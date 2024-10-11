@@ -76,7 +76,7 @@ def instances_to_gnn_data(instances):
             gnn_data.x = gnn_data.x.to(torch.float)
             gnn_data.e = gnn_data.e.to(torch.float)
             gnn_data.bipartite = gnn_data.bipartite.to(torch.bool)
-            gnn_data.weight = torch.from_numpy(np.array([np.exp(np.dot(pb.w, sol))])) / Z
+            gnn_data.weight = (np.exp(np.dot(pb.w, sol)) / Z) * torch.ones_like(gnn_data.y)
             graphs.append(gnn_data)
         bar.next()
     bar.finish()
@@ -109,7 +109,7 @@ train_instances = (train_instances[0][:train_n], train_instances[1][:train_n])
 train_graphs = instances_to_gnn_data(train_instances)
 val_graphs = instances_to_gnn_data(val_instances)
 
-train_loader = DataLoader(train_graphs, batch_size=1, shuffle=True)
+train_loader = DataLoader(train_graphs, batch_size=32, shuffle=True)
 val_loader = DataLoader(val_graphs, batch_size=1, shuffle=False)
 print("done")
 
@@ -163,10 +163,10 @@ for epoch in range(max_epoch):
         data = data.to(device)
         optimizer.zero_grad()
         out = model(data)
-        loss = data.weight * F.binary_cross_entropy(torch.flatten(out[data.bipartite==0]), data.y[data.bipartite==0])
-        no_red_loss = F.binary_cross_entropy(torch.flatten(out[data.bipartite==0]), data.y[data.bipartite==0], reduction="none")
-        print("no red loss = ", no_red_loss.shape)
-        epoch_train_loss.append(loss.item()/data.weight.item())
+        #loss = data.weight * F.binary_cross_entropy(torch.flatten(out[data.bipartite==0]), data.y[data.bipartite==0])
+        no_red_loss = data.weight[data.bipartite==0] * F.binary_cross_entropy(torch.flatten(out[data.bipartite==0]), data.y[data.bipartite==0], reduction="none")
+        loss = torch.mean(no_red_loss)
+        epoch_train_loss.append(loss.item())
         loss.backward()
         optimizer.step()
     with torch.no_grad():
@@ -174,7 +174,9 @@ for epoch in range(max_epoch):
         for data,pb,pool in zip(val_loader,*val_instances):
             data = data.to(device)
             out = model(data)
-            loss = data.weight * F.binary_cross_entropy(torch.flatten(out[data.bipartite==0]), data.y[data.bipartite==0])
+            no_red_loss = data.weight[data.bipartite==0] * F.binary_cross_entropy(torch.flatten(out[data.bipartite==0]), data.y[data.bipartite==0], reduction="none")
+            loss = torch.mean(no_red_loss)
+            #loss = data.weight * F.binary_cross_entropy(torch.flatten(out[data.bipartite==0]), data.y[data.bipartite==0])
             if loss.item() < 0:
                 print(loss.item())
                 print(torch.flatten(out[data.bipartite==0]))
@@ -183,7 +185,7 @@ for epoch in range(max_epoch):
                 print(torch.flatten(out[data.bipartite==0]).log())
                 print(data.y[data.bipartite==0] * (data.y[data.bipartite==0].log() - torch.flatten(out[data.bipartite==0]).log()))
                 exit()
-            epoch_val_loss.append(loss.item()/data.weight.item())
+            epoch_val_loss.append(loss.item())
 
             sol = maxcut_greedy(pb, out[data.bipartite==0].cpu().numpy())
             val = np.dot(pb.w, sol)
