@@ -7,7 +7,10 @@ import numpy as np
 from scipy.optimize import milp, LinearConstraint, Bounds
 import matplotlib.pyplot as plt
 
-from docplex.mp.model import Model
+import importlib.util
+docplex_spec = importlib.util.find_spec("docplex")
+if docplex is not None:
+    from docplex.mp.model import Model
 
 class MaxCut:
     def __init__(self, g, weights=None):
