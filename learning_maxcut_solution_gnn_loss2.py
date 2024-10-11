@@ -20,6 +20,10 @@ import pickle as pkl
 
 # dataset path 
 dataset_path = sys.argv[1]
+if dataset_path.endswith("/"):
+    dataset_name = os.path.basename(dataset_path[:-1])
+else:
+    dataset_name = os.path.basename(dataset_path)
 
 # create the bipartite graph representing an instance
 def bipartite_graph(pb):
@@ -148,7 +152,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = GCN().to(device)
 optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, weight_decay=5e-4)
 max_epoch = 10000
-writer = SummaryWriter()
+writer = SummaryWriter(log_dir=f"logs_{dataset_name}")
 
 train_loss_values  =[]
 val_loss_values = []
