@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 
 import importlib.util
 docplex_spec = importlib.util.find_spec("docplex")
-if docplex is not None:
+if docplex_spec is not None:
     from docplex.mp.model import Model
 
 class MaxCut:
