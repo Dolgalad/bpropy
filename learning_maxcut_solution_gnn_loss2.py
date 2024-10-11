@@ -164,7 +164,7 @@ for epoch in range(max_epoch):
         optimizer.zero_grad()
         out = model(data)
         loss = data.weight * F.binary_cross_entropy(torch.flatten(out[data.bipartite==0]), data.y[data.bipartite==0])
-        no_red_loss = F.binary_cross_entropy(torch.flatten(out[data.bipartite==0]), data.y[data.bipartite==0])
+        no_red_loss = F.binary_cross_entropy(torch.flatten(out[data.bipartite==0]), data.y[data.bipartite==0], reduction="none")
         print("no red loss = ", no_red_loss.shape)
         epoch_train_loss.append(loss.item()/data.weight.item())
         loss.backward()
