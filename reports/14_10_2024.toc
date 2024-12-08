@@ -1,0 +1,8 @@
+\contentsline {section}{\numberline {0.1}Definitions}{1}{section.0.1}%
+\contentsline {subsection}{\numberline {0.1.1}Erdos-Renyi graph generator}{1}{subsection.0.1.1}%
+\contentsline {subsection}{\numberline {0.1.2}Target probability over pools of solution}{1}{subsection.0.1.2}%
+\contentsline {section}{\numberline {0.2}Dataset details}{1}{section.0.2}%
+\contentsline {subsection}{\numberline {0.2.1}Maxcut n100 p0.15}{2}{subsection.0.2.1}%
+\contentsline {subsection}{\numberline {0.2.2}Maxcut n100 p0.15 uniform}{5}{subsection.0.2.2}%
+\contentsline {subsection}{\numberline {0.2.3}Maxcut n100 p0.15 exp}{9}{subsection.0.2.3}%
+\contentsline {subsection}{\numberline {0.2.4}Maxcut n100 p0.15 normal}{13}{subsection.0.2.4}%

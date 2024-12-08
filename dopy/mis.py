@@ -1,5 +1,5 @@
 """
-MaxCut solving routines
+MIS solving routines
 """
 
 import networkx as nx
@@ -12,7 +12,7 @@ docplex_spec = importlib.util.find_spec("docplex")
 if docplex_spec is not None:
     from docplex.mp.model import Model
 
-class MaxCut:
+class MIS:
     def __init__(self, g, weights=None):
         self.g = g
         if weights is None:
@@ -94,10 +94,14 @@ def maxcut_solution_validity(pb, sol):
                 return False
     return True
 
-def cplex_model(pb):
+def cplex_model(pb, continuous_relaxation=False):
     model = Model()
     # add the variables
-    x = np.array([model.binary_var(f"x{i}") for i in range(pb.nv())])
+    if continuous_relaxation:
+        x = np.array([model.continuous_var(lb=0.0, ub=1.0, name=f"x{i}") for i in range(pb.nv())])
+    else:
+        x = np.array([model.binary_var(f"x{i}") for i in range(pb.nv())])
+
     # add the constraints
     for e in pb.g.edges:
         model.add_constraint( x[e[0]] + x[e[1]] <= 1 )
@@ -105,7 +109,7 @@ def cplex_model(pb):
     model.maximize( np.dot( x, pb.w) )
     return model
 
-def get_solution_pool(pb, absgap=None, relgap=None, limit=None):
+def get_solution_pool(pb, absgap=None, relgap=None, limit=None, timelimit=None, threads=None):
     model = cplex_model(pb)
     cpx = model.get_cplex()
     cpx.parameters.mip.pool.intensity.set(4)
@@ -115,6 +119,10 @@ def get_solution_pool(pb, absgap=None, relgap=None, limit=None):
         cpx.parameters.mip.pool.relgap.set(relgap)
     if not limit is None:
         cpx.parameters.mip.limits.populate.set(limit)
+    if not timelimit is None:
+        cpx.parameters.timelimit.set(timelimit)
+    if not threads is None:
+        cpx.parameters.threads.set(threads)
 
     cpx.populate_solution_pool()
 
@@ -136,7 +144,7 @@ if __name__=="__main__":
     from networkx.generators.trees import random_tree
 
     g = random_tree(5)
-    pb = MaxCut(g)
+    pb = MIS(g)
     sol = pb.solve()
     print("Solution: ", sol.x)
 

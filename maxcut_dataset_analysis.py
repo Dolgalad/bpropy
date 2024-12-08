@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcol
 import matplotlib.cm as cm
+plt.rcParams['text.usetex'] = True
 import numpy as np
 import pickle as pkl
 import sys
@@ -10,6 +11,14 @@ import networkx as nx
 from dopy.maxcut import *
 
 dataset_path = sys.argv[1]
+if dataset_path.endswith("/"):
+    dataset_name = os.path.basename(os.path.dirname(dataset_path[:-1]))
+else:
+    dataset_name = os.path.basename(os.path.dirname(dataset_path))
+
+output_path = "."
+if len(sys.argv)>2:
+    output_path = sys.argv[2]
 
 def load_dataset(path):
     instances, solutions = [], []
@@ -51,44 +60,49 @@ for pb,pool in zip(*dataset):
 
 fig, ax = plt.subplots(2,1)
 plt.suptitle(f"Dataset: {dataset_path}")
-ax[0].hist(costs, bins=int(np.max(costs)))
-ax[0].set_ylabel("#")
-ax[0].set_xlabel("cost")
-ax[1].hist(gaps, bins=int(np.max(costs)))
-ax[1].set_ylabel("#")
-ax[1].set_xlabel("gap (%)")
+ax[0].hist(costs, bins=int(np.max(costs)), density=True)
+ax[0].set_ylabel("density")
+ax[0].set_xlabel("$c(y)$")
+ax[1].hist(gaps, bins=int(np.max(costs)), density=True)
+ax[1].set_ylabel("density")
+ax[1].set_xlabel("gap (\%)")
 plt.tight_layout()
+plt.savefig(os.path.join(output_path, f"{dataset_name}_hist_cost_gap.png"))
 
 fig, ax = plt.subplots(1,1)
 plt.suptitle(f"Dataset: {dataset_path}")
-ax.hist(probability_targets, bins=int(np.max(costs)))
-ax.set_ylabel("#")
-ax.set_xlabel("p")
+ax.hist(probability_targets, bins=int(np.max(costs)), density=True)
+ax.set_ylabel("density")
+ax.set_xlabel("$\overline{y}_i$")
 plt.tight_layout()
+plt.savefig(os.path.join(output_path,f"{dataset_name}_hist_target.png"))
 
 import pandas as pd
 
 fig, ax = plt.subplots(1,1)
-ax.set_ylabel("p[i]")
-ax.set_xlabel("w[i]")
-ax.plot(weights, weights, c="red")
-ax.scatter(weights, probability_targets, marker="+", alpha=0.01)
-df = pd.DataFrame({"x":weights, "y":probability_targets})
+ax.set_ylabel("$\overline{y}_i$")
+ax.set_xlabel("$w_i$")
+norm_w = (weights - np.min(weights)) / (np.max(weights) - np.min(weights))
+ax.plot(norm_w, norm_w, c="red")
+ax.scatter(norm_w, probability_targets, marker="+", alpha=0.01)
+df = pd.DataFrame({"x":norm_w, "y":probability_targets})
 df.sort_values(by="x", inplace=True)
 round_by = 2
 bins = df.groupby(df.x.round(round_by)).mean()
 ax.plot(bins.index, bins.y, "g--", lw=3)
+plt.savefig(os.path.join(output_path, f"{dataset_name}_scatter_weight_target.png"))
 
 fig, ax = plt.subplots(1,1)
-ax.set_ylabel("proportion[i]")
-ax.set_xlabel("w[i]")
-ax.plot(weights, weights, c="red")
-ax.scatter(weights, props, marker="+", alpha=0.01)
-df = pd.DataFrame({"x":weights, "y":props})
+ax.set_ylabel("$\\frac{1}{|\mathcal{P}|} \sum_{\mathcal{P}} y_i$")
+ax.set_xlabel("$w_i$")
+ax.plot(norm_w, norm_w, c="red")
+ax.scatter(norm_w, props, marker="+", alpha=0.01)
+df = pd.DataFrame({"x":norm_w, "y":props})
 df.sort_values(by="x", inplace=True)
 round_by = 2
 bins = df.groupby(df.x.round(round_by)).mean()
 ax.plot(bins.index, bins.y, "g--", lw=3)
+plt.savefig(os.path.join(output_path, f"{dataset_name}_scatter_weight_prop.png"))
 
 
 # plot network optimal solution and target probabilities
@@ -116,26 +130,26 @@ for i in range(inst.nv()):
     else:
         grd_node_colors.append("red")
 
-fig, ax = plt.subplots(1,4)
+fig, ax = plt.subplots(2,2, figsize=(10,10))
 opt_val = np.max(values)
-ax[0].set_title(f"Optimal, val={opt_val}")
-nx.drawing.draw_networkx(inst.g, pos, node_color=sol_node_colors, alpha=0.1, with_labels=False, node_size=50, ax=ax[0])
-nx.drawing.draw_networkx_nodes(inst.g, pos, node_color=sol_node_colors,  node_size=50, ax=ax[0])
+ax[0,0].set_title(f"Optimal, val={opt_val}")
+nx.drawing.draw_networkx(inst.g, pos, node_color=sol_node_colors, alpha=0.1, with_labels=False, node_size=50, ax=ax[0,0])
+nx.drawing.draw_networkx_nodes(inst.g, pos, node_color=sol_node_colors,  node_size=50, ax=ax[0,0])
 
-ax[1].set_title("Targets")
-nx.drawing.draw_networkx(inst.g, pos, node_color=sol_node_colors, alpha=0.1, with_labels=False, node_size=50, ax=ax[1])
+ax[0,1].set_title("Targets")
+nx.drawing.draw_networkx(inst.g, pos, node_color=sol_node_colors, alpha=0.1, with_labels=False, node_size=50, ax=ax[0,1])
 cm1 = mcol.LinearSegmentedColormap.from_list("MyCmapName",["r","b"])
-nx.drawing.draw_networkx_nodes(inst.g, pos, node_color=target,  node_size=50, ax=ax[1], vmin=np.min(target), vmax=np.max(target), cmap=cm1)
+pcm=nx.drawing.draw_networkx_nodes(inst.g, pos, node_color=target,  node_size=50, ax=ax[0,1], vmin=np.min(target), vmax=np.max(target), cmap=cm1)
 
 grd_val = np.dot(grd_sol, inst.w)
 
 print(sol, np.dot(sol, inst.w))
 print(grd_sol, np.dot(grd_sol, inst.w))
-ax[2].set_title(f"Greedy, val={grd_val}")
-nx.drawing.draw_networkx(inst.g, pos, node_color=sol_node_colors, alpha=0.1, with_labels=False, node_size=50, ax=ax[2])
-nx.drawing.draw_networkx_nodes(inst.g, pos, node_color=grd_node_colors,  node_size=50, ax=ax[2])
+ax[1,0].set_title(f"Greedy, val={grd_val}")
+nx.drawing.draw_networkx(inst.g, pos, node_color=sol_node_colors, alpha=0.1, with_labels=False, node_size=50, ax=ax[1,0])
+nx.drawing.draw_networkx_nodes(inst.g, pos, node_color=grd_node_colors,  node_size=50, ax=ax[1,0])
 
-ax[3].set_title(f"Diff")
+ax[1,1].set_title(f"Diff")
 diff_nodes = np.where(grd_sol!=sol)[0]
 diff_node_colors = []
 for n in diff_nodes:
@@ -146,10 +160,19 @@ for n in diff_nodes:
 
 diff_g = inst.g.subgraph(diff_nodes)
 diff_pos = {n:pos[n] for n in diff_nodes}
-nx.drawing.draw_networkx(diff_g, diff_pos, node_size=50, ax=ax[3], node_color=diff_node_colors, with_labels=False)
-ax[3].set_xlim(ax[0].get_xlim())
-ax[3].set_ylim(ax[0].get_ylim())
+nx.drawing.draw_networkx(diff_g, diff_pos, node_size=50, ax=ax[1,1], node_color=diff_node_colors, with_labels=False)
+ax[1,1].set_xlim(ax[0,0].get_xlim())
+ax[1,1].set_ylim(ax[0,0].get_ylim())
+fig.colorbar(pcm, ax=ax[0,1])
+plt.savefig(os.path.join(output_path, f"{dataset_name}_graph_sol.png"))
 
+print("Pool sizes : ", [len(pool) for pool in dataset[1]])
+fig, ax = plt.subplots(1,1)
+ax.boxplot([len(pool) for pool in dataset[1]])
+ax.set_ylabel("$|\mathcal{P}|$")
+plt.savefig(os.path.join(output_path, f"{dataset_name}_boxplot_pool.png"))
 
-plt.show()
-
+fig, ax = plt.subplots(1,1)
+ax.boxplot([len(pool) for pool in dataset[1]])
+ax.set_ylabel("N connected components")
+plt.savefig(os.path.join(output_path, f"{dataset_name}_boxplot_connected_components.png"))

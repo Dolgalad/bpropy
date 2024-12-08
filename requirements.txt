@@ -1,0 +1,9 @@
+wheel
+progress
+numpy
+torch
+torch_scatter
+torch_geometric
+scipy
+matplotlib
+networkx

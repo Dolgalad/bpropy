@@ -22,6 +22,11 @@ def create_dataset(n, n_nodes, edge_p, weights="unit"):
             w = np.random.random_sample(n_nodes)
         if weights=="unit":
             w = np.ones(n_nodes)
+        if weights=="exp":
+            w = np.random.exponential(1, n_nodes)
+        if weights=="normal":
+            w = np.random.randn(n_nodes)
+
         pb = MaxCut(g, weights=w)
 
         instances.append(pb)

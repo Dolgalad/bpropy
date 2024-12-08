@@ -1,2 +1,11 @@
 .pyc
 __pycache__
+
+# folders
+imgs/
+venv/
+runs/
+dummy*
+datasets/
+results/
+logs/
