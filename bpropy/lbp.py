@@ -251,12 +251,13 @@ def loopy_belief_propagation(theta, v2f, g, f2v_edges, f2v_subsum_idx, r_edges, 
     return mu
 
 def residual_loopy_belief_propagation(theta, v2f, g, f2v_edges, f2v_subsum_idx, r_edges, q_edges, m_edges, max_iter=100, tol=1e-6):
+    device = theta.device
     # strides
-    q_stride = torch.full((int(v2f.shape[0]/2),), 2)
-    q_idx = torch.arange(q_stride.size(0)).repeat_interleave(2)
-    m_stride = torch.tensor([2**len(list(g.neighbors(F))) for F in iter_factor_nodes(g)])
-    m_idx = torch.arange(m_stride.size(0)).repeat_interleave(m_stride)
-    mu = torch.zeros(sufficient_statistics_dim(g))
+    q_stride = torch.full((int(v2f.shape[0]/2),), 2, device=device)
+    q_idx = torch.arange(q_stride.size(0),device=device).repeat_interleave(2)
+    m_stride = torch.tensor([2**len(list(g.neighbors(F))) for F in iter_factor_nodes(g)]).to(theta.device)
+    m_idx = torch.arange(m_stride.size(0),device=device).repeat_interleave(m_stride)
+    mu = torch.zeros(sufficient_statistics_dim(g), device=device)
 
     v2f_residuals = torch.zeros_like(v2f)
     n_msg = int(v2f_residuals.shape[0]/2)
@@ -266,7 +267,7 @@ def residual_loopy_belief_propagation(theta, v2f, g, f2v_edges, f2v_subsum_idx, 
         
         stack = torch.concatenate((theta,v2f), 0)
         # subsum vect
-        v2f_subsum = torch.zeros(len(f2v_subsum_idx), dtype=theta.dtype)
+        v2f_subsum = torch.zeros(len(f2v_subsum_idx), dtype=theta.dtype, device=device)
         v2f_subsum.scatter_add_(0, f2v_edges[:,0], stack[f2v_edges[:,1]])
         
         r = torch_scatter.scatter_logsumexp(v2f_subsum[r_edges[:,1]], r_edges[:,0])

@@ -18,6 +18,8 @@ import sys
 import os
 import pickle as pkl
 
+batch_size = 1
+
 # dataset path 
 dataset_path = sys.argv[1]
 if dataset_path.endswith("/"):
@@ -73,15 +75,31 @@ def instances_to_gnn_data(instances):
         bg,feat = bipartite_graph(pb)
         pool_values = np.array([np.dot(pb.w, s) for s in spool])
         Z = np.sum(np.exp(pool_values))
+        gnn_data = from_networkx(bg)
+        gnn_data.x = gnn_data.x.to(torch.float)
+        gnn_data.e = gnn_data.e.to(torch.float)
+        gnn_data.bipartite = gnn_data.bipartite.to(torch.bool)
+
+        # compute the mean target over entire solution pool
+        target = np.stack([np.exp(np.dot(pb.w,s))*s for s in spool])
+        target = np.sum(target, axis=0)/Z
+        target = torch.from_numpy(target).to(torch.float)
+        gnn_data.y = torch.from_numpy(np.pad(target, (0,pb.ne()))).to(torch.float)
+        gnn_data.weight = torch.ones_like(gnn_data.y)
+        #gnn_data.f2v_edges = f2v_edges.clone()
+        #gnn_data.r_edges = r_edges.clone()
+        #gnn_data.q_edges = q_edges
+        #gnn_data.m_edges = m_edges
+        graphs.append(gnn_data)
+        bar.next()
+        continue
+
 
         for sol in spool:
-            gnn_data = from_networkx(bg)
-            gnn_data.y = torch.from_numpy(np.pad(sol, (0,pb.ne()))).to(torch.float)
-            gnn_data.x = gnn_data.x.to(torch.float)
-            gnn_data.e = gnn_data.e.to(torch.float)
-            gnn_data.bipartite = gnn_data.bipartite.to(torch.bool)
-            gnn_data.weight = (np.exp(np.dot(pb.w, sol)) / Z) * torch.ones_like(gnn_data.y)
-            graphs.append(gnn_data)
+            tgnn = gnn_data.clone()
+            tgnn.y = torch.from_numpy(np.pad(sol, (0,pb.ne()))).to(torch.float)
+            tgnn.weight = (np.exp(np.dot(pb.w, sol)) / Z) * torch.ones_like(tgnn.y)
+            graphs.append(tgnn)
         bar.next()
     bar.finish()
     return graphs
@@ -113,7 +131,7 @@ train_instances = (train_instances[0][:train_n], train_instances[1][:train_n])
 train_graphs = instances_to_gnn_data(train_instances)
 val_graphs = instances_to_gnn_data(val_instances)
 
-train_loader = DataLoader(train_graphs, batch_size=32, shuffle=True)
+train_loader = DataLoader(train_graphs, batch_size=1, shuffle=True)
 val_loader = DataLoader(val_graphs, batch_size=1, shuffle=False)
 print("done")
 
@@ -145,14 +163,14 @@ class GCN(torch.nn.Module):
 
         x = self.conv4(x, edge_index)
 
-        return torch.sigmoid(x)
+        return x #torch.sigmoid(x)
 
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = GCN().to(device)
 optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, weight_decay=5e-4)
 max_epoch = 10000
-writer = SummaryWriter(log_dir=f"logs_{dataset_name}")
+writer = SummaryWriter(log_dir=f"logs_bs{batch_size}_{dataset_name}")
 
 train_loss_values  =[]
 val_loss_values = []
@@ -168,7 +186,11 @@ for epoch in range(max_epoch):
         optimizer.zero_grad()
         out = model(data)
         #loss = data.weight * F.binary_cross_entropy(torch.flatten(out[data.bipartite==0]), data.y[data.bipartite==0])
-        no_red_loss = data.weight[data.bipartite==0] * F.binary_cross_entropy(torch.flatten(out[data.bipartite==0]), data.y[data.bipartite==0], reduction="none")
+        #print(torch.any(torch.flatten(out[data.bipartite==0]) <= 0),
+        #      torch.any(torch.flatten(out[data.bipartite==0]) >= 1))
+        #no_red_loss = data.weight[data.bipartite==0] * F.binary_cross_entropy(torch.flatten(out[data.bipartite==0]), data.y[data.bipartite==0], reduction="none")
+        no_red_loss = data.weight[data.bipartite==0] * F.binary_cross_entropy_with_logits(torch.flatten(out[data.bipartite==0]), data.y[data.bipartite==0], reduction="none")
+
         loss = torch.mean(no_red_loss)
         epoch_train_loss.append(loss.item())
         loss.backward()
@@ -178,7 +200,9 @@ for epoch in range(max_epoch):
         for data,pb,pool in zip(val_loader,*val_instances):
             data = data.to(device)
             out = model(data)
-            no_red_loss = data.weight[data.bipartite==0] * F.binary_cross_entropy(torch.flatten(out[data.bipartite==0]), data.y[data.bipartite==0], reduction="none")
+            #no_red_loss = data.weight[data.bipartite==0] * F.binary_cross_entropy(torch.flatten(out[data.bipartite==0]), data.y[data.bipartite==0], reduction="none")
+            no_red_loss = data.weight[data.bipartite==0] * F.binary_cross_entropy_with_logits(torch.flatten(out[data.bipartite==0]), data.y[data.bipartite==0], reduction="none")
+
             loss = torch.mean(no_red_loss)
             #loss = data.weight * F.binary_cross_entropy(torch.flatten(out[data.bipartite==0]), data.y[data.bipartite==0])
             if loss.item() < 0:
