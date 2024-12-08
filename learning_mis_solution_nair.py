@@ -36,6 +36,9 @@ if os.path.exists(checkpoint_dir):
     os.system(f"rm -rf {checkpoint_dir}")
 os.makedirs(checkpoint_dir)
 
+# tensorboard log dir
+log_dir = sys.argv[3]
+
 print("Loading data")
 full_dataset = MISERDataset(os.path.join(dataset_path,"train"), os.path.join(dataset_path,"train"))
 train_split = 0.8
@@ -81,7 +84,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = GCN(9).to(device)
 optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=5e-4)
 max_epoch = 10000
-writer = SummaryWriter(log_dir=f"logs_bs{batch_size}_{dataset_name}")
+writer = SummaryWriter(log_dir=os.path.join(log_dir,f"logs_bs{batch_size}_{dataset_name}_nair"))
 
 train_loss_values  =[]
 val_loss_values = []

@@ -9,6 +9,7 @@ from torch_geometric.utils.convert import from_networkx
 import networkx as nx
 import numpy as np
 from progress.bar import Bar
+from filelock import FileLock
 
 from dopy.mis import *
 from bipartite_graph import *
@@ -70,6 +71,11 @@ class MISERDataset(Dataset):
             efeat = np.load(f)
         return nfeat,cfeat,efeat
     def process(self):
+        # create lock to avoid processing by multiple training runs
+        lock = FileLock(osp.join(self.processed_dir, "processing.lock"))
+        print("Acquire lock")
+        lock.acquire()
+        print("Lock acquired")
         idx = 0
         bar = Bar("Processing: ", max=len(self.raw_paths))
         for raw_path in self.raw_paths:
@@ -104,6 +110,7 @@ class MISERDataset(Dataset):
                     torch.save(_data, save_path)
             bar.next()
         bar.finish()
+        lock.release()
     def len(self):
         return len(self.processed_file_names)
     def get(self, idx):
