@@ -119,6 +119,7 @@ class MISERDataset(Dataset):
         data.e = data.e.to(torch.float32)
         data.w = data.w.to(torch.float32)
         data.y = data.y.to(torch.float32)
+        data.bipartite = data.bipartite.to(torch.bool)
         return data
 
 if __name__=="__main__":

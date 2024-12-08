@@ -345,3 +345,46 @@ def max_sum_loopy_belief_propagation(theta, v2f, g, f2v_edges, f2v_subsum_idx, r
         if u < tol:
             break
     return mu
+
+def _loopy_belief_propagation(data, theta, v2f, f2v_edges, r_edges, q_edges, m_edges, max_iter=100, tol=1e-6):
+    # strides
+    q_stride = torch.full((int(v2f.shape[0]/2),), 2)
+    q_idx = torch.arange(q_stride.size(0)).repeat_interleave(2)
+    #m_stride = torch.tensor([2**len(list(g.neighbors(F))) for F in iter_factor_nodes(g)])
+    m_stride = data.m_stride
+    m_idx = torch.arange(m_stride.size(0)).repeat_interleave(m_stride)
+    #mu = torch.zeros(sufficient_statistics_dim(g))
+    mu = torch.zeros(data.ss_dim)
+    
+    for T in range(max_iter):
+        t0 = time.time()
+        
+        stack = torch.concatenate((theta,v2f), 0)
+        # subsum vect
+        #v2f_subsum = torch.zeros(len(f2v_subsum_idx), dtype=theta.dtype)
+        v2f_subsum = torch.zeros(data.f2v_ss_dim, dtype=theta.dtype)
+
+        v2f_subsum.scatter_add_(0, f2v_edges[:,0], stack[f2v_edges[:,1]])
+        
+        r = torch_scatter.scatter_logsumexp(v2f_subsum[r_edges[:,1]], r_edges[:,0])
+        
+        # variable to factor messages
+        qbar = torch.zeros_like(v2f).scatter_add_(0, q_edges[:,0], r[q_edges[:,1]])
+        delta = torch_scatter.scatter_logsumexp(qbar, q_idx).repeat_interleave(2)
+        v2f = qbar - delta
+        
+        # marginals
+        mufbar = theta.clone().scatter_add_(0, m_edges[:,0], v2f[m_edges[:,1]])
+        z = torch_scatter.scatter_logsumexp(mufbar, m_idx).repeat_interleave(m_stride, dim=0)
+    
+        mup = (mufbar - z).exp()
+
+        u = (mup - mu).abs().max()
+
+        if torch.any(torch.isinf(mup)) or torch.any(torch.isnan(mup)):
+            break
+        mu = mup
+        if u < tol:
+            break
+    return mu
+
