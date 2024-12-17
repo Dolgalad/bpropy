@@ -117,7 +117,6 @@ for epoch in range(max_epoch):
         epoch_train_loss.append(torch.mean(no_red_loss).item())
         loss.backward()
         optimizer.step()
-        bar.suffix = f" {epoch_train_loss}"
         bar.next()
     bar.finish()
 
