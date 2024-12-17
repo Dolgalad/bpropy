@@ -42,8 +42,8 @@ os.makedirs(checkpoint_dir)
 log_dir = sys.argv[4]
 
 print("Loading data")
-train_dataset = MISERDataset(train_dataset_path, category=category, mode="train"))
-val_dataset = MISERDataset(validation_dataset_path, category=category, mode="validation"))
+train_dataset = MISERDataset(train_dataset_path, category=category, mode="train")
+val_dataset = MISERDataset(validation_dataset_path, category=category, mode="validation")
 
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
