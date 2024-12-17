@@ -45,6 +45,7 @@ log_dir = sys.argv[4]
 category = sys.argv[5]
 
 batch_size = int(sys.argv[6])
+lr = float(sys.argv[7])
 lr = batch_size * lr
 
 print("Loading data")
