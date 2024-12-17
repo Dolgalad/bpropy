@@ -111,6 +111,8 @@ for epoch in range(max_epoch):
     epoch_val_gap = []
     bar = Bar(f"Epoch {epoch} training:", max = len(train_loader) // batch_size)
     for data in train_loader:
+        print(data.num_graphs)
+        print(data.num_graphs)
         data = data.to(device)
         optimizer.zero_grad()
         out = model(data)
