@@ -106,6 +106,7 @@ for epoch in range(max_epoch):
     epoch_train_loss = []
     epoch_val_loss = []
     epoch_val_gap = []
+    bar = Bar(f"Epoch {epoch}:", max = len(train_loader) // batch_size)
     for data in train_loader:
         data = data.to(device)
         optimizer.zero_grad()
@@ -116,6 +117,7 @@ for epoch in range(max_epoch):
         epoch_train_loss.append(torch.mean(no_red_loss).item())
         loss.backward()
         optimizer.step()
+        bar.suffix = f" {epoch_train_loss}"
     with torch.no_grad():
         model.eval()
         for data in val_loader:
@@ -125,6 +127,8 @@ for epoch in range(max_epoch):
 
             loss = torch.mean(data.w * no_red_loss)
             epoch_val_loss.append(torch.mean(no_red_loss).item())
+        bar.next()
+    bar.finish()
 
 
     mtrainloss = np.mean(epoch_train_loss)
