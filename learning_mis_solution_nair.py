@@ -44,7 +44,7 @@ log_dir = sys.argv[4]
 # dataset category
 category = sys.argv[5]
 
-batch_size = float(sys.argv[6])
+batch_size = int(sys.argv[6])
 lr = batch_size * lr
 
 print("Loading data")
