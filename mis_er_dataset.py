@@ -23,11 +23,11 @@ from bipartite_graph import *
 # dataset data urls
 dataset_urls = {
         "MIS100_EB": "https://cloud.lipn.univ-paris13.fr/index.php/s/RGdPmTfj83DmMdP",
-        "MIS100_CC": "https://cloud.lipn.univ-paris13.fr/index.php/s/rQ3aBR7ZdF2wHr4"
+        "MIS100_CC": "https://cloud.lipn.univ-paris13.fr/index.php/s/f3545KoiRb7x4iW"
         }
 
 class MISERDataset(Dataset):
-    def __init__(self, root, category="EB", mode="train", transform=None, pre_transform=None, pre_filter=None, unravel_pool=True):
+    def __init__(self, root, category="MIS100_EB", mode="train", transform=None, pre_transform=None, pre_filter=None, unravel_pool=True):
         self.category = category
         self.mode = mode
         self.unravel_pool = unravel_pool
@@ -141,7 +141,18 @@ class MISERDataset(Dataset):
                 nmap = {str(i):i for i in range(g.number_of_nodes())}
                 g = nx.relabel_nodes(g, nmap, copy=False)
                 pb = MIS(g)
-                bpg,bpg_feat = bipartite_graph(pb)
+                
+                # bipartite graph
+                bpg_file_name = os.path.join(raw_path, "bipartite.adjlist")
+                if os.path.exists(bpg_file_name):
+                    bpg = nx.read_adjlist(bpg_file_name)
+                    nmap = {str(i):i for i in range(bpg.number_of_nodes())}
+                    bpg = nx.relabel_nodes(bpg, nmap, copy=False)
+                    # set bipartite attributes
+                    attrs = {i:{"bipartite":int(i>=g.number_of_nodes())} for i in bpg.nodes}
+                    nx.set_node_attributes(bpg, attrs)
+                else:
+                    bpg,_ = bipartite_graph(pb)
                 data = from_networkx(bpg)
                 # node features
                 nfeat, cfeat, efeat = self.load_raw_graph_features(raw_path)
@@ -177,7 +188,7 @@ class MISERDataset(Dataset):
         return data
 
 if __name__=="__main__":
-    dataset = MISERDataset("./datasets/mis_er_n100-100_dummy_train", category="MIS100_EB")
+    dataset = MISERDataset("./datasets/mis_er_n100-100_dummy_val", category="MIS100_EB", mode="validation")
 
     print("Dataset length: ", dataset.len())
     print("Data[0] = ")
@@ -187,7 +198,9 @@ if __name__=="__main__":
 
     train_dataset = dataset[0:10]
     print(train_dataset)
-    loader = DataLoader(train_dataset, batch_size=2, shuffle=True)
+    loader = DataLoader(train_dataset, batch_size=1, shuffle=True)
+    print(len(dataset))
+    print(len(loader))
     for data in loader:
         print(torch.unique(data.batch))
 

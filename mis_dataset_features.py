@@ -14,6 +14,7 @@ np.random.seed(2024)
 from progress.bar import Bar
 
 from clique_covering import clique_covering_3
+from bipartite_graph import *
 
 dataset_path = sys.argv[1]
 
@@ -38,7 +39,14 @@ for instance_id in instance_ids:
         C = clique_covering_3(g, randomize=True)
         md = cplex_model(pb, continuous_relaxation=True, cliques=C)
     else:
+        C = [list(e) for e in g.edges]
         md = cplex_model(pb, continuous_relaxation=True)
+
+    # bipartite graph
+    bpg,bpg_feat = bipartite_graph(pb, cliques=C)
+    bipartite_graph_file_path = os.path.join(instance_path, "bipartite.adjlist")
+    nx.write_adjlist(bpg, bipartite_graph_file_path)
+
     varlist = [md.get_var_by_name(f"x{i}") for i in range(g.number_of_nodes())]
     sol = md.solve()
     x = np.array([sol.get_value(var) for var in varlist])

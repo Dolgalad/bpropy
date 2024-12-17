@@ -2,14 +2,14 @@ import networkx as nx
 import numpy as np
 
 # create the bipartite graph representing an instance
-def bipartite_graph(pb):
+def bipartite_graph(pb, cliques=None):
     g = nx.Graph()
     features = []
     for i in range(pb.nv()):
         g.add_node(i, bipartite=0, x=[pb.w[i]])
         features.append(pb.w[i])
     ci = 0
-    constraints = pb.constraints()
+    constraints = pb.constraints(cliques=cliques)
     for cj,c in enumerate(constraints):
         for i in range(c.A.shape[0]):
             if c.lb[i]==c.ub[i]:

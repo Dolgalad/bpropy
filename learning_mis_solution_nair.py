@@ -48,7 +48,7 @@ batch_size = int(sys.argv[6])
 lr = batch_size * lr
 
 print("Loading data")
-train_dataset = MISERDataset(train_dataset_path, category=category, mode="train")
+train_dataset = MISERDataset(train_dataset_path, category=category, mode="validation")
 val_dataset = MISERDataset(validation_dataset_path, category=category, mode="validation")
 
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
