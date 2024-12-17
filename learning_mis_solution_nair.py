@@ -20,35 +20,42 @@ import sys
 import os
 import pickle as pkl
 
-batch_size = 2
+batch_size = 1
 lr = 0.0001
 
 # dataset path 
-dataset_path = sys.argv[1]
-if dataset_path.endswith("/"):
-    dataset_name = os.path.basename(dataset_path[:-1])
+train_dataset_path = sys.argv[1]
+if train_dataset_path.endswith("/"):
+    dataset_name = os.path.basename(train_dataset_path[:-1])
 else:
-    dataset_name = os.path.basename(dataset_path)
+    dataset_name = os.path.basename(train_dataset_path)
+
+validation_dataset_path = sys.argv[2]
 
 # checkpoint save path
-checkpoint_dir = sys.argv[2]
+checkpoint_dir = sys.argv[3]
 if os.path.exists(checkpoint_dir):
     os.system(f"rm -rf {checkpoint_dir}")
 os.makedirs(checkpoint_dir)
 
 # tensorboard log dir
-log_dir = sys.argv[3]
+log_dir = sys.argv[4]
 
 print("Loading data")
-full_dataset = MISERDataset(os.path.join(dataset_path,"train"), os.path.join(dataset_path,"train"))
-train_split = 0.8
-
-val_dataset = full_dataset[train_split:]
-train_dataset = full_dataset[:train_split]
+train_dataset = MISERDataset(train_dataset_path, category=category, mode="train"))
+val_dataset = MISERDataset(validation_dataset_path, category=category, mode="validation"))
 
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 print("done")
+
+print("Summary")
+print("\ttrain dataset path = ", dataset_path)
+print("\tdataset name = ", dataset_name)
+print("\tcheckpoint director = ", checkpoint_dir)
+print("\tlog directory = ", log_dir)
+print("\tlearning rate = ", lr)
+print("\tbatch size = ", batch_size)
 
 
 class GCN(torch.nn.Module):
