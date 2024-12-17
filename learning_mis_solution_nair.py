@@ -109,10 +109,8 @@ for epoch in range(max_epoch):
     epoch_train_loss = []
     epoch_val_loss = []
     epoch_val_gap = []
-    bar = Bar(f"Epoch {epoch} training:", max = len(train_loader) // batch_size)
+    bar = Bar(f"Epoch {epoch} training:", max = train_dataset.len() // batch_size)
     for data in train_loader:
-        print(data.num_graphs)
-        print(data.num_graphs)
         data = data.to(device)
         optimizer.zero_grad()
         out = model(data)
@@ -126,7 +124,7 @@ for epoch in range(max_epoch):
     bar.finish()
 
     with torch.no_grad():
-        bar = Bar(f"Epoch {epoch} validation:", max = len(val_loader) // batch_size)
+        bar = Bar(f"Epoch {epoch} validation:", max = val_dataset.len() // batch_size)
         model.eval()
         for data in val_loader:
             data = data.to(device)
