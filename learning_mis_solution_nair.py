@@ -45,6 +45,7 @@ log_dir = sys.argv[4]
 category = sys.argv[5]
 
 batch_size = float(sys.argv[6])
+lr = batch_size * lr
 
 print("Loading data")
 train_dataset = MISERDataset(train_dataset_path, category=category, mode="train")
