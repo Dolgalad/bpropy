@@ -24,24 +24,32 @@ class MIS:
     def ne(self):
         return nx.number_of_edges(self.g)
 
-    def constraints(self, obj_ub=None):
+    def constraints(self, obj_ub=None, cliques=None):
         c = []
-        for e in self.g.edges:
-            row = np.zeros(self.nv())
-            row[e[0]] = 1
-            row[e[1]] = 1
-            c.append(LinearConstraint(row, ub=1))
+        if cliques is None:
+            for e in self.g.edges:
+                row = np.zeros(self.nv())
+                row[e[0]] = 1
+                row[e[1]] = 1
+                c.append(LinearConstraint(row, ub=1))
+        else:
+            for clq in cliques:
+                row = np.zeros(self.nv())
+                for u in clq:
+                    row[u] = 1
+                c.append(LinearConstraint(row, ub=1))
+
         if not obj_ub is None:
             print("Adding UB constraint ", obj_ub)
             c.append(LinearConstraint(-self.w, ub=obj_ub))
         return c
-    def solve(self, obj_ub=None):
+    def solve(self, obj_ub=None, disp=False):
         return milp(
                     -self.w,
                     integrality=np.ones(self.nv()),
                     constraints=self.constraints(obj_ub=obj_ub),
                     bounds=Bounds(np.zeros(self.nv()), np.ones(self.nv())),
-                    options={"disp":True}
+                    options={"disp":disp}
                 )
 
 def plot_maxcut_solution(pb, x, ax=None, pos=None, node_color=None, cmap=None):
@@ -94,7 +102,7 @@ def maxcut_solution_validity(pb, sol):
                 return False
     return True
 
-def cplex_model(pb, continuous_relaxation=False):
+def cplex_model(pb, continuous_relaxation=False, cliques=None):
     model = Model()
     # add the variables
     if continuous_relaxation:
@@ -103,8 +111,12 @@ def cplex_model(pb, continuous_relaxation=False):
         x = np.array([model.binary_var(f"x{i}") for i in range(pb.nv())])
 
     # add the constraints
-    for e in pb.g.edges:
-        model.add_constraint( x[e[0]] + x[e[1]] <= 1 )
+    if cliques is None:
+        for e in pb.g.edges:
+            model.add_constraint( x[e[0]] + x[e[1]] <= 1 )
+    else:
+        for clq in cliques:
+            model.add_constraint(sum([x[u] for u in clq]) <= 1)
     # add objective
     model.maximize( np.dot( x, pb.w) )
     return model

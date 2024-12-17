@@ -2,6 +2,7 @@
 Definition of the MISER dataset
 """
 import os
+import sys
 import os.path as osp
 import torch
 from torch_geometric.data import Dataset
@@ -10,22 +11,37 @@ import networkx as nx
 import numpy as np
 from progress.bar import Bar
 from filelock import FileLock
+import requests
+import tarfile
+#import xml.etree.ElementTree as ET
+from lxml import html
+from lxml.cssselect import CSSSelector
 
 from dopy.mis import *
 from bipartite_graph import *
 
-
+# dataset data urls
+dataset_urls = {
+        "MIS100_EB": "https://cloud.lipn.univ-paris13.fr/index.php/s/RGdPmTfj83DmMdP",
+        "MIS100_CC": "https://cloud.lipn.univ-paris13.fr/index.php/s/rQ3aBR7ZdF2wHr4"
+        }
 
 class MISERDataset(Dataset):
-    def __init__(self, root, data_path, transform=None, pre_transform=None, pre_filter=None, unravel_pool=True):
-        self.data_path = data_path
+    def __init__(self, root, category="EB", mode="train", transform=None, pre_transform=None, pre_filter=None, unravel_pool=True):
+        self.category = category
+        self.mode = mode
         self.unravel_pool = unravel_pool
         self._processed_file_names = []
         super().__init__(root, transform, pre_transform, pre_filter)
     @property
     def raw_file_names(self):
-        r = list(filter(lambda x: x.isnumeric() , os.listdir(self.data_path)))
-        return r
+        if self.mode=="train":
+            return list([str(i) for i in range(1,3001)])
+        if self.mode=="validation":
+            return list([str(i) for i in range(3001,4001)])
+        if self.mode=="train":
+            return list([str(i) for i in range(4001,5001)])
+
     @property
     def processed_file_names(self):
         if len(self._processed_file_names):
@@ -44,12 +60,50 @@ class MISERDataset(Dataset):
         bar.finish()
         return self._processed_file_names
     def download(self):
-        # copy files from data_path to raw_dir
-        print("Downloading")
-        for f in os.listdir(self.data_path):
-            if f.isnumeric():
-                os.system(f"cp -r {os.path.join(self.data_path, f)} {self.raw_dir}")
+        # download data archive
+        req = requests.get(dataset_urls[self.category])
+        tree = html.fromstring(req.text)
+        selector = CSSSelector("#downloadFile")
+        elements_with_id = selector(tree)
+        if len(elements_with_id)==0:
+            print("Cannot find download link")
+        url = elements_with_id[0].get("href")
+        print("url = ", url)
+        r = requests.get(url, stream=True)
+        path = os.path.join(self.raw_dir, "archive.tar.gz")
+        with open(path, 'wb') as f:
+            total_length = int(r.headers.get('content-length'))
+            bar = Bar("Downloading: ", max=(total_length/1024) + 1)
+            for chunk in r.iter_content(chunk_size=1024):
+                if chunk:
+                    f.write(chunk)
+                    f.flush()
+                    bar.next()
+            bar.finish()
+
+        # extract data
+        sys.stdout.write("Extracting...")
+        sys.stdout.flush()
+        file = tarfile.open(path)
+        file.extractall(self.raw_dir)
+        file.close()
+        sys.stdout.write("done\n")
+        sys.stdout.flush()
+       
+        # remove archive
+        sys.stdout.write("Cleaning up...")
+        sys.stdout.flush()
+        os.system(f"rm {path}")
+        # move the instance directories to raw_dir
+        data_dir = os.path.join(self.raw_dir, os.listdir(self.raw_dir)[0])
+        os.system(f"mv {self.raw_dir}/*/{self.mode}/* {self.raw_dir}")
+        os.system(f"rm -rf {data_dir}")
+
+        sys.stdout.write("done\n")
+        sys.stdout.flush()
+
         print("Download finished")
+
     def load_redumis_solution(self, path):
         with open(path, "r") as f:
             return np.array(list(map(int, filter(None, f.read().split("\n")))))
@@ -123,9 +177,7 @@ class MISERDataset(Dataset):
         return data
 
 if __name__=="__main__":
-    dataset_path = "./datasets/mis_er_n700-800_dummy/train"
-
-    dataset = MISERDataset("./datasets/mis_er_n700-800_dummy/train", dataset_path)
+    dataset = MISERDataset("./datasets/mis_er_n100-100_dummy_train", category="MIS100_EB")
 
     print("Dataset length: ", dataset.len())
     print("Data[0] = ")
