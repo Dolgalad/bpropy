@@ -41,6 +41,9 @@ os.makedirs(checkpoint_dir)
 # tensorboard log dir
 log_dir = sys.argv[4]
 
+# dataset category
+category = sys.argv[5]
+
 print("Loading data")
 train_dataset = MISERDataset(train_dataset_path, category=category, mode="train")
 val_dataset = MISERDataset(validation_dataset_path, category=category, mode="validation")
