@@ -29,6 +29,7 @@ def optimizer_str(opt, lr):
 
 def command_line(args, params):
     [bs,lr,h,opt,p] = params
+    opt_str = optimizer_str(opt, lr)
     if opt == "torch.optim.RAdam":
         return f"python learning_mis_solution_nair.py {args.train_dataset_path} {args.validation_dataset_path} {args.dataset_category} {args.checkpoint_dir} {args.log_dir} -b {bs} -a {h} -p {p} {opt_str} -m mis_nair_gs{args.index}"
     if opt == "torch.optim.Adam":
