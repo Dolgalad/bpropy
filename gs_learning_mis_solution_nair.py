@@ -22,9 +22,9 @@ param_list = list(itertools.product(batch_sizes, learning_rates, hidden_dims, op
 
 def optimizer_str(opt, lr):
     if opt=="torch.optim.RAdam":
-        return "-o "+opt+"-O '{\"lr\":"+str(lr)+", \"weight_decay\": 5e-4, \"decoupled_weight_decay\":true}'"
+        return "-o "+opt+" -O '{\"lr\":"+str(lr)+", \"weight_decay\": 5e-4, \"decoupled_weight_decay\":true}'"
     if opt=="torch.optim.Adam":
-        return "-o "+opt+"-O '{\"lr\":"+str(lr)+", \"weight_decay\": 5e-4}'"
+        return "-o "+opt+" -O '{\"lr\":"+str(lr)+", \"weight_decay\": 5e-4}'"
 
 
 def command_line(args, params):
