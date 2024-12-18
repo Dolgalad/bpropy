@@ -5,7 +5,7 @@ import os
 import sys
 import os.path as osp
 import torch
-from torch_geometric.data import Dataset
+from torch_geometric.data import Dataset, Data
 from torch_geometric.utils.convert import from_networkx
 import networkx as nx
 import numpy as np
@@ -39,7 +39,7 @@ class MISERDataset(Dataset):
             return list([str(i) for i in range(1,3001)])
         if self.mode=="validation":
             return list([str(i) for i in range(3001,4001)])
-        if self.mode=="train":
+        if self.mode=="test":
             return list([str(i) for i in range(4001,5001)])
 
     @property
@@ -53,9 +53,10 @@ class MISERDataset(Dataset):
         bar = Bar("Loading processed file names: ", max=len(self.raw_file_names))
         for p in self.raw_paths:
             # load solution pool
-            pool = self.load_solution_pool(p)
-            for i in range(pool.shape[0]):
-                self._processed_file_names.append(f"{os.path.basename(p)}_{i}.pt")
+            if self.unravel_pool:
+                pool = self.load_solution_pool(p)
+                for i in range(pool.shape[0]):
+                    self._processed_file_names.append(f"{os.path.basename(p)}_{i}.pt")
             bar.next()
         bar.finish()
         return self._processed_file_names
@@ -124,6 +125,16 @@ class MISERDataset(Dataset):
         with open(os.path.join(path, "edge_features.npy"), "rb") as f:
             efeat = np.load(f)
         return nfeat,cfeat,efeat
+    def networkx_to_tgdata(self, g):
+        g = g.to_directed()
+        edge_index = torch.empty((2, g.number_of_edges()), dtype=torch.long)
+        bipartite = torch.empty(g.number_of_nodes())
+        for i,(src,dst) in enumerate(g.edges):
+            edge_index[0,i] = src
+            edge_index[1,i] = dst
+        for n,d in g.nodes(data=True):
+            bipartite[n] = d["bipartite"]
+        return Data(edge_index=edge_index, bipartite=bipartite)
     def process(self):
         # create lock to avoid processing by multiple training runs
         lock = FileLock(osp.join(self.processed_dir, "processing.lock"))
@@ -134,8 +145,13 @@ class MISERDataset(Dataset):
         bar = Bar("Processing: ", max=len(self.raw_paths))
         for raw_path in self.raw_paths:
             instance_id = os.path.basename(raw_path)
-            processed_names = list(filter(lambda x: x.startswith(f"{instance_id}_"), self.processed_file_names))
-            processed_paths = [osp.join(self.processed_dir, p) for p in processed_names]
+            if self.unravel_pool:
+                processed_names = list(filter(lambda x: x.startswith(f"{instance_id}_"), self.processed_file_names))
+                processed_paths = [osp.join(self.processed_dir, p) for p in processed_names]
+            else:
+                processed_names = list(filter(lambda x: x.startswith(f"{instance_id}"), self.processed_file_names))
+                processed_paths = [osp.join(self.processed_dir, p) for p in processed_names]
+
             if not all([os.path.exists(p) for p in processed_paths]):
                 g = nx.read_adjlist(os.path.join(raw_path, "graph.adjlist"))
                 nmap = {str(i):i for i in range(g.number_of_nodes())}
@@ -153,7 +169,8 @@ class MISERDataset(Dataset):
                     nx.set_node_attributes(bpg, attrs)
                 else:
                     bpg,_ = bipartite_graph(pb)
-                data = from_networkx(bpg)
+                #data = from_networkx(bpg)
+                data = self.networkx_to_tgdata(bpg)
                 # node features
                 nfeat, cfeat, efeat = self.load_raw_graph_features(raw_path)
                 nfeat = nfeat - np.mean(nfeat,axis=0)
@@ -167,12 +184,19 @@ class MISERDataset(Dataset):
                 pool = self.load_solution_pool(raw_path)
                 pool_values = np.sum(pool, axis=1)
                 Z = np.exp(pool_values).sum()
-                for i in range(pool.shape[0]):
-                    save_path = osp.join(self.processed_dir, f'{os.path.basename(raw_path)}_{i}.pt')
-                    _data = data.clone()
-                    _data.y = torch.from_numpy(pool[i,:])
-                    _data.w = torch.ones_like(_data.y) * np.exp(pool_values[i]) / Z
-                    torch.save(_data, save_path)
+                if self.unravel_pool:
+                    for i in range(pool.shape[0]):
+                        save_path = osp.join(self.processed_dir, f'{os.path.basename(raw_path)}_{i}.pt')
+                        _data = data.clone()
+                        _data.y = torch.from_numpy(pool[i,:])
+                        _data.w = torch.ones_like(_data.y) * np.exp(pool_values[i]) / Z
+                        torch.save(_data, save_path)
+                else:
+                    # best solution
+                    save_path = osp.join(self.processed_dir, f'{os.path.basename(raw_path)}.pt')
+                    data.y = torch.from_numpy(pool[np.argmax(pool_values),:])
+                    torch.save(data, save_path)
+
             bar.next()
         bar.finish()
         lock.release()
@@ -182,7 +206,8 @@ class MISERDataset(Dataset):
         data = torch.load(osp.join(self.processed_dir, self._processed_file_names[idx]))
         data.x = data.x.to(torch.float32)
         data.e = data.e.to(torch.float32)
-        data.w = data.w.to(torch.float32)
+        if hasattr(data, "w"):
+            data.w = data.w.to(torch.float32)
         data.y = data.y.to(torch.float32)
         data.bipartite = data.bipartite.to(torch.bool)
         return data

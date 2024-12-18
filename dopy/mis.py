@@ -64,7 +64,7 @@ def plot_maxcut_solution(pb, x, ax=None, pos=None, node_color=None, cmap=None):
                 node_color.append("red")
     nx.draw_networkx(pb.g, pos, node_color=node_color, ax=ax, cmap=cmap)
 
-def maxcut_greedy(pb, node_scores):
+def mis_greedy(pb, node_scores):
     queue = list(range(pb.nv()))
     sol = np.zeros(pb.nv())
     while len(queue)>0:

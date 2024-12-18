@@ -51,6 +51,17 @@ train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 print("done")
 
+print("Summary")
+print("\tdataset path = ", dataset_path)
+print("\tdataset name = ", dataset_name)
+print("\tcheckpoint director = ", checkpoint_dir)
+print("\tlog directory = ", log_dir)
+print("\tlearning rate = ", lr)
+print("\tbatch size = ", batch_size)
+
+
+exit()
+
 
 class GCNMRF(torch.nn.Module):
     def __init__(self, in_dim, hidden_dim=64):
