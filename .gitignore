@@ -8,4 +8,12 @@ runs/
 dummy*
 datasets/
 results/
-logs/
+logs*/
+
+# slurm
+*.slurm
+*.out
+*.err
+
+# data archives
+*.tar.gz
