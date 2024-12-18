@@ -1,6 +1,14 @@
 import os
 import itertools
 import argparse
+import time
+import numpy as np
+# sleep random time
+rt = 60 + np.random.rand() * 60
+print(f"Sleep for {rt} seconds")
+time.sleep(rt)
+print("Waking up")
+
 
 parser = argparse.ArgumentParser(prog="gs_learning_mis_solution_nair.py",
                                  description="Grid search Learning MIS solution with Nair et. al. approach")
