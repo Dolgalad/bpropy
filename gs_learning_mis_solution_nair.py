@@ -20,12 +20,20 @@ patience = [100, 500]
 
 param_list = list(itertools.product(batch_sizes, learning_rates, hidden_dims, optimizers, patience))
 
+def optimizer_str(opt, lr):
+    if opt=="torch.optim.RAdam":
+        return "-o "+opt+"-O '{\"lr\":"+str(lr)+", \"weight_decay\": 5e-4, \"decoupled_weight_decay\":true}'"
+    if opt=="torch.optim.Adam":
+        return "-o "+opt+"-O '{\"lr\":"+str(lr)+", \"weight_decay\": 5e-4}'"
+
+
 def command_line(args, params):
     [bs,lr,h,opt,p] = params
     if opt == "torch.optim.RAdam":
-        return f"python learning_mis_solution_nair.py {args.train_dataset_path} {args.validation_dataset_path} {args.dataset_category} {args.checkpoint_dir} {args.log_dir} -b {bs} -a {h} -p {p} -o {opt} -O '{\"lr\":{lr}, \"weight_decay\": 5e-4, \"decoupled_weight_decay\":true}' -m mis_nair_gs{args.index}"
+        return f"python learning_mis_solution_nair.py {args.train_dataset_path} {args.validation_dataset_path} {args.dataset_category} {args.checkpoint_dir} {args.log_dir} -b {bs} -a {h} -p {p} {opt_str} -m mis_nair_gs{args.index}"
     if opt == "torch.optim.Adam":
-        return f"python learning_mis_solution_nair.py {args.train_dataset_path} {args.validation_dataset_path} {args.dataset_category} {args.checkpoint_dir} {args.log_dir} -b {bs} -a {h} -p {p} -o {opt} -O '{\"lr\":{lr}, \"weight_decay\": 5e-4}' -m mis_nair_gs{args.index}"
+        return f"python learning_mis_solution_nair.py {args.train_dataset_path} {args.validation_dataset_path} {args.dataset_category} {args.checkpoint_dir} {args.log_dir} -b {bs} -a {h} -p {p} {opt_str} -m mis_nair_gs{args.index}"
 
-
-os.system(command_line(args, param_list[args.index])
+cmd = command_line(args, param_list[args.index])
+print("CMD = ", cmd)
+os.system(cmd)
