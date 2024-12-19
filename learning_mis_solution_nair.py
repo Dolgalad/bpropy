@@ -97,7 +97,7 @@ train_dataset = MISERDataset(args.train_dataset_path, category=args.dataset_cate
 val_dataset = MISERDataset(args.validation_dataset_path, category=args.dataset_category, mode="validation", unravel_pool=False)
 
 train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
+val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False)
 print("done")
 
 # training description data
