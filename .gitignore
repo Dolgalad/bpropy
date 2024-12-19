@@ -11,7 +11,7 @@ results/
 logs*/
 
 # slurm
-*.slurm
+#*.slurm
 *.out
 *.err
 
