@@ -212,6 +212,8 @@ class MISERDataset(Dataset):
         data.bipartite = data.bipartite.to(torch.bool)
         return data
 
+def get_neighbors(data, u):
+    return data.edge_index[1, data.edge_index[0,:]==u].numpy()
 def tgdata_to_networkx(data):
     nv = int(torch.sum(data.bipartite==0).item())
     nc = int(torch.sum(data.bipartite).item())
