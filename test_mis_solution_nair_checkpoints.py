@@ -60,15 +60,11 @@ def get_neighbors(data, u):
 def tgdata_to_networkx(data):
     nv = int(torch.sum(data.bipartite==False).item())
     nc = int(torch.sum(data.bipartite==True).item())
-    print("nv = ", nv)
-    print("nc = ", nc)
     g = nx.Graph()
     for i in range(nv):
         g.add_node(i)
     for c in range(nc):
         neighbors = get_neighbors(data, c+nv)
-        print(c, data.bipartite[c+nv])
-        print(neighbors)
         for e in itertools.product(neighbors, neighbors):
             if e[0]!=e[1]:
                 g.add_edge(e[0], e[1])
@@ -81,55 +77,61 @@ print("Dataset category = ", args.dataset_category)
 dataset = MISERDataset(args.dataset_path, category=args.dataset_category, mode="test", unravel_pool=False)
 loader = DataLoader(dataset, batch_size=1, shuffle=False)
 
-epochs = []
-mean_gaps = []
+model_data = {}
 
 problems = {}
 
-c = 0
-files = list(os.listdir(args.checkpoint_dir))
-for j,f in enumerate(files):
-    # model 
-    model = GCN(9, args.hidden_dim)
-    model.load_state_dict(torch.load(os.path.join(args.checkpoint_dir, f), weights_only=True))
+for c,model_name in enumerate(os.listdir(args.checkpoint_dir)):
+    model_data[model_name] = {}
+    model_data[model_name]["epochs"] = []
+    model_data[model_name]["mean_gaps"] = []
+
+    model_dir = os.path.join(args.checkpoint_dir, model_name)
     
-    epochs.append(int(f.split(".")[0]))
-    gaps = []
-    bar = Bar(f"{j+1}/{len(files)} Testing {f}: ", max=dataset.len())
-    model.eval()
-    with torch.no_grad():
-        for i,data in enumerate(loader):
-            out = model(data)
-            pred = out[data.bipartite==0]
-            print()
-            print("pred.shape = ", pred.shape)
-            if i in problems:
-                pb = problems[i]
-            else:
-                g = tgdata_to_networkx(data)
-                print("g.nv = ", g.number_of_nodes())
-                pb = MIS(g)
-                problems[i] = pb
-            print("nv = ", pb.nv())
-            print()
-            data_sol = data.y.numpy()
-            if data_sol.sum() == 0:
-                continue
-            # solve greedy
-            sol = mis_greedy(pb, pred.numpy())
-            gap = (data.y.numpy().sum() - sol.sum()) / data.y.numpy().sum()
-            gaps.append(gap)
-            bar.suffix = f" {i+1}/{dataset.len()}: gap = {np.mean(gaps)}"
-            bar.next()
-        bar.finish()
-    mean_gaps.append(np.mean(gaps))
+    c = 0
+    files = [f for f in os.listdir(model_dir) if f.endswith(".pt")]
+    for j,f in enumerate(files):
+        # model 
+        if "a64" in model_name:
+            model = GCN(9, 64)
+        if "a128" in model_name:
+            model = GCN(9, 128)
+        model.load_state_dict(torch.load(os.path.join(model_dir, f), weights_only=True))
+        
+        gaps = []
+        bar = Bar(f"{c}. {j+1}/{len(files)} Testing {f}: ", max=dataset.len())
+        model.eval()
+        with torch.no_grad():
+            for i,data in enumerate(loader):
+                out = model(data)
+                pred = out[data.bipartite==0]
+                if i in problems:
+                    pb = problems[i]
+                else:
+                    g = tgdata_to_networkx(data)
+                    pb = MIS(g)
+                    problems[i] = pb
+                data_sol = data.y.numpy()
+                if data_sol.sum() == 0:
+                    continue
+                # solve greedy
+                sol = mis_greedy(pb, pred.numpy())
+                gap = (data.y.numpy().sum() - sol.sum()) / data.y.numpy().sum()
+                gaps.append(gap)
+                bar.suffix = f" {i+1}/{dataset.len()}: gap = {np.mean(gaps)}"
+                bar.next()
+            bar.finish()
+        model_data[model_name]["mean_gaps"].append(np.mean(gaps))
+        model_data[model_name]["epochs"].append(int(f.split(".")[0]))
 
 import matplotlib.pyplot as plt
 plt.figure()
-plt.scatter(epochs, mean_gaps, marker="+")
+for k in model_data.keys():
+    plt.scatter(model_data[k]["epochs"], model_data[k]["mean_gaps"], marker="+", label=k)
 plt.ylabel("Mean gap")
 plt.xlabel("Epoch")
 plt.suptitle("Mean gap vs epoch")
+plt.legend()
 plt.tight_layout()
 plt.savefig("test_mis_solution_nair_checkpoints.png")
 plt.show()

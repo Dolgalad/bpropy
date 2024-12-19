@@ -212,6 +212,20 @@ class MISERDataset(Dataset):
         data.bipartite = data.bipartite.to(torch.bool)
         return data
 
+def tgdata_to_networkx(data):
+    nv = int(torch.sum(data.bipartite==0).item())
+    nc = int(torch.sum(data.bipartite).item())
+    g = nx.Graph()
+    for i in range(nv):
+        g.add_node(i)
+    for c in range(nc):
+        neighbors = get_neighbors(data, c+nv)
+        for e in itertools.product(neighbors, neighbors):
+            if e[0]!=e[1]:
+                g.add_edge(e[0], e[1])
+    return g
+
+
 if __name__=="__main__":
     dataset = MISERDataset("./datasets/mis_er_n100-100_dummy_val", category="MIS100_EB", mode="validation")
 

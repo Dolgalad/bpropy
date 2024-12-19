@@ -15,7 +15,8 @@ from progress.bar import Bar
 
 #from bpropy.lbp import *
 from dopy.mis import *
-from mis_er_dataset import MISERDataset
+from mis_er_dataset import MISERDataset, tgdata_to_networkx
+
 
 import matplotlib.pyplot as plt
 
@@ -93,7 +94,7 @@ if not "lr" in optimizer_args:
 
 print("Loading data")
 train_dataset = MISERDataset(args.train_dataset_path, category=args.dataset_category, mode="train")
-val_dataset = MISERDataset(args.validation_dataset_path, category=args.dataset_category, mode="validation")
+val_dataset = MISERDataset(args.validation_dataset_path, category=args.dataset_category, mode="validation", unravel_pool=False)
 
 train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
@@ -189,20 +190,36 @@ for epoch in range(args.max_epochs):
         bar = Bar(f"Epoch {epoch} validation:", max = val_dataset.len() // args.batch_size)
         model.eval()
         for data in val_loader:
+            # retrieve graph
+            g =  tgdata_to_networkx(data)
+            pb = MIS(g)
+
             data = data.to(device)
             out = model(data)
-            no_red_loss = F.binary_cross_entropy_with_logits(torch.flatten(out[data.bipartite==0]), data.y, reduction="none")
+            node_scores = torch.flatten(out[data.bipartite==0]).cpu().numpy()
 
-            loss = torch.mean(data.w * no_red_loss)
-            epoch_val_loss.append(loss.item())
+            # solve greedy
+            sol = mis_greedy(pb, node_scores)
+
+            # gap
+            opt_val = data.y.sum().item()
+            grd_val = sol.sum()
+            gap = (opt_val - grd_val) / opt_val
+
+            #no_red_loss = F.binary_cross_entropy_with_logits(torch.flatten(out[data.bipartite==0]), data.y, reduction="none")
+
+            #loss = torch.mean(data.w * no_red_loss)
+            #epoch_val_loss.append(loss.item())
+            epoch_val_loss.append(gap)
             bar.next()
         bar.finish()
 
 
     mtrainloss = np.mean(epoch_train_loss)
     mvalloss = np.mean(epoch_val_loss)
-    print(f"epoch {epoch}, loss = {mtrainloss}, val = {mvalloss}")
-    writer.add_scalars("loss", {"train":mtrainloss, "val":mvalloss}, epoch)
+    print(f"epoch {epoch}, loss = {mtrainloss}, val_gap = {mvalloss}")
+    writer.add_scalar("loss_train", mtrainloss, epoch)
+    writer.add_scalar("gap_val", mvalloss, epoch)
 
     # save checkpoint
     checkpoint_filename = os.path.join(checkpoint_dir, f"{epoch}.pt")
@@ -215,8 +232,8 @@ for epoch in range(args.max_epochs):
         break
 
 training_description["stop_time"] = time.time()
-training_description["min_validation_loss"] = es.min_validation_loss
-training_description["min_validation_loss_epoch"] = es.min_validation_loss_epoch
+training_description["min_validation_gap"] = es.min_validation_loss
+training_description["min_validation_gap_epoch"] = es.min_validation_loss_epoch
 training_description["epochs"] = epoch
 with open(os.path.join(log_dir, "description.json"), "w") as f:
     f.write(json.dumps(training_description, sort_keys=True, indent=4))
