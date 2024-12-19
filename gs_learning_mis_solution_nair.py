@@ -3,11 +3,6 @@ import itertools
 import argparse
 import time
 import numpy as np
-# sleep random time
-rt = 60 + np.random.rand() * 60
-print(f"Sleep for {rt} seconds")
-time.sleep(rt)
-print("Waking up")
 
 
 parser = argparse.ArgumentParser(prog="gs_learning_mis_solution_nair.py",
@@ -20,7 +15,7 @@ parser.add_argument("log_dir")
 parser.add_argument("index", type=int)
 args = parser.parse_args()
 
-batch_sizes = [10, 100]
+batch_sizes = [100]
 learning_rates = [1e-6, 1e-5, 1e-4]
 hidden_dims = [64, 128]
 optimizers = ["torch.optim.Adam", "torch.optim.RAdam"]
@@ -43,6 +38,15 @@ def command_line(args, params):
     if opt == "torch.optim.Adam":
         return f"python learning_mis_solution_nair.py {args.train_dataset_path} {args.validation_dataset_path} {args.dataset_category} {args.checkpoint_dir} {args.log_dir} -b {bs} -a {h} -p {p} {opt_str} -m mis_nair_gs{args.index}"
 
-cmd = command_line(args, param_list[args.index])
+cmd = command_line(args, param_list[args.index % len(param_list)])
 print("CMD = ", cmd)
+print("Index = ", args.index)
+
+if args.index > 1:
+    # sleep random time
+    rt = 60 + np.random.rand() * 300
+    print(f"Sleep for {rt} seconds")
+    time.sleep(rt)
+    print("Waking up")
+
 os.system(cmd)
