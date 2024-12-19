@@ -4,6 +4,7 @@ Definition of the MISER dataset
 import os
 import sys
 import os.path as osp
+import itertools
 import torch
 from torch_geometric.data import Dataset, Data
 from torch_geometric.utils.convert import from_networkx
