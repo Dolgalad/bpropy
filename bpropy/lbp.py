@@ -347,14 +347,14 @@ def max_sum_loopy_belief_propagation(theta, v2f, g, f2v_edges, f2v_subsum_idx, r
     return mu
 
 def _loopy_belief_propagation(data, theta, v2f, f2v_edges, r_edges, q_edges, m_edges, max_iter=100, tol=1e-6):
+    device = theta.device
     # strides
-    q_stride = torch.full((int(v2f.shape[0]/2),), 2)
-    q_idx = torch.arange(q_stride.size(0)).repeat_interleave(2)
-    #m_stride = torch.tensor([2**len(list(g.neighbors(F))) for F in iter_factor_nodes(g)])
+    q_stride = torch.full((int(v2f.shape[0]/2),), 2, device=device)
+    q_idx = torch.arange(q_stride.size(0), device=device).repeat_interleave(2)
     m_stride = data.m_stride
-    m_idx = torch.arange(m_stride.size(0)).repeat_interleave(m_stride)
-    #mu = torch.zeros(sufficient_statistics_dim(g))
-    mu = torch.zeros(data.ss_dim)
+    m_idx = torch.arange(m_stride.size(0), device=device).repeat_interleave(m_stride)
+    mu = torch.zeros(data.ss_dim, device=device)
+
     
     for T in range(max_iter):
         t0 = time.time()
