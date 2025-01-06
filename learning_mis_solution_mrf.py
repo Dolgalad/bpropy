@@ -13,7 +13,7 @@ from torch_geometric.nn import GCNConv
 from torch.utils.tensorboard import SummaryWriter
 from progress.bar import Bar
 
-from bpropy.lbp import *
+from bpropy.lbp import _loopy_belief_propagation
 from dopy.mis import *
 from mis_er_mrf_dataset import MISERMRFDataset, tgdata_to_networkx
 
