@@ -169,8 +169,11 @@ class GCN(torch.nn.Module):
             torch.flatten(self.unary_predictor(x[data.bipartite==0])),
             torch.flatten(self.binary_predictor(x[data.bipartite==1]))))
         theta = torch.nn.functional.normalize(theta, p=1, dim=0)
-        v2f = torch.zeros_like(theta)
+        print("theta.device ", theta.device)
+        v2f = torch.zeros_like(theta, device=device)
+        print("v2f.device ", v2f.device)
         mu = _loopy_belief_propagation(data, theta, v2f, data.f2v_edges, data.r_edges, data.q_edges, data.m_edges, max_iter=args.bp_max_iter, tol=1e-6)
+        print("mu.device ", mu.device)
         return mu
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
