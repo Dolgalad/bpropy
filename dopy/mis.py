@@ -67,14 +67,21 @@ def plot_maxcut_solution(pb, x, ax=None, pos=None, node_color=None, cmap=None):
 def mis_greedy(pb, node_scores):
     queue = list(range(pb.nv()))
     sol = np.zeros(pb.nv())
+    c = 0
     while len(queue)>0:
         u = queue[np.argmax(node_scores[np.array(queue)])]
+        print("---------")
+        print(c, np.argmax(node_scores[np.array(queue)]), u, list(pb.g.neighbors(u)))
+        print("\t", queue)
+        print("\t", [len(list(pb.g.neighbors(n))) for n in queue])
+        print("\t", node_scores[np.array(queue)])
         sol[u] = 1
         queue.remove(u)
         for v in pb.g.neighbors(u):
             if v in queue:
                 sol[v] = 0
                 queue.remove(v)
+        c += 1
     return sol
 
 #def maxcut_greedy(pb, marginals):
