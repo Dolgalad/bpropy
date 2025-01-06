@@ -196,6 +196,8 @@ for epoch in range(args.max_epochs):
         data = data.to(device)
         optimizer.zero_grad()
         out = model(data)
+        print("out ", out.size())
+        print("y ", data.y.size())
         no_red_loss = F.binary_cross_entropy_with_logits(torch.flatten(out[data.bipartite==0]), data.y, reduction="none")
 
         loss = torch.mean(data.w * no_red_loss)
