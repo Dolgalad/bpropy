@@ -218,7 +218,7 @@ for epoch in range(args.max_epochs):
             pb = MIS(g)
 
             data = data.to(device)
-            out = model(data)[data.bipartite==0].cpu().numpy()
+            out = model(data).cpu().numpy()
             unary_marginals = out[:2*pb.nv()].reshape(pb.nv(), 2)
 
             node_scores = unary_marginals[:,1]
