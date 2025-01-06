@@ -128,9 +128,9 @@ training_description = {
             **optimizer_args
         },
         "dropout_p": args.dropout_p,
-        "model_name": model_name
-        },
+        "model_name": model_name,
         "bp_max_iter": args.bp_max_iter
+        }
 
 print("Summary")
 print(json.dumps(training_description, sort_keys=True, indent=4))
