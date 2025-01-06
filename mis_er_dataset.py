@@ -63,11 +63,8 @@ class MISERDataset(Dataset):
                 gaps = (best_val - pool_vals) / best_val
                 for i in range(pool.shape[0]):
                     val = np.sum(pool[i,:])
-                    if self.gap_limit is None:
+                    if (self.gap_limit is None) or (gaps[i] <= self.gap_limit):
                         self._processed_file_names.append(f"{os.path.basename(p)}_{i}.pt")
-                    else:
-                        if gaps[i] <= self.gap_limit:
-                            self._processed_file_names.append(f"{os.path.basename(p)}_{i}.pt")
             bar.next()
         bar.finish()
         return self._processed_file_names
@@ -195,13 +192,20 @@ class MISERDataset(Dataset):
                 pool = self.load_solution_pool(raw_path)
                 pool_values = np.sum(pool, axis=1)
                 Z = np.exp(pool_values).sum()
+
+                # best solution val
+                pool_vals = np.sum(pool, axis=1)
+                best_val = np.max(pool_vals)
+                gaps = (best_val - pool_vals) / best_val
+
                 if self.unravel_pool:
                     for i in range(pool.shape[0]):
-                        save_path = osp.join(self.processed_dir, f'{os.path.basename(raw_path)}_{i}.pt')
-                        _data = data.clone()
-                        _data.y = torch.from_numpy(pool[i,:])
-                        _data.w = torch.ones_like(_data.y) * np.exp(pool_values[i]) / Z
-                        torch.save(_data, save_path)
+                        if (self.gap_limit is None) or (gaps[i] <= self.gap_limit):
+                            save_path = osp.join(self.processed_dir, f'{os.path.basename(raw_path)}_{i}.pt')
+                            _data = data.clone()
+                            _data.y = torch.from_numpy(pool[i,:])
+                            _data.w = torch.ones_like(_data.y) * np.exp(pool_values[i]) / Z
+                            torch.save(_data, save_path)
                 else:
                     # best solution
                     save_path = osp.join(self.processed_dir, f'{os.path.basename(raw_path)}.pt')
