@@ -355,6 +355,12 @@ def _loopy_belief_propagation(data, theta, v2f, f2v_edges, r_edges, q_edges, m_e
     m_idx = torch.arange(m_stride.size(0), device=device).repeat_interleave(m_stride)
     mu = torch.zeros(data.ss_dim, device=device)
 
+    print(q_stride.device)
+    print(q_idx.device)
+    print(m_stride.device)
+    print(m_idx.device)
+    print(mu.device)
+
     
     for T in range(max_iter):
         t0 = time.time()
