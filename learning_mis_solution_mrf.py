@@ -192,9 +192,12 @@ for epoch in range(args.max_epochs):
     epoch_val_loss = []
     epoch_val_gap = []
     bar = Bar(f"Epoch {epoch} training:", max = train_dataset.len() // args.batch_size)
+    cc = 0
+    bs = 100
     for data in train_loader:
         data = data.to(device)
-        optimizer.zero_grad()
+        if cc == 0:
+            optimizer.zero_grad()
         out = model(data)
         #print("out ", out.size())
         #print("y ", data.y.size())
@@ -205,7 +208,10 @@ for epoch in range(args.max_epochs):
         loss = torch.mean(data.w * no_red_loss)
         epoch_train_loss.append(loss.item())
         loss.backward()
-        optimizer.step()
+        cc += 1
+        if cc == bs:
+            optimizer.step()
+            cc = 0
         bar.next()
     bar.finish()
 
