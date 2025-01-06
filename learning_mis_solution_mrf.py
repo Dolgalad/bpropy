@@ -212,6 +212,7 @@ for epoch in range(args.max_epochs):
         if cc == bs:
             optimizer.step()
             cc = 0
+            break
         bar.next()
     bar.finish()
 
@@ -237,6 +238,9 @@ for epoch in range(args.max_epochs):
             opt_val = data.y.sum().item()
             grd_val = sol.sum()
             gap = (opt_val - grd_val) / opt_val
+            print("OPT val ", opt_val)
+            print("GRD val ", grd_val)
+            print("GAP val ", gap)
 
             #no_red_loss = F.binary_cross_entropy_with_logits(torch.flatten(out[data.bipartite==0]), data.y, reduction="none")
 
