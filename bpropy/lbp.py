@@ -355,13 +355,6 @@ def _loopy_belief_propagation(data, theta, v2f, f2v_edges, r_edges, q_edges, m_e
     m_idx = torch.arange(m_stride.size(0), device=device).repeat_interleave(m_stride)
     mu = torch.zeros(data.ss_dim, device=device)
 
-    print(q_stride.device)
-    print(q_idx.device)
-    print(m_stride.device)
-    print(m_idx.device)
-    print(mu.device)
-
-    
     for T in range(max_iter):
         t0 = time.time()
         
@@ -369,8 +362,6 @@ def _loopy_belief_propagation(data, theta, v2f, f2v_edges, r_edges, q_edges, m_e
         # subsum vect
         #v2f_subsum = torch.zeros(len(f2v_subsum_idx), dtype=theta.dtype)
         v2f_subsum = torch.zeros(data.f2v_ss_dim, dtype=theta.dtype, device=device)
-        print(stack.device)
-        print(v2f_subsum.device)
 
         v2f_subsum.scatter_add_(0, f2v_edges[:,0], stack[f2v_edges[:,1]])
         
