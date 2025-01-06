@@ -168,7 +168,7 @@ class GCN(torch.nn.Module):
         theta = torch.concatenate((
             torch.flatten(self.unary_predictor(x[data.bipartite==0])),
             torch.flatten(self.binary_predictor(x[data.bipartite==1]))))
-        theta = torch.nn.functional.normalize(theta, p=1, dim=0)
+        #theta = torch.nn.functional.normalize(theta, p=1, dim=0)
         v2f = torch.zeros_like(theta, device=device)
         mu = _loopy_belief_propagation(data, theta, v2f, data.f2v_edges, data.r_edges, data.q_edges, data.m_edges, max_iter=args.bp_max_iter, tol=1e-6)
         return mu
