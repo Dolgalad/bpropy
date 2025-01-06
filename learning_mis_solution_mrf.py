@@ -212,7 +212,6 @@ for epoch in range(args.max_epochs):
         if cc == bs:
             optimizer.step()
             cc = 0
-            break
         bar.next()
     bar.finish()
 
