@@ -82,6 +82,8 @@ def mis_greedy(pb, node_scores):
                 sol[v] = 0
                 queue.remove(v)
         c += 1
+        print("SOLLLLL ", sol)
+        print(" SUMMM  ", np.sum(sol))
     return sol
 
 #def maxcut_greedy(pb, marginals):
