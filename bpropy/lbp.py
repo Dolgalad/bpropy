@@ -368,7 +368,9 @@ def _loopy_belief_propagation(data, theta, v2f, f2v_edges, r_edges, q_edges, m_e
         stack = torch.concatenate((theta,v2f), 0)
         # subsum vect
         #v2f_subsum = torch.zeros(len(f2v_subsum_idx), dtype=theta.dtype)
-        v2f_subsum = torch.zeros(data.f2v_ss_dim, dtype=theta.dtype)
+        v2f_subsum = torch.zeros(data.f2v_ss_dim, dtype=theta.dtype, device=device)
+        print(stack.device)
+        print(v2f_subsum.device)
 
         v2f_subsum.scatter_add_(0, f2v_edges[:,0], stack[f2v_edges[:,1]])
         
