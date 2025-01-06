@@ -46,10 +46,10 @@ parser.add_argument("-s", "--seed", default=None)
 parser.add_argument("-g", "--gap_limit", default=-1)
 
 args = parser.parse_args()
-if args.gap_limit < 0:
+if float(args.gap_limit) < 0:
     gap_limit = None
 else:
-    gap_limit = args.gap_limit
+    gap_limit = float(args.gap_limit)
 
 # setting seed
 
