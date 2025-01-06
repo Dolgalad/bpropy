@@ -70,11 +70,6 @@ def mis_greedy(pb, node_scores):
     c = 0
     while len(queue)>0:
         u = queue[np.argmax(node_scores[np.array(queue)])]
-        print("---------")
-        print(c, np.argmax(node_scores[np.array(queue)]), u, list(pb.g.neighbors(u)))
-        print("\t", queue)
-        print("\t", [len(list(pb.g.neighbors(n))) for n in queue])
-        print("\t", node_scores[np.array(queue)])
         sol[u] = 1
         queue.remove(u)
         for v in pb.g.neighbors(u):
@@ -82,8 +77,6 @@ def mis_greedy(pb, node_scores):
                 sol[v] = 0
                 queue.remove(v)
         c += 1
-        print("SOLLLLL ", sol)
-        print(" SUMMM  ", np.sum(sol))
     return sol
 
 #def maxcut_greedy(pb, marginals):
