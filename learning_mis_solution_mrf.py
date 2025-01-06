@@ -235,12 +235,11 @@ for epoch in range(args.max_epochs):
             sol = mis_greedy(pb, node_scores)
 
             # gap
-            opt_val = data.y.sum().item()
+            sol_tmp = data.y[:2*pb.nv()].reshape(pb.nv(), 2)
+
+            opt_val = sol_tmp[:,1].sum().item()
             grd_val = sol.sum()
             gap = (opt_val - grd_val) / opt_val
-            print("OPT val ", opt_val)
-            print("GRD val ", grd_val)
-            print("GAP val ", gap)
 
             #no_red_loss = F.binary_cross_entropy_with_logits(torch.flatten(out[data.bipartite==0]), data.y, reduction="none")
 
