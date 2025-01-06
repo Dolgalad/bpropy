@@ -101,8 +101,8 @@ if not "lr" in optimizer_args:
     optimizer_args["lr"] = args.learning_rate
 
 print("Loading data")
-train_dataset = MISERDataset(args.train_dataset_path, category=args.dataset_category, mode="train", gap_limit=gap_limit)
-val_dataset = MISERDataset(args.validation_dataset_path, category=args.dataset_category, mode="validation", unravel_pool=False, gap_limit=gap_limit)
+train_dataset = MISERMRFDataset(args.train_dataset_path, category=args.dataset_category, mode="train", gap_limit=gap_limit)
+val_dataset = MISERMRFDataset(args.validation_dataset_path, category=args.dataset_category, mode="validation", unravel_pool=False, gap_limit=gap_limit)
 
 train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False)
