@@ -42,8 +42,16 @@ parser.add_argument("-d", "--dropout_p", default=0.25, type=float)
 parser.add_argument("-m", "--model_name_prefix", default="mis_nair")
 parser.add_argument("-o", "--optimizer", default="torch.optim.Adam")
 parser.add_argument("-O", "--optimizer_args", default="{}")
+parser.add_argument("-s", "--seed", default=None)
+parser.add_argument("-g", "--gap_limit", default=-1)
 
 args = parser.parse_args()
+if args.gap_limit < 0:
+    gap_limit = None
+else:
+    gap_limit = args.gap_limit
+
+# setting seed
 
 # dataset path 
 if args.train_dataset_path.endswith("/"):
@@ -93,8 +101,8 @@ if not "lr" in optimizer_args:
     optimizer_args["lr"] = args.learning_rate
 
 print("Loading data")
-train_dataset = MISERDataset(args.train_dataset_path, category=args.dataset_category, mode="train")
-val_dataset = MISERDataset(args.validation_dataset_path, category=args.dataset_category, mode="validation", unravel_pool=False)
+train_dataset = MISERDataset(args.train_dataset_path, category=args.dataset_category, mode="train", gap_limit=gap_limit)
+val_dataset = MISERDataset(args.validation_dataset_path, category=args.dataset_category, mode="validation", unravel_pool=False, gap_limit=gap_limit)
 
 train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False)
@@ -103,6 +111,7 @@ print("done")
 # training description data
 training_description = {
         "dataset_category": args.dataset_category,
+        "dataset_gap_limit": args.gap_limit,
         "train_dataset": args.train_dataset_path,
         "validation_dataset": args.validation_dataset_path,
         "dataset_name": dataset_name,
@@ -133,7 +142,6 @@ class GCN(torch.nn.Module):
         self.conv3 = GCNConv(hidden_dim, hidden_dim, normalize=False)
         self.conv4 = GCNConv(hidden_dim, 1, normalize=False)
         self.sig = torch.nn.LogSigmoid()
-
     def forward(self, data):
         x, edge_index = data.x, data.edge_index
 

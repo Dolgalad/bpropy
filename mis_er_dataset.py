@@ -28,11 +28,12 @@ dataset_urls = {
         }
 
 class MISERDataset(Dataset):
-    def __init__(self, root, category="MIS100_EB", mode="train", transform=None, pre_transform=None, pre_filter=None, unravel_pool=True):
+    def __init__(self, root, category="MIS100_EB", mode="train", transform=None, pre_transform=None, pre_filter=None, unravel_pool=True, gap_limit=None):
         self.category = category
         self.mode = mode
         self.unravel_pool = unravel_pool
         self._processed_file_names = []
+        self.gap_limit = gap_limit
         super().__init__(root, transform, pre_transform, pre_filter)
     @property
     def raw_file_names(self):
@@ -56,8 +57,17 @@ class MISERDataset(Dataset):
             # load solution pool
             if self.unravel_pool:
                 pool = self.load_solution_pool(p)
+                # best solution val
+                pool_vals = np.sum(pool, axis=1)
+                best_val = np.max(pool_vals)
+                gaps = (best_val - pool_vals) / best_val
                 for i in range(pool.shape[0]):
-                    self._processed_file_names.append(f"{os.path.basename(p)}_{i}.pt")
+                    val = np.sum(pool[i,:])
+                    if self.gap_limit is None:
+                        self._processed_file_names.append(f"{os.path.basename(p)}_{i}.pt")
+                    else:
+                        if gaps[i] <= self.gap_limit:
+                            self._processed_file_names.append(f"{os.path.basename(p)}_{i}.pt")
             bar.next()
         bar.finish()
         return self._processed_file_names
