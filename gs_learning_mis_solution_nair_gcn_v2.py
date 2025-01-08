@@ -30,7 +30,7 @@ def optimizer_str(opt, lr):
         return "-o "+opt+" -O '{\"lr\":"+str(lr)+", \"weight_decay\": 5e-4}'"
 
 def model_str(m, nl):
-    return f"-M {m} -A "+"{\"n_layers\":"+str(nl)+"}'"
+    return f"-M {m} -A "+"'{\"n_layers\":"+str(nl)+"}'"
 def dataset_str():
     return "-D '{\"solution_limit\": 1, \"aggregate\": false, \"unravel_pool\": false, \"gap_limit\": 0.0}'"
 
