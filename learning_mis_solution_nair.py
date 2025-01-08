@@ -127,10 +127,8 @@ es = EarlyStopper(patience=args.es_patience, min_delta=1e-6)
 
 
 print("Loading data")
-#train_dataset = MISERDataset(train_dataset_path, mode="train", **dataset_args)
-#val_dataset = MISERDataset(validation_dataset_path, mode="validation", unravel_pool=False)
-train_dataset = MISERDataset(train_dataset_path, mode="test", **dataset_args)
-val_dataset = MISERDataset(validation_dataset_path, mode="test", unravel_pool=False, solution_limit=1)
+train_dataset = MISERDataset(train_dataset_path, mode="train", **dataset_args)
+val_dataset = MISERDataset(validation_dataset_path, mode="validation", unravel_pool=False, solution_limit=1)
 
 train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False)
