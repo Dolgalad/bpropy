@@ -62,6 +62,15 @@ def clique_covering(g):
         t0 = time.time() - t0
     return C
 
+def invert_permutation(p):
+    """Return an array s with which np.array_equal(arr[p][s], arr) is True.
+    The array_like argument p must be some permutation of 0, 1, ..., len(p)-1.
+    """
+    p = np.asanyarray(p) # in case p is a tuple, etc.
+    s = np.empty_like(p)
+    s[p] = np.arange(p.size)
+    return s
+
 def clique_covering_3(g, randomize=False):
     _g = g.copy()
     n = _g.number_of_nodes()
@@ -71,17 +80,23 @@ def clique_covering_3(g, randomize=False):
         _g = nx.relabel_nodes(_g, nmap)
     else:
         perm = np.arange(n)
+
+    perm = invert_permutation(perm)
+
     # mark all edges as not covered
     uncovered_edges = set(list(_g.edges))
+
     C = []
     while len(uncovered_edges):
         # select an uncovered edge
         c = list(uncovered_edges.pop())
-        W = set(_g.neighbors(c[0])).union(_g.neighbors(c[1])) - set(c)
+        W = set(_g.neighbors(c[0])).intersection(_g.neighbors(c[1])) - set(c)
         while len(W):
             w = W.pop()
             for u in c:
+                e = (min(u,w),max(u,w))
                 uncovered_edges.discard((min(u,w),max(u,w)))
+
             c.append(w)
             W = W.intersection(_g.neighbors(w))
         C.append([perm[i] for i in c])
