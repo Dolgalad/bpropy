@@ -6,6 +6,7 @@ import sys
 import os.path as osp
 import itertools
 import torch
+import json
 from torch_geometric.data import Dataset, Data
 from torch_geometric.utils.convert import from_networkx
 import networkx as nx
@@ -28,13 +29,28 @@ dataset_urls = {
         }
 
 class MISERDataset(Dataset):
-    def __init__(self, root, category="MIS100_EB", mode="train", transform=None, pre_transform=None, pre_filter=None, unravel_pool=True, gap_limit=None):
+    def __init__(self, root, category="MIS100_EB", mode="train", transform=None, pre_transform=None, pre_filter=None, unravel_pool=True, gap_limit=None, solution_limit=None, aggregate=False):
         self.category = category
         self.mode = mode
         self.unravel_pool = unravel_pool
+        self.solution_limit = solution_limit
+        self.aggregate = aggregate
+        if solution_limit is None:
+            self.solution_limit = np.inf
         self._processed_file_names = []
         self.gap_limit = gap_limit
+        # write description
+        description = {"category": category, "unravel_pool": unravel_pool, "gap_limit": gap_limit, "solution_limit": solution_limit, "aggregate": aggregate}
+
+        lock_path = osp.join(root, "processing.lock")
+        lock = FileLock(lock_path, thread_local=False)
+        print("Waiting on lock: ", lock_path)
+        lock.acquire()
+        print(f"Lock {lock_path} acquired")
+        with open(os.path.join(root, "description.json"), "w") as f:
+            f.write(json.dumps(description, sort_keys=True, indent=4))
         super().__init__(root, transform, pre_transform, pre_filter)
+        print(f"Lock {lock_path} released")
     @property
     def raw_file_names(self):
         if self.mode=="train":
@@ -124,7 +140,14 @@ class MISERDataset(Dataset):
         y = self.load_redumis_solution(os.path.join(path, "redumis.sol"))
         # pool
         p = self.load_pool(os.path.join(path, "pool.npy"))
-        return np.concatenate((np.expand_dims(y,axis=0),p), axis=0)
+        pool = np.concatenate((np.expand_dims(y,axis=0),p), axis=0)
+        # sort pool by descending value
+        pool_vals = np.sum(pool, axis=1)
+        pool = pool[np.flip(np.argsort(pool_vals))]
+        if self.solution_limit is None:
+            return pool
+        return pool[:self.solution_limit]
+
     def load_raw_graph_features(self, path):
         with open(os.path.join(path, "node_features.npy"), "rb") as f:
             nfeat = np.load(f)
@@ -145,10 +168,6 @@ class MISERDataset(Dataset):
         return Data(edge_index=edge_index, bipartite=bipartite)
     def process(self):
         # create lock to avoid processing by multiple training runs
-        lock = FileLock(osp.join(self.processed_dir, "processing.lock"))
-        print("Acquire lock")
-        lock.acquire()
-        print("Lock acquired")
         idx = 0
         bar = Bar("Processing: ", max=len(self.raw_paths))
         for raw_path in self.raw_paths:
@@ -207,18 +226,30 @@ class MISERDataset(Dataset):
                             _data.w = torch.ones_like(_data.y) * np.exp(pool_values[i]) / Z
                             torch.save(_data, save_path)
                 else:
-                    # best solution
                     save_path = osp.join(self.processed_dir, f'{os.path.basename(raw_path)}.pt')
-                    data.y = torch.from_numpy(pool[np.argmax(pool_values),:])
+                    if self.aggregate:
+                        data.y = torch.from_numpy(self.aggregate_pool(pool))
+                        data.w = torch.ones_like(data.y)
+                    else:
+                        # best solution
+                        data.y = torch.from_numpy(pool[0])
+                        data.w = torch.ones_like(data.y)
                     torch.save(data, save_path)
 
             bar.next()
         bar.finish()
-        lock.release()
+    def aggregate_pool(self, pool):
+        pool_vals = np.sum(pool, axis=1).reshape(pool.shape[0],1)
+        Z = np.exp(pool_vals).sum()
+        w = np.tile(np.exp(pool_vals), (1, pool.shape[1]))
+        r = (w * pool).sum(axis=0) / Z
+        return r
+
+
     def len(self):
         return len(self.processed_file_names)
     def get(self, idx):
-        data = torch.load(osp.join(self.processed_dir, self._processed_file_names[idx]))
+        data = torch.load(osp.join(self.processed_dir, self._processed_file_names[idx]), weights_only=False)
         data.x = data.x.to(torch.float32)
         data.e = data.e.to(torch.float32)
         if hasattr(data, "w"):

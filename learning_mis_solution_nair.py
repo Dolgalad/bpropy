@@ -3,20 +3,21 @@ import copy
 import time
 import argparse
 import json
+import hashlib
+import random
 
 from progress.bar import Bar
 import networkx as nx
 from torch_geometric.utils.convert import from_networkx
 from torch_geometric.loader import DataLoader
 import torch.nn.functional as F
-from torch_geometric.nn import GCNConv
 from torch.utils.tensorboard import SummaryWriter
 from progress.bar import Bar
 
 #from bpropy.lbp import *
 from dopy.mis import *
 from mis_er_dataset import MISERDataset, tgdata_to_networkx
-
+from models import *
 
 import matplotlib.pyplot as plt
 
@@ -28,36 +29,63 @@ from early_stopper import EarlyStopper
 
 parser = argparse.ArgumentParser(prog="learning_mis_solution_nair.py",
                                  description="Learning MIS solution with Nair et. al. approach")
-parser.add_argument("train_dataset_path")
-parser.add_argument("validation_dataset_path")
+parser.add_argument("dataset_path")
 parser.add_argument("dataset_category")
-parser.add_argument("checkpoint_dir")
 parser.add_argument("log_dir")
 parser.add_argument("-b", "--batch_size", default=1, type=int)
 parser.add_argument("-l", "--learning_rate", default=0.0001, type=float)
 parser.add_argument("-a", "--hidden_dim", default=64, type=int)
 parser.add_argument("-E", "--max_epochs", default=10000, type=int)
-parser.add_argument("-p", "--es_patience", default=10, type=int)
+parser.add_argument("-p", "--es_patience", default=100, type=int)
 parser.add_argument("-d", "--dropout_p", default=0.25, type=float)
 parser.add_argument("-m", "--model_name_prefix", default="mis_nair")
 parser.add_argument("-o", "--optimizer", default="torch.optim.Adam")
 parser.add_argument("-O", "--optimizer_args", default="{}")
-parser.add_argument("-s", "--seed", default=None)
-parser.add_argument("-g", "--gap_limit", default=-1)
+parser.add_argument("-s", "--seed", default=0, type=int)
+parser.add_argument("-g", "--gap_limit", default=-1, type=float)
+parser.add_argument("-M", "--model_class", default="GCN_v1")
+parser.add_argument("-A", "--model_args", default="{}")
+parser.add_argument("-D", "--dataset_args", default="{}")
+parser.add_argument("-V", "--validation_dataset_args", default='{"unravel_pool":false, "solution_limit":1, "aggregate":false, "gap_limit": 0.0}')
+parser.add_argument("--debug", action="store_true")
 
 args = parser.parse_args()
-if float(args.gap_limit) < 0:
-    gap_limit = None
-else:
-    gap_limit = float(args.gap_limit)
+
+# optimizer arguments
+print("Optimizer args : ", args.optimizer_args)
+optimizer_args = json.loads(args.optimizer_args)
+if not "lr" in optimizer_args:
+    optimizer_args["lr"] = args.learning_rate
+
+# dataset arguments
+dataset_args = json.loads(args.dataset_args)
+dataset_args["category"] =  args.dataset_category
+if not "gap_limit" in dataset_args:
+    if args.gap_limit < 0:
+        args.gap_limit = None
+    dataset_args["gap_limit"] = args.gap_limit
+
+validation_dataset_args = json.loads(args.validation_dataset_args)
+validation_dataset_args["category"] =  args.dataset_category
+
+# model arguments
+model_args = json.loads(args.model_args)
+if not "hidden_dim" in model_args:
+    model_args["hidden_dim"] = args.hidden_dim
+if not "dropout_p" in model_args:
+    model_args["dropout_p"] = args.dropout_p
 
 # setting seed
+torch.manual_seed(args.seed)
+np.random.seed(args.seed)
+random.seed(args.seed)
 
 # dataset path 
-if args.train_dataset_path.endswith("/"):
-    dataset_name = os.path.basename(args.train_dataset_path[:-1])
-else:
-    dataset_name = os.path.basename(args.train_dataset_path)
+print(json.dumps(dataset_args, sort_keys=True))
+print(json.dumps(validation_dataset_args, sort_keys=True))
+dataset_name = args.dataset_category+"_"+hashlib.md5(json.dumps(dataset_args, sort_keys=True).encode("utf8")).hexdigest()[:6]
+validation_dataset_name = args.dataset_category+"_"+hashlib.md5(json.dumps(validation_dataset_args, sort_keys=True).encode("utf8")).hexdigest()[:6]
+
 
 # model name
 def get_model_name(_dataset_name, _args):
@@ -65,25 +93,27 @@ def get_model_name(_dataset_name, _args):
     optimizer_args = json.loads(args.optimizer_args)
     if "lr" in optimizer_args:
         lr = optimizer_args["lr"]
+    model_hash = hashlib.md5(json.dumps(vars(_args), sort_keys=True).encode("utf8")).hexdigest()[:6]
     name = "_".join([_args.model_name_prefix,
-                    args.dataset_category,
-                    f"b{_args.batch_size}",
-                    f"l{lr}",
-                    f"a{_args.hidden_dim}",
-                    f"E{_args.max_epochs}",
-                    f"p{_args.es_patience}",
-                    f"d{_args.dropout_p}"
+                    _args.model_class,
+                    _args.dataset_category,
+                    model_hash
                     ])
     test_name = name
     c = 1
-    while os.path.exists(os.path.join(_args.checkpoint_dir, test_name)) or os.path.exists(os.path.join(_args.log_dir, test_name)):
+    while os.path.exists(os.path.join(_args.log_dir, test_name)) or os.path.exists(os.path.join(_args.log_dir, test_name)):
         test_name = f"{name}_{c}"
         c += 1
     return test_name
+
 model_name = get_model_name(dataset_name, args)
 
+# dataset paths
+train_dataset_path = os.path.join(args.dataset_path, dataset_name)
+validation_dataset_path = os.path.join(args.dataset_path, validation_dataset_name)
+
 # checkpoint save path
-checkpoint_dir = os.path.join(args.checkpoint_dir, model_name)
+checkpoint_dir = os.path.join(args.log_dir, model_name, "checkpoints")
 os.makedirs(checkpoint_dir)
 
 # tensorboard log dir
@@ -94,31 +124,41 @@ writer = SummaryWriter(log_dir=log_dir)
 # early stopping
 es = EarlyStopper(patience=args.es_patience, min_delta=1e-6)
 
-# optimizer arguments
-print("Optimizer args : ", args.optimizer_args)
-optimizer_args = json.loads(args.optimizer_args)
-if not "lr" in optimizer_args:
-    optimizer_args["lr"] = args.learning_rate
+
 
 print("Loading data")
-train_dataset = MISERDataset(args.train_dataset_path, category=args.dataset_category, mode="train", gap_limit=gap_limit)
-val_dataset = MISERDataset(args.validation_dataset_path, category=args.dataset_category, mode="validation", unravel_pool=False, gap_limit=gap_limit)
+#train_dataset = MISERDataset(train_dataset_path, mode="train", **dataset_args)
+#val_dataset = MISERDataset(validation_dataset_path, mode="validation", unravel_pool=False)
+train_dataset = MISERDataset(train_dataset_path, mode="test", **dataset_args)
+val_dataset = MISERDataset(validation_dataset_path, mode="test", unravel_pool=False, solution_limit=1)
 
 train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False)
+
 print("done")
 
 # training description data
 training_description = {
-        "dataset_category": args.dataset_category,
-        "dataset_gap_limit": args.gap_limit,
-        "train_dataset": args.train_dataset_path,
-        "validation_dataset": args.validation_dataset_path,
+        "seed": args.seed,
+        "dataset": {
+            "class": "MISERDataset",
+            **dataset_args
+        },
+        "validation_dataset": {
+            "class": "MISERDataset",
+            **validation_dataset_args
+
+        },
+        "train_dataset": train_dataset_path,
+        "validation_dataset": validation_dataset_path,
         "dataset_name": dataset_name,
         "checkpoint_dir": checkpoint_dir,
         "log_dir": log_dir,
         "batch_size": args.batch_size,
-        "hidden_dim": args.hidden_dim,
+        "model": {
+            "class": args.model_class,
+            **model_args
+        },
         "max_epoch": args.max_epochs,
         "early_stopping": {
             "es_patience": args.es_patience,
@@ -127,44 +167,16 @@ training_description = {
             "class": args.optimizer,
             **optimizer_args
         },
-        "dropout_p": args.dropout_p,
         "model_name": model_name
         }
 
 print("Summary")
 print(json.dumps(training_description, sort_keys=True, indent=4))
 
-class GCN(torch.nn.Module):
-    def __init__(self, in_dim, hidden_dim=64):
-        super().__init__()
-        self.conv1 = GCNConv(9, hidden_dim, normalize=False)
-        self.conv2 = GCNConv(hidden_dim, hidden_dim, normalize=False)
-        self.conv3 = GCNConv(hidden_dim, hidden_dim, normalize=False)
-        self.conv4 = GCNConv(hidden_dim, 1, normalize=False)
-        self.sig = torch.nn.LogSigmoid()
-    def forward(self, data):
-        x, edge_index = data.x, data.edge_index
-
-        x = self.conv1(x, edge_index)
-        x = F.elu(x)
-        x = F.dropout(x, p=args.dropout_p, training=self.training)
-
-        x = x + self.conv2(x, edge_index)
-        x = F.elu(x)
-        x = F.dropout(x, p=args.dropout_p, training=self.training)
-
-        x = x + self.conv3(x, edge_index)
-        x = F.elu(x)
-        x = F.dropout(x, p=args.dropout_p, training=self.training)
-
-        x = self.conv4(x, edge_index)
-
-        return x #torch.sigmoid(x)
-
-
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model = GCN(9, args.hidden_dim).to(device)
-#optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=5e-4)
+#model = GCN(9, args.hidden_dim).to(device)
+model = eval(args.model_class)(9, **model_args).to(device)
+
 optimizer = eval(args.optimizer)(model.parameters(), **optimizer_args)
 
 training_description["start_time"] = time.time()
@@ -174,6 +186,7 @@ with open(os.path.join(log_dir, "description.json"), "w") as f:
 train_loss_values  =[]
 val_loss_values = []
 val_gap_values = []
+best_val_gap = np.inf
 for epoch in range(args.max_epochs):
     # train
     model.train()
@@ -194,10 +207,12 @@ for epoch in range(args.max_epochs):
         bar.next()
     bar.finish()
 
+    positive_scores = None
+    negative_scores = None
     with torch.no_grad():
-        bar = Bar(f"Epoch {epoch} validation:", max = val_dataset.len() // args.batch_size)
+        bar = Bar(f"Epoch {epoch} validation:", max = val_dataset.len())
         model.eval()
-        for data in val_loader:
+        for i,data in enumerate(val_loader):
             # retrieve graph
             g =  tgdata_to_networkx(data)
             pb = MIS(g)
@@ -214,25 +229,45 @@ for epoch in range(args.max_epochs):
             grd_val = sol.sum()
             gap = (opt_val - grd_val) / opt_val
 
-            #no_red_loss = F.binary_cross_entropy_with_logits(torch.flatten(out[data.bipartite==0]), data.y, reduction="none")
+            no_red_loss = F.binary_cross_entropy_with_logits(torch.flatten(out[data.bipartite==0]), data.y, reduction="none")
+            loss = torch.mean(data.w * no_red_loss)
 
-            #loss = torch.mean(data.w * no_red_loss)
-            #epoch_val_loss.append(loss.item())
-            epoch_val_loss.append(gap)
+            epoch_val_loss.append(loss.item())
+            epoch_val_gap.append(gap)
+            
+            labels = data.y.numpy()
+            if positive_scores is None:
+                positive_scores = node_scores[labels == 1]
+                negative_scores = node_scores[labels == 0]
+            else:
+                positive_scores = np.concatenate((positive_scores, node_scores[labels==1]))
+                negative_scores = np.concatenate((negative_scores, node_scores[labels==0]))
+
             bar.next()
+            if args.debug and i>10:
+                break
         bar.finish()
 
 
     mtrainloss = np.mean(epoch_train_loss)
     mvalloss = np.mean(epoch_val_loss)
-    print(f"epoch {epoch}, loss = {mtrainloss}, val_gap = {mvalloss}")
-    writer.add_scalar("loss_train", mtrainloss, epoch)
-    writer.add_scalar("gap_val", mvalloss, epoch)
+    mvalgap = np.mean(epoch_val_gap)
+    print(f"epoch {epoch}, loss = {mtrainloss}, val_gap = {mvalgap}, val_loss = {mvalloss}")
+    writer.add_scalars("loss", {"train": mtrainloss, "val": mvalloss}, epoch)
+    writer.add_scalars("gap", {"val": mvalgap}, epoch)
+    writer.add_scalars("scores", {"pos": np.mean(positive_scores), "neg": np.mean(negative_scores)}, epoch)
 
-    # save checkpoint
-    checkpoint_filename = os.path.join(checkpoint_dir, f"{epoch}.pt")
-    _model = copy.deepcopy(model).cpu()
-    torch.save(_model.state_dict(), checkpoint_filename)
+    fig = plt.figure()
+    plt.boxplot([negative_scores, positive_scores], labels=["0", "1"])
+    writer.add_figure("scores", fig, global_step=epoch)
+    plt.close()
+
+    # save checkpoint if gap is better
+    if mvalgap <= best_val_gap:
+        best_val_gap = mvalgap
+        checkpoint_filename = os.path.join(checkpoint_dir, f"checkpoint.pt")
+        _model = copy.deepcopy(model).cpu()
+        torch.save(_model.state_dict(), checkpoint_filename)
 
     # early stopping
     if es.early_stop(epoch, mvalloss):
