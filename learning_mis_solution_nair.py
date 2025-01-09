@@ -186,7 +186,7 @@ print("Summary")
 print(json.dumps(training_description, sort_keys=True, indent=4))
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-#model = GCN(9, args.hidden_dim).to(device)
+print("Using device ", device)
 model = eval(args.model_class)(9, **model_args).to(device)
 
 optimizer = eval(args.optimizer)(model.parameters(), **optimizer_args)
@@ -200,6 +200,7 @@ train_loss_values  =[]
 val_loss_values = []
 val_gap_values = []
 best_val_gap = np.inf
+print("Training started")
 for epoch in range(args.max_epochs):
     # train
     model.train()
