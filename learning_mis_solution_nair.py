@@ -233,7 +233,7 @@ for epoch in range(args.max_epochs):
             epoch_val_loss.append(loss.item())
             epoch_val_gap.append(gap)
             
-            labels = data.y.numpy()
+            labels = data.y.cpu().numpy()
             if positive_scores is None:
                 positive_scores = node_scores[labels == 1]
                 negative_scores = node_scores[labels == 0]
