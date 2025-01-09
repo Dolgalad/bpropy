@@ -47,13 +47,13 @@ parser.add_argument("-M", "--model_class", default="GCN_v1")
 parser.add_argument("-A", "--model_args", default="{}")
 parser.add_argument("-D", "--dataset_args", default="{}")
 parser.add_argument("-V", "--validation_dataset_args", default='{"unravel_pool":false, "solution_limit":1, "aggregate":false, "gap_limit": 0.0}')
-parser.add_argument("-j", "--description_file")
+parser.add_argument("-j", "--description_file", default="", type=str)
 parser.add_argument("--debug", action="store_true")
 
 args = parser.parse_args()
 
 
-if os.path.exists(args.description_file):
+if os.path.exists(args.description_file) and len(args.description_file)>0:
     with open(args.description_file) as f:
         description = json.load(f)
         optimizer_args = description["optimizer"]
