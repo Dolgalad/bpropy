@@ -29,12 +29,13 @@ dataset_urls = {
         }
 
 class MISERDataset(Dataset):
-    def __init__(self, root, category="MIS100_EB", mode="train", transform=None, pre_transform=None, pre_filter=None, unravel_pool=True, gap_limit=None, solution_limit=None, aggregate=False):
+    def __init__(self, root, category="MIS100_EB", mode="train", transform=None, pre_transform=None, pre_filter=None, unravel_pool=True, gap_limit=None, solution_limit=None, aggregate=False, verbose=True):
         self.category = category
         self.mode = mode
         self.unravel_pool = unravel_pool
         self.solution_limit = solution_limit
         self.aggregate = aggregate
+        self.verbose = verbose
         if solution_limit is None:
             self.solution_limit = np.inf
         self._processed_file_names = []
@@ -44,13 +45,16 @@ class MISERDataset(Dataset):
 
         lock_path = osp.join(root, "processing.lock")
         lock = FileLock(lock_path, thread_local=False)
-        print("Waiting on lock: ", lock_path)
+        if self.verbose:
+            print("Waiting on lock: ", lock_path)
         lock.acquire()
-        print(f"Lock {lock_path} acquired")
+        if self.verbose:
+            print(f"Lock {lock_path} acquired")
         with open(os.path.join(root, "description.json"), "w") as f:
             f.write(json.dumps(description, sort_keys=True, indent=4))
         super().__init__(root, transform, pre_transform, pre_filter)
-        print(f"Lock {lock_path} released")
+        if self.verbose:
+            print(f"Lock {lock_path} released")
     @property
     def raw_file_names(self):
         if self.mode=="train":
@@ -90,10 +94,11 @@ class MISERDataset(Dataset):
         tree = html.fromstring(req.text)
         selector = CSSSelector("#downloadFile")
         elements_with_id = selector(tree)
-        if len(elements_with_id)==0:
+        if len(elements_with_id)==0 and self.verbose:
             print("Cannot find download link")
         url = elements_with_id[0].get("href")
-        print("url = ", url)
+        if self.verbose:
+            print("url = ", url)
         r = requests.get(url, stream=True)
         path = os.path.join(self.raw_dir, "archive.tar.gz")
         with open(path, 'wb') as f:
@@ -107,17 +112,20 @@ class MISERDataset(Dataset):
             bar.finish()
 
         # extract data
-        sys.stdout.write("Extracting...")
-        sys.stdout.flush()
+        if self.verbose:
+            sys.stdout.write("Extracting...")
+            sys.stdout.flush()
         file = tarfile.open(path)
         file.extractall(self.raw_dir)
         file.close()
-        sys.stdout.write("done\n")
-        sys.stdout.flush()
+        if self.verbose:
+          sys.stdout.write("done\n")
+          sys.stdout.flush()
        
         # remove archive
-        sys.stdout.write("Cleaning up...")
-        sys.stdout.flush()
+        if self.verbose:
+            sys.stdout.write("Cleaning up...")
+            sys.stdout.flush()
         os.system(f"rm {path}")
         # move the instance directories to raw_dir
         data_dir = os.path.join(self.raw_dir, os.listdir(self.raw_dir)[0])
