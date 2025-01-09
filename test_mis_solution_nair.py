@@ -93,8 +93,13 @@ with torch.no_grad():
         if data_sol.sum() == 0:
             continue
         # solve greedy
+        #print(data.y.size(), pred.size())
+        #print(pred.min(), pred.max())
         sol = mis_greedy(pb, pred.numpy())
+        #print(sol.sum(), data.y.numpy().sum())
         gap = (data.y.numpy().sum() - sol.sum()) / data.y.numpy().sum()
+        #print()
+
         gaps.append(gap)
         bar.suffix = f" {np.mean(gaps)}"
         bar.next()
