@@ -47,33 +47,53 @@ parser.add_argument("-M", "--model_class", default="GCN_v1")
 parser.add_argument("-A", "--model_args", default="{}")
 parser.add_argument("-D", "--dataset_args", default="{}")
 parser.add_argument("-V", "--validation_dataset_args", default='{"unravel_pool":false, "solution_limit":1, "aggregate":false, "gap_limit": 0.0}')
+parser.add_argument("-j", "--description_file")
 parser.add_argument("--debug", action="store_true")
 
 args = parser.parse_args()
 
-# optimizer arguments
-print("Optimizer args : ", args.optimizer_args)
-optimizer_args = json.loads(args.optimizer_args)
-if not "lr" in optimizer_args:
-    optimizer_args["lr"] = args.learning_rate
 
-# dataset arguments
-dataset_args = json.loads(args.dataset_args)
-dataset_args["category"] =  args.dataset_category
-if not "gap_limit" in dataset_args:
-    if args.gap_limit < 0:
-        args.gap_limit = None
-    dataset_args["gap_limit"] = args.gap_limit
-
-validation_dataset_args = json.loads(args.validation_dataset_args)
-validation_dataset_args["category"] =  args.dataset_category
-
-# model arguments
-model_args = json.loads(args.model_args)
-if not "hidden_dim" in model_args:
-    model_args["hidden_dim"] = args.hidden_dim
-if not "dropout_p" in model_args:
-    model_args["dropout_p"] = args.dropout_p
+if os.path.exists(args.description_file):
+    with open(args.description_file) as f:
+        description = json.load(f)
+        optimizer_args = description["optimizer"]
+        args.optimizer = description["optimizer"]["class"]
+        del optimizer_args["class"]
+        dataset_args = description["dataset"]
+        del dataset_args["class"]
+        if "validation_dataset_args" in description:
+            validation_dataset_args = description["validation_dataset_args"]
+        else:
+            validation_dataset_args = json.loads(args.validation_dataset_args)
+            validation_dataset_args["category"] =  args.dataset_category
+        args.seed = description["seed"]
+        model_args = description["model"]
+        args.model_class = model_args["class"]
+        del model_args["class"]
+else:
+    # optimizer arguments
+    print("Optimizer args : ", args.optimizer_args)
+    optimizer_args = json.loads(args.optimizer_args)
+    if not "lr" in optimizer_args:
+        optimizer_args["lr"] = args.learning_rate
+    
+    # dataset arguments
+    dataset_args = json.loads(args.dataset_args)
+    dataset_args["category"] =  args.dataset_category
+    if not "gap_limit" in dataset_args:
+        if args.gap_limit < 0:
+            args.gap_limit = None
+        dataset_args["gap_limit"] = args.gap_limit
+    
+    validation_dataset_args = json.loads(args.validation_dataset_args)
+    validation_dataset_args["category"] =  args.dataset_category
+    
+    # model arguments
+    model_args = json.loads(args.model_args)
+    if not "hidden_dim" in model_args:
+        model_args["hidden_dim"] = args.hidden_dim
+    if not "dropout_p" in model_args:
+        model_args["dropout_p"] = args.dropout_p
 
 # setting seed
 torch.manual_seed(args.seed)
@@ -81,59 +101,10 @@ np.random.seed(args.seed)
 random.seed(args.seed)
 
 # dataset path 
-print(json.dumps(dataset_args, sort_keys=True))
-print(json.dumps(validation_dataset_args, sort_keys=True))
 dataset_name = args.dataset_category+"_"+hashlib.md5(json.dumps(dataset_args, sort_keys=True).encode("utf8")).hexdigest()[:6]
 validation_dataset_name = args.dataset_category+"_"+hashlib.md5(json.dumps(validation_dataset_args, sort_keys=True).encode("utf8")).hexdigest()[:6]
-
-
-# model name
-def get_model_name(_dataset_name, _args):
-    lr = _args.learning_rate
-    optimizer_args = json.loads(args.optimizer_args)
-    if "lr" in optimizer_args:
-        lr = optimizer_args["lr"]
-    model_hash = hashlib.md5(json.dumps(vars(_args), sort_keys=True).encode("utf8")).hexdigest()[:6]
-    name = "_".join([_args.model_name_prefix,
-                    _args.model_class,
-                    _args.dataset_category,
-                    model_hash
-                    ])
-    test_name = name
-    c = 1
-    while os.path.exists(os.path.join(_args.log_dir, test_name)) or os.path.exists(os.path.join(_args.log_dir, test_name)):
-        test_name = f"{name}_{c}"
-        c += 1
-    return test_name
-
-model_name = get_model_name(dataset_name, args)
-
-# dataset paths
 train_dataset_path = os.path.join(args.dataset_path, dataset_name)
 validation_dataset_path = os.path.join(args.dataset_path, validation_dataset_name)
-
-# checkpoint save path
-checkpoint_dir = os.path.join(args.log_dir, model_name, "checkpoints")
-os.makedirs(checkpoint_dir)
-
-# tensorboard log dir
-log_dir = os.path.join(args.log_dir, model_name)
-
-writer = SummaryWriter(log_dir=log_dir)
-
-# early stopping
-es = EarlyStopper(patience=args.es_patience, min_delta=1e-6)
-
-
-
-print("Loading data")
-train_dataset = MISERDataset(train_dataset_path, mode="train", **dataset_args)
-val_dataset = MISERDataset(validation_dataset_path, mode="validation", unravel_pool=False, solution_limit=1)
-
-train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False)
-
-print("done")
 
 # training description data
 training_description = {
@@ -150,8 +121,6 @@ training_description = {
         "train_dataset": train_dataset_path,
         "validation_dataset": validation_dataset_path,
         "dataset_name": dataset_name,
-        "checkpoint_dir": checkpoint_dir,
-        "log_dir": log_dir,
         "batch_size": args.batch_size,
         "model": {
             "class": args.model_class,
@@ -165,8 +134,53 @@ training_description = {
             "class": args.optimizer,
             **optimizer_args
         },
-        "model_name": model_name
         }
+
+
+
+# model name
+def get_model_name(prefix, desc, _args):
+    model_hash = hashlib.md5(json.dumps(desc, sort_keys=True).encode("utf8")).hexdigest()[:6]
+    name = "_".join([prefix,
+                    desc["model"]["class"],
+                    desc["dataset"]["category"],
+                    model_hash
+                    ])
+    test_name = name
+    c = 1
+    while os.path.exists(os.path.join(_args.log_dir, test_name)) or os.path.exists(os.path.join(_args.log_dir, test_name)):
+        test_name = f"{name}_{c}"
+        c += 1
+    return test_name
+
+model_name = get_model_name(args.model_name_prefix, training_description, args)
+training_description["model_name"] = model_name
+
+
+# checkpoint save path
+checkpoint_dir = os.path.join(args.log_dir, model_name, "checkpoints")
+os.makedirs(checkpoint_dir)
+training_description["checkpoint_dir"] = checkpoint_dir
+
+# tensorboard log dir
+log_dir = os.path.join(args.log_dir, model_name)
+writer = SummaryWriter(log_dir=log_dir)
+training_description["log_dir"] = log_dir
+
+# early stopping
+es = EarlyStopper(patience=args.es_patience, min_delta=1e-6)
+
+
+
+print("Loading data")
+train_dataset = MISERDataset(train_dataset_path, mode="train", **dataset_args)
+val_dataset = MISERDataset(validation_dataset_path, mode="validation", unravel_pool=False, solution_limit=1)
+
+train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False)
+
+print("done")
+
 
 print("Summary")
 print(json.dumps(training_description, sort_keys=True, indent=4))
@@ -178,6 +192,7 @@ model = eval(args.model_class)(9, **model_args).to(device)
 optimizer = eval(args.optimizer)(model.parameters(), **optimizer_args)
 
 training_description["start_time"] = time.time()
+training_description["status"] = "running"
 with open(os.path.join(log_dir, "description.json"), "w") as f:
     f.write(json.dumps(training_description, sort_keys=True, indent=4))
 
@@ -196,6 +211,11 @@ for epoch in range(args.max_epochs):
         data = data.to(device)
         optimizer.zero_grad()
         out = model(data)
+        if torch.any(torch.isnan(out)) or torch.any(torch.isinf(out)):
+            print("Encountered bad value in output")
+            training_description["status"] = "failed"
+            break
+
         no_red_loss = F.binary_cross_entropy_with_logits(torch.flatten(out[data.bipartite==0]), data.y, reduction="none")
 
         loss = torch.mean(data.w * no_red_loss)
@@ -217,6 +237,11 @@ for epoch in range(args.max_epochs):
 
             data = data.to(device)
             out = model(data)
+            if torch.any(torch.isnan(out)) or torch.any(torch.isinf(out)):
+                print("Encountered bad value in output")
+                training_description["status"] = "failed"
+                break
+
             node_scores = torch.flatten(out[data.bipartite==0]).cpu().numpy()
 
             # solve greedy
@@ -245,6 +270,8 @@ for epoch in range(args.max_epochs):
             if args.debug and i>10:
                 break
         bar.finish()
+    if training_description["status"] == "failed":
+        break
 
 
     mtrainloss = np.mean(epoch_train_loss)
@@ -276,6 +303,7 @@ training_description["stop_time"] = time.time()
 training_description["min_validation_gap"] = es.min_validation_loss
 training_description["min_validation_gap_epoch"] = es.min_validation_loss_epoch
 training_description["epochs"] = epoch
+training_description["status"] = "success"
 with open(os.path.join(log_dir, "description.json"), "w") as f:
     f.write(json.dumps(training_description, sort_keys=True, indent=4))
 
