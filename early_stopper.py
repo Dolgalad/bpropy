@@ -1,3 +1,6 @@
+"""EarlyStopper: early stopping management class, keeps track of number of epochs since best validation score
+"""
+
 class EarlyStopper:
     def __init__(self, patience=1, min_delta=0):
         self.patience = patience

@@ -188,7 +188,6 @@ print(json.dumps(training_description, sort_keys=True, indent=4))
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print("Using device ", device)
-#model = GCN(9, args.hidden_dim).to(device)
 model = eval(args.model_class)(9, **model_args).to(device)
 
 optimizer = eval(args.optimizer)(model.parameters(), **optimizer_args)
