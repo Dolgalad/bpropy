@@ -233,7 +233,6 @@ def create_factor_graph(g):
         c += 1
     #for e in g.edges:
     for e in ordered_edges(g):
-        print("in create factor graph ", e, g.has_edge(*e))
         fg.add_node(c, bipartite=1)
         fg.add_edge(e[0], c)
         fg.add_edge(e[1], c)

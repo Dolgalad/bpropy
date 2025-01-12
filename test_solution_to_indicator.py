@@ -81,9 +81,11 @@ if not np.all(sol == rsol):
     print("Solution and reconstructed solution are not identical")
     exit()
 
+offset = 0
 for F in iter_factor_nodes(fg):
     neighbors = list(fg.neighbors(F))
     factor_val = rsol[neighbors]
+    nN = factor_size(fg,F)
     print(F, factor_size(fg, F), factor_val)
     print("\t", neighbors)
     if factor_size(fg,F)==2:
@@ -91,6 +93,21 @@ for F in iter_factor_nodes(fg):
         if not g.has_edge(*neighbors):
             print("Error in factor graph")
             exit()
+        if np.all(factor_val == 1):
+            print("Invalid solution ", F, factor_val, neighbors)
+            exit()
+    # check that the corresponding factor value is 1
+    print("\t", ind_sol[offset: offset+2**factor_size(fg,F)])
+    valF = np.packbits(np.array(factor_val,dtype=np.uint8), bitorder="little")
+    print("\t", valF, ind_sol[offset+valF])
+    if ind_sol[offset+valF] != 1:
+        print("Error")
+        exit()
+    if ind_sol[offset:offset+2**nN].sum() != 1:
+        print("Big error")
+        exit()
+    offset += 2**factor_size(fg,F)
+
 
 print(g.is_directed())
 print(fg.is_directed())
