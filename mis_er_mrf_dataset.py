@@ -196,7 +196,8 @@ class MISERMRFDataset(Dataset):
             efeat = np.load(f)
         return nfeat,cfeat,efeat
     def ordered_edges(self, g):
-        adj = nx.to_numpy_array(g)
+        nV = nx.number_of_nodes(g)
+        adj = nx.to_numpy_array(g, nodelist=range(nV))
         if g.is_directed():
             for (s,t) in zip(*np.where(adj > 0)):
                 yield (s,t)

@@ -13,7 +13,8 @@ if docplex_spec is not None:
     from docplex.mp.model import Model
 
 def ordered_edges(g):
-    adj = nx.to_numpy_array(g)
+    nV = nx.number_of_nodes(g)
+    adj = nx.to_numpy_array(g, nodelist=range(nV))
     if g.is_directed():
         for (s,t) in zip(*np.where(adj > 0)):
             yield (s,t)
@@ -108,7 +109,7 @@ def mis_greedy(pb, node_scores):
 #    return sol
 
 
-def maxcut_solution_validity(pb, sol):
+def solution_validity(pb, sol):
     for u in pb.g.nodes:
         for v in pb.g.neighbors(u):
             if sol[u]==1 and sol[v]==1:
