@@ -1,11 +1,12 @@
 """
-Definition of the MISERMRF dataset
+Definition of the MISER dataset
 """
 import os
 import sys
 import os.path as osp
 import itertools
 import torch
+import json
 from torch_geometric.data import Dataset, Data
 from torch_geometric.utils.convert import from_networkx
 import networkx as nx
@@ -17,6 +18,8 @@ import tarfile
 #import xml.etree.ElementTree as ET
 from lxml import html
 from lxml.cssselect import CSSSelector
+from distutils.dir_util import copy_tree
+import tempfile
 
 from bpropy.lbp import *
 from dopy.mis import *
@@ -26,6 +29,10 @@ from bipartite_graph import *
 dataset_urls = {
         "MIS100_EB": "https://cloud.lipn.univ-paris13.fr/index.php/s/RGdPmTfj83DmMdP",
         "MIS100_CC": "https://cloud.lipn.univ-paris13.fr/index.php/s/f3545KoiRb7x4iW"
+        }
+dataset_archives = {
+        "MIS100_EB": "mis_er_n100-100_p0.15_tl1000.0_pooltl1000.0_eb.tar.gz",
+        "MIS100_CC": "mis_er_n100-100_p0.15_tl1000.0_pooltl1000.0_cc.tar.gz"
         }
 
 def solution_to_indicators(x, fg):
@@ -43,15 +50,33 @@ def solution_to_indicators(x, fg):
         fact_offset += 2**nF
     return ind
 
-
 class MISERMRFDataset(Dataset):
-    def __init__(self, root, category="MIS100_EB", mode="train", transform=None, pre_transform=None, pre_filter=None, unravel_pool=True, gap_limit=None):
+    def __init__(self, root, category="MIS100_EB", mode="train", transform=None, pre_transform=None, pre_filter=None, unravel_pool=True, gap_limit=None, solution_limit=None, aggregate=False, verbose=True):
         self.category = category
         self.mode = mode
         self.unravel_pool = unravel_pool
+        self.solution_limit = solution_limit
+        self.aggregate = aggregate
+        self.verbose = verbose
+        if solution_limit is None:
+            self.solution_limit = np.inf
         self._processed_file_names = []
         self.gap_limit = gap_limit
+        # write description
+        description = {"category": category, "unravel_pool": unravel_pool, "gap_limit": gap_limit, "solution_limit": solution_limit, "aggregate": aggregate}
+
+        lock_path = osp.join(root, "processing.lock")
+        lock = FileLock(lock_path, thread_local=False)
+        if self.verbose:
+            print("Waiting on lock: ", lock_path)
+        lock.acquire()
+        if self.verbose:
+            print(f"Lock {lock_path} acquired")
+        with open(os.path.join(root, "description.json"), "w") as f:
+            f.write(json.dumps(description, sort_keys=True, indent=4))
         super().__init__(root, transform, pre_transform, pre_filter)
+        if self.verbose:
+            print(f"Lock {lock_path} released")
     @property
     def raw_file_names(self):
         if self.mode=="train":
@@ -86,47 +111,60 @@ class MISERMRFDataset(Dataset):
         bar.finish()
         return self._processed_file_names
     def download(self):
-        # download data archive
-        req = requests.get(dataset_urls[self.category])
-        tree = html.fromstring(req.text)
-        selector = CSSSelector("#downloadFile")
-        elements_with_id = selector(tree)
-        if len(elements_with_id)==0:
-            print("Cannot find download link")
-        url = elements_with_id[0].get("href")
-        print("url = ", url)
-        r = requests.get(url, stream=True)
-        path = os.path.join(self.raw_dir, "archive.tar.gz")
-        with open(path, 'wb') as f:
-            total_length = int(r.headers.get('content-length'))
-            bar = Bar("Downloading: ", max=(total_length/1024) + 1)
-            for chunk in r.iter_content(chunk_size=1024):
-                if chunk:
-                    f.write(chunk)
-                    f.flush()
-                    bar.next()
-            bar.finish()
+        if all([os.path.exists(os.path.join(self.raw_dir, rf)) for rf in self.raw_file_names]):
+            return 
 
-        # extract data
-        sys.stdout.write("Extracting...")
-        sys.stdout.flush()
-        file = tarfile.open(path)
-        file.extractall(self.raw_dir)
-        file.close()
-        sys.stdout.write("done\n")
-        sys.stdout.flush()
+        with tempfile.TemporaryDirectory(dir=os.environ["WORK"]) as tmpdir:
+            archive_path = os.path.join(os.environ["WORK"], f"datasets_archive/{dataset_archives[self.category]}")
+
+            ## download data archive
+            #req = requests.get(dataset_urls[self.category])
+            #tree = html.fromstring(req.text)
+            #selector = CSSSelector("#downloadFile")
+            #elements_with_id = selector(tree)
+            #if len(elements_with_id)==0 and self.verbose:
+            #    print("Cannot find download link")
+            #url = elements_with_id[0].get("href")
+            #if self.verbose:
+            #    print("url = ", url)
+            #r = requests.get(url, stream=True)
+            #with open(path, 'wb') as f:
+            #    total_length = int(r.headers.get('content-length'))
+            #    bar = Bar("Downloading: ", max=(total_length/1024) + 1)
+            #    for chunk in r.iter_content(chunk_size=1024):
+            #        if chunk:
+            #            f.write(chunk)
+            #            f.flush()
+            #            bar.next()
+            #    bar.finish()
+
+            # extract data
+            if self.verbose:
+                sys.stdout.write("Extracting...")
+                sys.stdout.flush()
+            file = tarfile.open(archive_path)
+            file.extractall(tmpdir)
+            file.close()
+            if self.verbose:
+              sys.stdout.write("done\n")
+              sys.stdout.flush()
        
-        # remove archive
-        sys.stdout.write("Cleaning up...")
-        sys.stdout.flush()
-        os.system(f"rm {path}")
-        # move the instance directories to raw_dir
-        data_dir = os.path.join(self.raw_dir, os.listdir(self.raw_dir)[0])
-        os.system(f"mv {self.raw_dir}/*/{self.mode}/* {self.raw_dir}")
-        os.system(f"rm -rf {data_dir}")
+            # remove archive
+            if self.verbose:
+                sys.stdout.write("Cleaning up...")
+                sys.stdout.flush()
+            # move the instance directories to raw_dir
+            data_dir = os.path.join(tmpdir, os.listdir(tmpdir)[0])
+            for rf in self.raw_file_names:
+                dest_dir = os.path.join(self.raw_dir, rf)
+                if not os.path.exists(dest_dir):
+                    orig_dir = os.path.join(data_dir, self.mode, rf)
+                    copy_tree(orig_dir, dest_dir)
 
-        sys.stdout.write("done\n")
-        sys.stdout.flush()
+
+
+            sys.stdout.write("done\n")
+            sys.stdout.flush()
 
         print("Download finished")
 
@@ -141,7 +179,14 @@ class MISERMRFDataset(Dataset):
         y = self.load_redumis_solution(os.path.join(path, "redumis.sol"))
         # pool
         p = self.load_pool(os.path.join(path, "pool.npy"))
-        return np.concatenate((np.expand_dims(y,axis=0),p), axis=0)
+        pool = np.concatenate((np.expand_dims(y,axis=0),p), axis=0)
+        # sort pool by descending value
+        pool_vals = np.sum(pool, axis=1)
+        pool = pool[np.flip(np.argsort(pool_vals))]
+        if self.solution_limit is None or np.isinf(self.solution_limit):
+            return pool
+        return pool[:self.solution_limit]
+
     def load_raw_graph_features(self, path):
         with open(os.path.join(path, "node_features.npy"), "rb") as f:
             nfeat = np.load(f)
@@ -162,10 +207,6 @@ class MISERMRFDataset(Dataset):
         return Data(edge_index=edge_index, bipartite=bipartite)
     def process(self):
         # create lock to avoid processing by multiple training runs
-        lock = FileLock(osp.join(self.processed_dir, "processing.lock"))
-        print("Acquire lock")
-        lock.acquire()
-        print("Lock acquired")
         idx = 0
         bar = Bar("Processing: ", max=len(self.raw_paths))
         for raw_path in self.raw_paths:
@@ -248,18 +289,31 @@ class MISERMRFDataset(Dataset):
                             _data.w = torch.ones_like(_data.y) * np.exp(pool_values[i]) / Z
                             torch.save(_data, save_path)
                 else:
-                    # best solution
                     save_path = osp.join(self.processed_dir, f'{os.path.basename(raw_path)}.pt')
-                    data.y = torch.from_numpy(solution_to_indicators(pool[np.argmax(pool_values),:], fg))
+                    if self.aggregate:
+                        data.y = torch.from_numpy(self.aggregate_pool(pool, fg))
+                        data.w = torch.ones_like(data.y)
+                    else:
+                        # best solution
+                        data.y = torch.from_numpy(solution_to_indicators(pool[0], fg))
+                        data.w = torch.ones_like(data.y)
                     torch.save(data, save_path)
 
             bar.next()
         bar.finish()
-        lock.release()
+    def aggregate_pool(self, pool, fg):
+        indicator_pool = np.array([solution_to_indicators(pool[i,:], fg) for i in range(pool.shape[0])])
+        pool_vals = np.sum(pool, axis=1).reshape(pool.shape[0],1)
+        Z = np.exp(pool_vals).sum()
+        w = np.tile(np.exp(pool_vals), (1, indicator_pool.shape[1]))
+        r = (w * pool).sum(axis=0) / Z
+        return r
+
+
     def len(self):
         return len(self.processed_file_names)
     def get(self, idx):
-        data = torch.load(osp.join(self.processed_dir, self._processed_file_names[idx]))
+        data = torch.load(osp.join(self.processed_dir, self._processed_file_names[idx]), weights_only=False)
         data.x = data.x.to(torch.float32)
         data.e = data.e.to(torch.float32)
         if hasattr(data, "w"):

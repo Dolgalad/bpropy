@@ -27,6 +27,11 @@ dataset_urls = {
         "MIS100_EB": "https://cloud.lipn.univ-paris13.fr/index.php/s/RGdPmTfj83DmMdP",
         "MIS100_CC": "https://cloud.lipn.univ-paris13.fr/index.php/s/f3545KoiRb7x4iW"
         }
+dataset_archives = {
+        "MIS100_EB": "mis_er_n100-100_p0.15_tl1000.0_pooltl1000.0_eb.tar.gz",
+        "MIS100_CC": "mis_er_n100-100_p0.15_tl1000.0_pooltl1000.0_cc.tar.gz"
+        }
+
 
 class MISERDataset(Dataset):
     def __init__(self, root, category="MIS100_EB", mode="train", transform=None, pre_transform=None, pre_filter=None, unravel_pool=True, gap_limit=None, solution_limit=None, aggregate=False, verbose=True):
@@ -89,27 +94,28 @@ class MISERDataset(Dataset):
         bar.finish()
         return self._processed_file_names
     def download(self):
-        # download data archive
-        req = requests.get(dataset_urls[self.category])
-        tree = html.fromstring(req.text)
-        selector = CSSSelector("#downloadFile")
-        elements_with_id = selector(tree)
-        if len(elements_with_id)==0 and self.verbose:
-            print("Cannot find download link")
-        url = elements_with_id[0].get("href")
-        if self.verbose:
-            print("url = ", url)
-        r = requests.get(url, stream=True)
         path = os.path.join(self.raw_dir, "archive.tar.gz")
-        with open(path, 'wb') as f:
-            total_length = int(r.headers.get('content-length'))
-            bar = Bar("Downloading: ", max=(total_length/1024) + 1)
-            for chunk in r.iter_content(chunk_size=1024):
-                if chunk:
-                    f.write(chunk)
-                    f.flush()
-                    bar.next()
-            bar.finish()
+        os.system(f"cp $WORK/datasets_archive/{dataset_archives[self.category]} {path}")
+        ## download data archive
+        #req = requests.get(dataset_urls[self.category])
+        #tree = html.fromstring(req.text)
+        #selector = CSSSelector("#downloadFile")
+        #elements_with_id = selector(tree)
+        #if len(elements_with_id)==0 and self.verbose:
+        #    print("Cannot find download link")
+        #url = elements_with_id[0].get("href")
+        #if self.verbose:
+        #    print("url = ", url)
+        #r = requests.get(url, stream=True)
+        #with open(path, 'wb') as f:
+        #    total_length = int(r.headers.get('content-length'))
+        #    bar = Bar("Downloading: ", max=(total_length/1024) + 1)
+        #    for chunk in r.iter_content(chunk_size=1024):
+        #        if chunk:
+        #            f.write(chunk)
+        #            f.flush()
+        #            bar.next()
+        #    bar.finish()
 
         # extract data
         if self.verbose:
@@ -152,7 +158,7 @@ class MISERDataset(Dataset):
         # sort pool by descending value
         pool_vals = np.sum(pool, axis=1)
         pool = pool[np.flip(np.argsort(pool_vals))]
-        if self.solution_limit is None:
+        if self.solution_limit is None or np.isinf(self.solution_limit):
             return pool
         return pool[:self.solution_limit]
 

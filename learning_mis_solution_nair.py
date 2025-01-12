@@ -159,7 +159,8 @@ training_description["model_name"] = model_name
 
 # checkpoint save path
 checkpoint_dir = os.path.join(args.log_dir, model_name, "checkpoints")
-os.makedirs(checkpoint_dir)
+print("checkpoint_dir = ", checkpoint_dir)
+os.makedirs(checkpoint_dir, mode=0o777)
 training_description["checkpoint_dir"] = checkpoint_dir
 
 # tensorboard log dir
@@ -186,6 +187,7 @@ print("Summary")
 print(json.dumps(training_description, sort_keys=True, indent=4))
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+print("Using device ", device)
 #model = GCN(9, args.hidden_dim).to(device)
 model = eval(args.model_class)(9, **model_args).to(device)
 
@@ -200,6 +202,7 @@ train_loss_values  =[]
 val_loss_values = []
 val_gap_values = []
 best_val_gap = np.inf
+print("Started training")
 for epoch in range(args.max_epochs):
     # train
     model.train()
@@ -281,6 +284,10 @@ for epoch in range(args.max_epochs):
     writer.add_scalars("loss", {"train": mtrainloss, "val": mvalloss}, epoch)
     writer.add_scalars("gap", {"val": mvalgap}, epoch)
     writer.add_scalars("scores", {"pos": np.mean(positive_scores), "neg": np.mean(negative_scores)}, epoch)
+    for tag, value in model.named_parameters():
+        writer.add_histogram(tag, value.cpu(), epoch)
+        if value.grad is not None:
+            writer.add_histogram(tag + "/grad", value.grad.cpu(), epoch)
 
     fig = plt.figure()
     plt.boxplot([negative_scores, positive_scores], labels=["0", "1"])

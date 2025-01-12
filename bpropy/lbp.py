@@ -346,7 +346,7 @@ def max_sum_loopy_belief_propagation(theta, v2f, g, f2v_edges, f2v_subsum_idx, r
             break
     return mu
 
-def _loopy_belief_propagation(data, theta, v2f, f2v_edges, r_edges, q_edges, m_edges, max_iter=100, tol=1e-6):
+def _loopy_belief_propagation(data, theta, v2f, f2v_edges, r_edges, q_edges, m_edges, max_iter=100, tol=1e-6, damping=0.5):
     device = theta.device
     # strides
     q_stride = torch.full((int(v2f.shape[0]/2),), 2, device=device)
@@ -382,7 +382,7 @@ def _loopy_belief_propagation(data, theta, v2f, f2v_edges, r_edges, q_edges, m_e
 
         if torch.any(torch.isinf(mup)) or torch.any(torch.isnan(mup)):
             break
-        mu = mup
+        mu = (1 - damping) * mup + damping * mu
         if u < tol:
             break
     return mu

@@ -29,15 +29,15 @@ def optimizer_str(opt, lr):
     if opt=="torch.optim.Adam":
         return "-o "+opt+" -O '{\"lr\":"+str(lr)+", \"weight_decay\": 5e-4}'"
 
-def model_str(m, nl):
-    return f"-M {m} -A "+"'{\"n_layers\":"+str(nl)+"}'"
+def model_str(m, h, nl):
+    return f"-M {m} -A "+"'{\"n_layers\":"+str(nl)+", \"hidden_dim\":"+str(h)+"}'"
 def dataset_str():
     return "-D '{\"solution_limit\": 1, \"aggregate\": false, \"unravel_pool\": false, \"gap_limit\": 0.0}'"
 
 def command_line(args, params):
     [seed,dataset,bs,lr,h,opt,p,nl] = params
     opt_str = optimizer_str(opt, lr)
-    m_str = model_str("GCN_v2", nl)
+    m_str = model_str("GCN_v2", h, nl)
     data_str = dataset_str()
     train_dataset_path = args.dataset_path
     validation_dataset_path = args.dataset_path
