@@ -1,4 +1,4 @@
-"""EarlyStopper
+"""EarlyStopper: early stopping management class
 """
 
 class EarlyStopper:
