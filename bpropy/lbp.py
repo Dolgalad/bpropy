@@ -5,18 +5,40 @@ import numpy as np
 import time
 import torch_scatter
 
-def sufficient_statistics_dim(g):
-    return sum([2**len(list(g.neighbors(n))) for n,d in g.nodes(data=True) if d["bipartite"]==1])
-def number_vm_edges(g):
-    return sum([2*len(list(g.neighbors(n))) for n,d in g.nodes(data=True) if d["bipartite"]==0])
-def number_of_variables(g):
-    return len([n for n,d in g.nodes(data=True) if d["bipartite"]==0])
-def f2v_messages_dim(g):
-    return sum([2*len(list(g.neighbors(n))) for n,d in g.nodes(data=True) if d["bipartite"]==1])
+def ordered_edges(g):
+    adj = nx.to_numpy_array(g)
+    if g.is_directed():
+        for (s,t) in zip(*np.where(adj > 0)):
+            yield (s,t)
+    else:
+        for (s,t) in zip(*np.where(adj > 0)):
+            if s<t:
+                yield (s,t)
+
 def iter_factor_nodes(g):
-    for n,d in g.nodes(data=True):
-        if d["bipartite"]==1:
+    nV = nx.number_of_nodes(g)
+    for n in range(nV):
+        if g.nodes[n]["bipartite"]==1:
             yield n
+def iter_variable_nodes(g):
+    nV = nx.number_of_nodes(g)
+    for n in range(nV):
+        if g.nodes[n]["bipartite"]==0:
+            yield n
+
+def factor_size(g, F):
+    return len(list(g.neighbors(F)))
+
+def sufficient_statistics_dim(g):
+    #return sum([2**len(list(g.neighbors(n))) for n,d in g.nodes(data=True) if d["bipartite"]==1])
+    return sum([2**factor_size(g,F) for F in iter_factor_nodes(g)])
+
+def number_vm_edges(g):
+    return sum([2*len(list(g.neighbors(n))) for n in iter_variable_nodes(g)])
+def number_of_variables(g):
+    return len(list(iter_variable_nodes(n)))
+def f2v_messages_dim(g):
+    return sum([2*factor_size(g, F) for F in iter_factor_nodes(g)])
 def f2v_index_map(g):
     m,n,ss = {}, {}, {}
     c,d,e = 0,0,0
@@ -201,11 +223,13 @@ def create_factor_graph(g):
     fg = nx.Graph()
     fg.add_nodes_from(g.nodes, bipartite=0)
     c = g.number_of_nodes()
-    for n in g.nodes:
+    nV = g.number_of_nodes()
+    for n in range(nV):
         fg.add_node(c, bipartite=1)
         fg.add_edge(n,c)
         c += 1
-    for e in g.edges:
+    #for e in g.edges:
+    for e in ordered_edges(g):
         fg.add_node(c, bipartite=1)
         fg.add_edge(e[0], c)
         fg.add_edge(e[1], c)

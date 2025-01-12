@@ -195,11 +195,21 @@ class MISERMRFDataset(Dataset):
         with open(os.path.join(path, "edge_features.npy"), "rb") as f:
             efeat = np.load(f)
         return nfeat,cfeat,efeat
+    def ordered_edges(self, g):
+        adj = nx.to_numpy_array(g)
+        if g.is_directed():
+            for (s,t) in zip(*np.where(adj > 0)):
+                yield (s,t)
+        else:
+            for (s,t) in zip(*np.where(adj > 0)):
+                if s<t:
+                    yield (s,t)
     def networkx_to_tgdata(self, g):
         g = g.to_directed()
         edge_index = torch.empty((2, g.number_of_edges()), dtype=torch.long)
         bipartite = torch.empty(g.number_of_nodes())
-        for i,(src,dst) in enumerate(g.edges):
+        #for i,(src,dst) in enumerate(g.edges):
+        for i,(src,dst) in enumerate(self.ordered_edges(g)):
             edge_index[0,i] = src
             edge_index[1,i] = dst
         for n,d in g.nodes(data=True):

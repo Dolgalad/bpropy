@@ -12,6 +12,17 @@ docplex_spec = importlib.util.find_spec("docplex")
 if docplex_spec is not None:
     from docplex.mp.model import Model
 
+def ordered_edges(g):
+    adj = nx.to_numpy_array(g)
+    if g.is_directed():
+        for (s,t) in zip(*np.where(adj > 0)):
+            yield (s,t)
+    else:
+        for (s,t) in zip(*np.where(adj > 0)):
+            if s<t:
+                yield (s,t)
+
+
 class MIS:
     def __init__(self, g, weights=None):
         self.g = g
@@ -27,7 +38,7 @@ class MIS:
     def constraints(self, obj_ub=None, cliques=None):
         c = []
         if cliques is None:
-            for e in self.g.edges:
+            for e in ordered_edges(self.g):
                 row = np.zeros(self.nv())
                 row[e[0]] = 1
                 row[e[1]] = 1
@@ -114,7 +125,7 @@ def cplex_model(pb, continuous_relaxation=False, cliques=None):
 
     # add the constraints
     if cliques is None:
-        for e in pb.g.edges:
+        for e in ordered_edges(pb.g):
             model.add_constraint( x[e[0]] + x[e[1]] <= 1 )
     else:
         for clq in cliques:
