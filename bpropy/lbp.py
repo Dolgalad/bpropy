@@ -36,7 +36,9 @@ def sufficient_statistics_dim(g):
 def number_vm_edges(g):
     return sum([2*len(list(g.neighbors(n))) for n in iter_variable_nodes(g)])
 def number_of_variables(g):
-    return len(list(iter_variable_nodes(n)))
+    return len(list(iter_variable_nodes(g)))
+def number_of_factors(g):
+    return len(list(iter_factor_nodes(g)))
 def f2v_messages_dim(g):
     return sum([2*factor_size(g, F) for F in iter_factor_nodes(g)])
 def f2v_index_map(g):
