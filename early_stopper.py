@@ -1,4 +1,4 @@
-"""EarlyStopper: early stopping management class
+"""EarlyStopper: early stopping management class, keeps track of number of epochs since best validation score
 """
 
 class EarlyStopper:
