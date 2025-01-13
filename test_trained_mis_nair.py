@@ -27,6 +27,10 @@ parser.add_argument("-o","--output", type=str, default="test_trained_mis_nair.cs
 
 args = parser.parse_args()
 
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+print("Using device ", device)
+
+
 def get_neighbors(data, u):
     return data.edge_index[1, data.edge_index[0,:]==u].numpy()
 def tgdata_to_networkx(data):
@@ -73,13 +77,14 @@ def test_model(dataset_path, dataset_category, model_log_dir, verbose=True):
     # model 
     model = eval(model_class)(9, **model_desc)
     model.load_state_dict(torch.load(checkpoint_path, weights_only=True))
+    model = model.to(device)
     
     gaps = []
     bar = Bar("Testing: ", max=dataset.len())
     with torch.no_grad():
         for data in loader:
-            out = model(data)
-            pred = out[data.bipartite==0]
+            out = model(data.to(device))
+            pred = out[data.bipartite==0].cpu()
             g = tgdata_to_networkx(data)
             pb = MIS(g)
             data_sol = data.y.numpy()

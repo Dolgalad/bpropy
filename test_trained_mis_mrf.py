@@ -18,6 +18,9 @@ from dopy.mis import *
 from mis_er_mrf_dataset import MISERMRFDataset
 from models_mrf import *
 
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+print("Using device ", device)
+
 parser = argparse.ArgumentParser(prog="test_trained_mis_mrf.py",
                                  description="Test trained model following Nair et. al. + MRF")
 parser.add_argument("dataset_path")
@@ -73,12 +76,13 @@ def test_model(dataset_path, dataset_category, model_log_dir, verbose=True):
     # model 
     model = eval(model_class)(9, **model_desc)
     model.load_state_dict(torch.load(checkpoint_path, weights_only=True))
+    model = model.to(device)
     
     gaps = []
     bar = Bar("Testing: ", max=dataset.len())
     with torch.no_grad():
         for data in loader:
-            out = model(data)
+            out = model(data.to(device))
             g = tgdata_to_networkx(data)
             pb = MIS(g)
             data_sol = data.y.numpy()
