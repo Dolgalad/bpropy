@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 from torch.nn import ReLU, ELU, Dropout, BatchNorm1d
+import torch_geometric as tg
 from torch_geometric.nn import GCNConv, Sequential, LayerNorm
 from torch_geometric.nn.models import GCN
 
@@ -72,6 +73,24 @@ class GCN_v3(torch.nn.Module):
     def __init__(self, in_dim, n_layers=4, hidden_dim=64, dropout_p=0.25, normalize=False):
         super().__init__()
         self.conv = GCN(in_dim, hidden_dim, n_layers, out_channels=1, dropout=dropout_p, act="elu", norm="LayerNorm", jk="lstm")
+
+    def forward(self, data):
+        x, edge_index = data.x, data.edge_index
+        return self.conv(x, edge_index)
+
+class SAGE_v1(torch.nn.Module):
+    def __init__(self, in_dim, n_layers=4, hidden_dim=64, dropout_p=0.25, normalize=False):
+        super().__init__()
+        self.conv = tg.nn.models.GraphSAGE(in_dim, hidden_dim, n_layers, out_channels=1, dropout=dropout_p, act="elu", norm="LayerNorm", jk="lstm")
+
+    def forward(self, data):
+        x, edge_index = data.x, data.edge_index
+        return self.conv(x, edge_index)
+
+class GAT_v1(torch.nn.Module):
+    def __init__(self, in_dim, n_layers=4, hidden_dim=64, dropout_p=0.25, normalize=False):
+        super().__init__()
+        self.conv = tg.nn.models.GAT(in_dim, hidden_dim, n_layers, out_channels=1, dropout=dropout_p, act="elu", norm="LayerNorm", jk="lstm")
 
     def forward(self, data):
         x, edge_index = data.x, data.edge_index
