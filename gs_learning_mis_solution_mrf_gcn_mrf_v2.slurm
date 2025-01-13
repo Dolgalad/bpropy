@@ -4,7 +4,7 @@
 #SBATCH --job-name=gs_learning_mis_solution_mrf_gcn_mrf_v2
 #SBATCH --output=slurm_outputs/gs_learning_mis_solution_mrf_gcn_mrf_v2/gs_learning_mis_solution_mrf_gcn_mrf_v2-%a.out
 #SBATCH --error=slurm_outputs/gs_learning_mis_solution_mrf_gcn_mrf_v2/gs_learning_mis_solution_mrf_gcn_mrf_v2-%a.err
-#SBATCH --array=1-162
+#SBATCH --array=1-12
 #SBATCH --ntasks=1
 #SBATCH --gres=gpu:1
 
