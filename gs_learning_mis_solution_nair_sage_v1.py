@@ -14,9 +14,9 @@ args = parser.parse_args()
 
 seeds = [2022,2023,2024]
 datasets = ["MIS100_EB"]
-batch_sizes = [100]
+batch_sizes = [10]
 learning_rates = [1e-2,1e-4,1e-6]
-hidden_dims = [64, 128]
+hidden_dims = [64]
 optimizers = ["torch.optim.RAdam"]
 patience = [100]
 n_layers = [8]
