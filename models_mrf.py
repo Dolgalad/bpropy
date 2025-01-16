@@ -163,3 +163,28 @@ class GCN_MRF_v4_tmp(torch.nn.Module):
 
         return mu
 
+class GCN_MRF_v4(torch.nn.Module):
+    def __init__(self, in_dim, n_layers=4, hidden_dim=64, dropout_p=0.25, normalize=False, bp_max_iter=10, bp_tol=1e-6, bp_damping=0.5):
+        super().__init__()
+        self.bp_max_iter = bp_max_iter
+        self.bp_tol = bp_tol
+        self.bp_damping = bp_damping
+        self.conv = GCN(in_dim, hidden_dim, n_layers, out_channels=hidden_dim, dropout=dropout_p, act="elu", norm="LayerNorm", jk="lstm")
+
+        # canonical parameter predictors
+        self.unary_predictor = torch.nn.Linear(hidden_dim, 2)
+        self.binary_predictor = torch.nn.Linear(hidden_dim, 4)
+
+        self.efc = EFCanonicalParam(hidden_dim, lambda in_channels, out_channels: MLP(in_channels, hidden_channels=[64, 64, out_channels], activation_layer=ELU, norm_layer=torch.nn.LayerNorm), factor_sizes=[1,2])
+    def forward(self, data):
+        x, edge_index = data.x, data.edge_index
+
+        x = self.conv(x, edge_index)
+
+        theta = self.efc(x, data.bipartite + 1)
+
+        v2f = torch.zeros_like(theta, device=x.device)
+        mu = _loopy_belief_propagation(data, theta, v2f, data.f2v_edges, data.r_edges, data.q_edges, data.m_edges, max_iter=self.bp_max_iter, tol=self.bp_tol, damping=self.bp_damping)
+
+        return mu
+
