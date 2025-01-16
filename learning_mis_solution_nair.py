@@ -103,8 +103,10 @@ random.seed(args.seed)
 # dataset path 
 dataset_name = args.dataset_category+"_"+hashlib.md5(json.dumps(dataset_args, sort_keys=True).encode("utf8")).hexdigest()[:6]
 validation_dataset_name = args.dataset_category+"_"+hashlib.md5(json.dumps(validation_dataset_args, sort_keys=True).encode("utf8")).hexdigest()[:6]
+test_dataset_name = args.dataset_category+"_"+hashlib.md5(json.dumps(validation_dataset_args, sort_keys=True).encode("utf8")).hexdigest()[:6]
 train_dataset_path = os.path.join(args.dataset_path, dataset_name)
 validation_dataset_path = os.path.join(args.dataset_path, validation_dataset_name)
+test_dataset_path = os.path.join(args.dataset_path, test_dataset_name)
 
 # training description data
 training_description = {
@@ -175,7 +177,7 @@ es = EarlyStopper(patience=args.es_patience, min_delta=1e-6)
 
 print("Loading data")
 train_dataset = MISERDataset(train_dataset_path, mode="train", **dataset_args)
-val_dataset = MISERDataset(validation_dataset_path, mode="validation", unravel_pool=False, solution_limit=1)
+val_dataset = MISERDataset(validation_dataset_path, category=args.dataset_category, mode="validation", unravel_pool=False, solution_limit=1)
 
 train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False)
@@ -304,6 +306,37 @@ for epoch in range(args.max_epochs):
     if es.early_stop(epoch, mvalloss):
         print("Stopping early")
         break
+
+checkpoint_path = os.path.join(log_dir, "checkpoints", "checkpoint.pt")
+if os.path.exists(os.path.join(log_dir, "checkpoints", "checkpoint.pt")):
+    test_dataset = MISERDataset(test_dataset_path, category=args.dataset_category, mode="test", unravel_pool=False, solution_limit=1, verbose=verbose)
+    test_loader = DataLoader(dataset, batch_size=1, shuffle=False)
+    
+    # model 
+    model.load_state_dict(torch.load(checkpoint_path, weights_only=True))
+    model = model.to(device)
+    model.eval()
+    
+    gaps = []
+    bar = Bar("Testing: ", max=dataset.len())
+    with torch.no_grad():
+        for data in loader:
+            out = model(data.to(device))
+            pred = out[data.bipartite==0].cpu()
+            g = tgdata_to_networkx(data)
+            pb = MIS(g)
+            data_sol = data.y.numpy()
+            if data_sol.sum() == 0:
+                continue
+            # solve greedy
+            sol = mis_greedy(pb, pred.numpy())
+            gap = (data.y.numpy().sum() - sol.sum()) / data.y.numpy().sum()
+    
+            gaps.append(gap)
+            bar.suffix = f" {np.mean(gaps)}"
+            bar.next()
+        bar.finish()
+    training_description["test_gap"] = np.mean(gaps)
 
 training_description["stop_time"] = time.time()
 training_description["min_validation_gap"] = es.min_validation_loss

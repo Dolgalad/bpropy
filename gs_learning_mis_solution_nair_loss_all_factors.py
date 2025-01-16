@@ -23,6 +23,9 @@ n_layers = [8]
 max_iters = [10]
 
 script_name = "learning_mis_solution_nair_loss_all_factors.py"
+model_class = "GCN_MRF_v4_tmp"
+model_prefix = "mis_nair_loss_all_factors_gs"
+
 
 param_list = list(itertools.product(seeds,datasets, batch_sizes, learning_rates, hidden_dims, optimizers, patience, n_layers, max_iters))
 
@@ -40,15 +43,15 @@ def dataset_str():
 def command_line(args, params):
     [seed,dataset,bs,lr,h,opt,p,nl,bpmi] = params
     opt_str = optimizer_str(opt, lr)
-    m_str = model_str("GCN_MRF_v2", h, nl,bpmi)
+    m_str = model_str(model_class, h, nl,bpmi)
     data_str = dataset_str()
     train_dataset_path = args.dataset_path
     validation_dataset_path = args.dataset_path
 
     if opt == "torch.optim.RAdam":
-        return f"python {script_name} {train_dataset_path} {dataset} {args.log_dir} -b {bs} -a {h} -p {p} {opt_str} -m mis_mrf_gcn_mrf_v2_gs{args.index} -s {seed} {m_str} {data_str}"
+        return f"python {script_name} {train_dataset_path} {dataset} {args.log_dir} -b {bs} -a {h} -p {p} {opt_str} -m {model_prefix}{args.index} -s {seed} {m_str} {data_str}"
     if opt == "torch.optim.Adam":
-        return f"python {script_name} {train_dataset_path} {validation_dataset_path} {dataset} {args.checkpoint_dir} {args.log_dir} -b {bs} -a {h} -p {p} {opt_str} -m mis_mrf_gcn_mrf_v2_gs{args.index} -s {seed}"
+        return f"python {script_name} {train_dataset_path} {validation_dataset_path} {dataset} {args.checkpoint_dir} {args.log_dir} -b {bs} -a {h} -p {p} {opt_str} -m {model_prefix}{args.index} -s {seed}"
 
 cmd = command_line(args, param_list[args.index - 1])
 print("CMD = ", cmd)
