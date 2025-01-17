@@ -29,7 +29,10 @@ dataset_urls = {
         }
 dataset_archives = {
         "MIS100_EB": "mis_er_n100-100_p0.15_tl1000.0_pooltl1000.0_eb.tar.gz",
-        "MIS100_CC": "mis_er_n100-100_p0.15_tl1000.0_pooltl1000.0_cc.tar.gz"
+        "MIS100_CC": "mis_er_n100-100_p0.15_tl1000.0_pooltl1000.0_cc.tar.gz",
+        "MIS100_CF": "mis_er_n100-100_p0.15_tl1000.0_pooltl1000.0_cf.tar.gz",
+        "MIS100_EC": "mis_er_n100-100_p0.15_tl1000.0_pooltl1000.0_ec.tar.gz",
+        "MIS100_CP": "mis_er_n100-100_p0.15_tl1000.0_pooltl1000.0_cp.tar.gz",
         }
 
 
