@@ -8,7 +8,7 @@ def bipartite_graph(pb, cliques=None):
     for i in range(pb.nv()):
         g.add_node(i, bipartite=0, x=[pb.w[i]])
         features.append(pb.w[i])
-    ci = 0
+    ci,ce = 0,0
     constraints = pb.constraints(cliques=cliques)
     for cj,c in enumerate(constraints):
         for i in range(c.A.shape[0]):
@@ -18,6 +18,7 @@ def bipartite_graph(pb, cliques=None):
                 features.append(c.lb[i])
                 for j in np.where(c.A[i,:] != 0)[0]:
                     g.add_edge(j, pb.nv() + ci, e=[c.A[i,j]])
+                    ce += 1
                 ci += 1
             else:
                 if c.lb[i] != -np.inf:
@@ -25,12 +26,14 @@ def bipartite_graph(pb, cliques=None):
                     features.append(c.lb[i])
                     for j in np.where(c.A[i,:] != 0)[0]:
                         g.add_edge(j, pb.nv() + ci, e=[c.A[i,j]])
+                        ce += 1
                     ci += 1
                 if c.ub[i] != np.inf:
                     g.add_node(pb.nv() + ci, bipartite=1, x=[c.ub[i]])
                     features.append(c.ub[i])
                     for j in np.where(c.A[i,:] != 0)[0]:
                         g.add_edge(j, pb.nv() + ci, e=[c.A[i,j]])
+                        ce += 1
                     ci += 1
 
     return g,np.array(features)
