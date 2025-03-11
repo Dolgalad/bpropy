@@ -1,7 +1,7 @@
 import os
 import time
 import networkx as nx
-from dopy.maxcut import *
+from dopy.mis import *
 
 kamis_root = "/data/aschulz/Documents2023/KaMIS/deploy"
 
@@ -32,7 +32,7 @@ def kamis_solve(graph_path, solution_path, timelimit=1000, seed=0, executable="r
 if __name__=="__main__":
     g = nx.generators.random_graphs.erdos_renyi_graph(50, 0.15)
 
-    pb = MaxCut(g)
+    pb = MIS(g)
     # solve with cplex
     sol = pb.solve()
     print(sol)

@@ -9,7 +9,7 @@ class GCN_v1(torch.nn.Module):
     def __init__(self, in_dim, hidden_dim=64, dropout_p=0.25):
         super().__init__()
         self.dropout_p = dropout_p
-        self.conv1 = GCNConv(9, hidden_dim, normalize=False)
+        self.conv1 = GCNConv(in_dim, hidden_dim, normalize=False)
         self.conv2 = GCNConv(hidden_dim, hidden_dim, normalize=False)
         self.conv3 = GCNConv(hidden_dim, hidden_dim, normalize=False)
         self.conv4 = GCNConv(hidden_dim, 1, normalize=False)

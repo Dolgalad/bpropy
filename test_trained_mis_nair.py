@@ -75,7 +75,7 @@ def test_model(dataset_path, dataset_category, model_log_dir, verbose=True):
     loader = DataLoader(dataset, batch_size=1, shuffle=False)
     
     # model 
-    model = eval(model_class)(9, **model_desc)
+    model = eval(model_class)(10, **model_desc)
     model.load_state_dict(torch.load(checkpoint_path, weights_only=True))
     model = model.to(device)
     model.eval()
@@ -85,9 +85,6 @@ def test_model(dataset_path, dataset_category, model_log_dir, verbose=True):
     with torch.no_grad():
         for data in loader:
             out = model(data.to(device))
-            print()
-            print(out)
-            print()
             pred = out[data.bipartite==0].cpu()
             g = tgdata_to_networkx(data)
             pb = MIS(g)

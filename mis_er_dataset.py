@@ -220,7 +220,8 @@ class MISERDataset(Dataset):
                 nfeat = nfeat - np.mean(nfeat,axis=0)
                 cfeat = cfeat - np.mean(cfeat,axis=0)
                 efeat = efeat - np.mean(efeat,axis=0)
-                x = np.concatenate((nfeat, np.pad(cfeat, ((0,0), (0,5)))), axis=0)
+                nn = nfeat.shape[1] - cfeat.shape[1]
+                x = np.concatenate((nfeat, np.pad(cfeat, ((0,0), (0,nn)))), axis=0)
                 data.x = torch.from_numpy(x)
                 data.e = torch.from_numpy(np.concatenate((efeat,efeat)))
 
