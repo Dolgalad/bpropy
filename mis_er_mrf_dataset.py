@@ -253,8 +253,10 @@ class MISERMRFDataset(Dataset):
                 #data = from_networkx(bpg)
                 data = self.networkx_to_tgdata(bpg)
 
+                # extract cliques from bipartite graph
+                clique = [list(bpg.neighbors(u)) for u,dat in bpg.nodes(data=True) if dat["bipartite"]==1]
                 # create the factor graph
-                fg = create_factor_graph(pb.g)
+                fg = create_factor_graph(pb.g, factors=cliques)
                 n_ss = sufficient_statistics_dim(fg)
                 # create the computation edges
                 f2v_idx, f2v_subsum_idx,ss_idx = f2v_index_map(fg)

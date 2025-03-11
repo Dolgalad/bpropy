@@ -222,7 +222,9 @@ def variable_marginal_indexes(g, f2v_idx, ss_idx):
 
 
 
-def create_factor_graph(g):
+def create_factor_graph(g, factors=None):
+    if factors is None:
+        factors = [e for e in ordered_edges(g)]
     fg = nx.Graph()
     fg.add_nodes_from(g.nodes, bipartite=0)
     c = g.number_of_nodes()
@@ -231,11 +233,11 @@ def create_factor_graph(g):
         fg.add_node(c, bipartite=1)
         fg.add_edge(n,c)
         c += 1
-    #for e in g.edges:
-    for e in ordered_edges(g):
+    #for e in ordered_edges(g):
+    for fn in factors:
         fg.add_node(c, bipartite=1)
-        fg.add_edge(e[0], c)
-        fg.add_edge(e[1], c)
+        for n in fn:
+            fg.add_edge(n, c)
         c += 1
     return fg
 
