@@ -15,7 +15,7 @@ class GCN_MRF_v1(torch.nn.Module):
         self.bp_damping = bp_damping
 
         self.dropout_p = dropout_p
-        self.conv1 = GCNConv(9, hidden_dim, normalize=False)
+        self.conv1 = GCNConv(in_dim, hidden_dim, normalize=False)
         self.conv2 = GCNConv(hidden_dim, hidden_dim, normalize=False)
         self.conv3 = GCNConv(hidden_dim, hidden_dim, normalize=False)
         self.conv4 = GCNConv(hidden_dim, hidden_dim, normalize=False)
@@ -60,7 +60,7 @@ class GCN_MRF_v2(torch.nn.Module):
         self.bp_damping = bp_damping
 
         self.dropout_p = dropout_p
-        self.conv_in = GCNConv(9, hidden_dim, normalize=normalize, aggr="max")
+        self.conv_in = GCNConv(in_dim, hidden_dim, normalize=normalize, aggr="max")
         self.act_in = ELU(inplace=True)
         self.dropout_in = Dropout(dropout_p)
         self.bn_in = BatchNorm1d(hidden_dim)
@@ -164,7 +164,7 @@ class GCN_MRF_v4_tmp(torch.nn.Module):
         return mu
 
 class GCN_MRF_v4(torch.nn.Module):
-    def __init__(self, in_dim, n_layers=4, hidden_dim=64, dropout_p=0.25, normalize=False, bp_max_iter=10, bp_tol=1e-6, bp_damping=0.5):
+    def __init__(self, in_dim, n_layers=4, hidden_dim=64, dropout_p=0.25, normalize=False, bp_max_iter=10, bp_tol=1e-6, bp_damping=0.5, factor_sizes=[1,2]):
         super().__init__()
         self.bp_max_iter = bp_max_iter
         self.bp_tol = bp_tol
@@ -175,16 +175,16 @@ class GCN_MRF_v4(torch.nn.Module):
         self.unary_predictor = torch.nn.Linear(hidden_dim, 2)
         self.binary_predictor = torch.nn.Linear(hidden_dim, 4)
 
-        self.efc = EFCanonicalParam(hidden_dim, lambda in_channels, out_channels: MLP(in_channels, hidden_channels=[64, 64, out_channels], activation_layer=ELU, norm_layer=torch.nn.LayerNorm), factor_sizes=[1,2])
+        self.efc = EFCanonicalParam(hidden_dim, lambda in_channels, out_channels: MLP(in_channels, hidden_channels=[64, 64, out_channels], activation_layer=ELU, norm_layer=torch.nn.LayerNorm), factor_sizes=factor_sizes)
     def forward(self, data):
         x, edge_index = data.x, data.edge_index
 
         x = self.conv(x, edge_index)
 
-        theta = self.efc(x, data.bipartite + 1)
+        theta = self.efc(x, data.factor_size)
 
         v2f = torch.zeros_like(theta, device=x.device)
         mu = _loopy_belief_propagation(data, theta, v2f, data.f2v_edges, data.r_edges, data.q_edges, data.m_edges, max_iter=self.bp_max_iter, tol=self.bp_tol, damping=self.bp_damping)
 
-        return mu
+        return mu,theta
 

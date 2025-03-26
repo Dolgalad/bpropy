@@ -397,6 +397,11 @@ def _loopy_belief_propagation(data, theta, v2f, f2v_edges, r_edges, q_edges, m_e
 
         v2f_subsum.scatter_add_(0, f2v_edges[:,0], stack[f2v_edges[:,1]])
         
+        #print("v2f_subsum.shape = ", v2f_subsum.shape)
+        #print("r_edges[:,0].min/max = ", r_edges[:,0].min(), r_edges[:,0].max())
+        #print("r_edges[:,1].min/max = ", r_edges[:,1].min(), r_edges[:,1].max())
+        #print()
+
         r = torch_scatter.scatter_logsumexp(v2f_subsum[r_edges[:,1]], r_edges[:,0])
         
         # variable to factor messages

@@ -71,6 +71,19 @@ def invert_permutation(p):
     s[p] = np.arange(p.size)
     return s
 
+def clique_cmp(c1, c2):
+    if len(c1)==len(c2):
+        if c1 < c2:
+            return -1
+        else:
+            return 1
+    else:
+        return len(c1) - len(c2)
+def sorted_cliques(cliques):
+    from functools import cmp_to_key
+    cliques = sorted(cliques, key=cmp_to_key(clique_cmp))
+    return cliques
+
 def clique_covering_3(g, randomize=False):
     _g = g.copy()
     n = _g.number_of_nodes()
@@ -99,8 +112,10 @@ def clique_covering_3(g, randomize=False):
 
             c.append(w)
             W = W.intersection(_g.neighbors(w))
-        C.append([perm[i] for i in c])
-    return C
+        A = [perm[i] for i in c]
+        A.sort()
+        C.append(A)
+    return sorted_cliques(C)
 
 
 if __name__=="__main__":

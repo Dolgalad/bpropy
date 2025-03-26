@@ -13,7 +13,7 @@ np.random.seed(2024)
 
 from progress.bar import Bar
 
-from clique_covering import clique_covering_3
+from clique_covering import clique_covering_3,sorted_cliques
 from bipartite_graph import *
 
 def ordered_edges(g):
@@ -113,6 +113,7 @@ def cp_features(pb):
     MC,W = nx.max_weight_clique(_g)
     while W > 1000:
         C.append(MC)
+        C = sorted_cliques(C)
         md = cplex_model(pb, continuous_relaxation=True, cliques=C)
         varlist = [md.get_var_by_name(f"x{i}") for i in range(pb.g.number_of_nodes())]
         sol = md.solve()
@@ -144,6 +145,7 @@ def get_features(pb, mode):
         return cf_features(pb, C, md)
     if mode == "EC":
         C = [list(e) for e in ordered_edges(pb.g)] + clique_covering_3(pb.g, randomize=False)
+        C = sorted_cliques(C)
         md = cplex_model(pb, continuous_relaxation=True, cliques=C)
         _,nfeat,_,cfeat = eb_features(pb, md)
         efeat = np.ones(2 * sum(len(c) for c in C))
