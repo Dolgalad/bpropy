@@ -49,7 +49,7 @@ def mis_importance_sampling(pb, theta, U=10.0, max_iter=10, inference_f=loopy_be
         mu = inference_f(theta, v2f, lbpedges, max_iter=max_iter, tol=1e-6, damping=0.0)
 
         # vertex marginals for x_i=1
-        marginals = mu[:2*pb.nv()].reshape(pb.nv(), 2)[:,1].clone().numpy()
+        marginals = mu[:2*pb.nv()].reshape(pb.nv(), 2)[:,1].cpu().numpy()
         # set fixed vertex marginals to -inf
         marginals[fixed_variables==1] = -np.inf
         # find candidate

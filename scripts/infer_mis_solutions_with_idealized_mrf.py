@@ -15,8 +15,10 @@ from bpropy.mrf.importance_sampling import mis_importance_sampling
 from bpropy.mrf.sufficient_statistics import ss2x,x2ss
 from bpropy.datasets.mis_data import data_to_mis
 
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
 def mis_idealized_canonical_parameters(fg, M=10.):
-    theta = torch.zeros(fg.number_sufficient_statistics())
+    theta = torch.zeros(fg.number_sufficient_statistics(), device=device, requires_grad=False)
     c = 0
     for F in fg.iter_factors():
         nF = fg.factor_size(F)
@@ -59,7 +61,7 @@ if __name__=="__main__":
 
             # Sum-product + greedy solve
             mu = loopy_belief_propagation(theta, v2f, edges, max_iter=max_iter)
-            x_sp_greedy = pb.greedy(mu[:2*pb.nv()].reshape(pb.nv(),2)[:,1].numpy())
+            x_sp_greedy = pb.greedy(mu[:2*pb.nv()].reshape(pb.nv(),2)[:,1].cpu().numpy())
             val_sp_greedy = x_sp_greedy.sum()
             sp_greedy_gap = 100 * (val - val_sp_greedy) / val
             gap_values["sp_greedy"].append(sp_greedy_gap)
@@ -74,7 +76,7 @@ if __name__=="__main__":
 
             # Max-sum + greedy solve
             mu = max_sum_loopy_belief_propagation(theta, v2f, edges, max_iter=max_iter)
-            x_ms_greedy = pb.greedy(mu[:2*pb.nv()].reshape(pb.nv(),2)[:,1].numpy())
+            x_ms_greedy = pb.greedy(mu[:2*pb.nv()].reshape(pb.nv(),2)[:,1].cpu().numpy())
             val_ms_greedy = x_ms_greedy.sum()
             ms_greedy_gap = 100 * (val - val_ms_greedy) / val
             gap_values["ms_greedy"].append(ms_greedy_gap)
