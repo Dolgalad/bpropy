@@ -50,7 +50,7 @@ if __name__=="__main__":
         pb = data_to_mis(data)
         # factor graph
         fg = MISFactorGraph(pb)
-        edges = LBPEdges(fg)
+        edges = LBPEdges(fg).to(device)
         x = ss2x(data.y.numpy(), fg)
         gap_values = {"sp_greedy":[], "ms_greedy":[], "sp_is":[], "ms_is":[]}
         if pb.check_solution(x):
