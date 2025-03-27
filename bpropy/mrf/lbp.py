@@ -10,7 +10,7 @@ def loopy_belief_propagation(theta, v2f, edges, max_iter=100, tol=1e-6, damping=
     q_stride = torch.full((int(v2f.shape[0]/2),), 2)
     q_idx = torch.arange(q_stride.size(0)).repeat_interleave(2)
     #m_stride = torch.tensor([2**len(list(g.neighbors(F))) for F in iter_factor_nodes(g)])
-    m_idx = torch.arange(edges.m_stride.size(0)).repeat_interleave(edges.m_stride)
+    m_idx = torch.arange(edges.m_stride.size(0), device=theta.device).repeat_interleave(edges.m_stride)
     mu = torch.zeros(int(edges.n_ss.sum().item()))
     
     for T in range(max_iter):
