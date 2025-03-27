@@ -43,9 +43,8 @@ def mis_importance_sampling(pb, theta, U=10.0, max_iter=10, inference_f=loopy_be
     v2f = torch.zeros_like(theta)
     edges = [e for e in ordered_edges(pb.g)]
     fg = MISFactorGraph(pb)
-    lbpedges = LBPEdges(fg)
+    lbpedges = LBPEdges(fg).to(theta.device)
     while not np.all(fixed_variables):
-        print(theta.device)
         # belief propagation
         mu = inference_f(theta, v2f, lbpedges, max_iter=max_iter, tol=1e-6, damping=0.0)
 

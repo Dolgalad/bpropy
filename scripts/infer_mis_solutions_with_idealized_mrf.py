@@ -57,7 +57,6 @@ if __name__=="__main__":
             val = x.sum()
             # create the vector of canonical parameters
             theta = mis_idealized_canonical_parameters(fg)
-            print("theta dev ", theta.device)
             v2f = torch.zeros_like(theta)
 
             # Sum-product + greedy solve

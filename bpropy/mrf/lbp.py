@@ -11,7 +11,6 @@ def loopy_belief_propagation(theta, v2f, edges, max_iter=100, tol=1e-6, damping=
     q_stride = torch.full((int(v2f.shape[0]/2),), 2, device=dev)
     q_idx = torch.arange(q_stride.size(0), device=dev).repeat_interleave(2)
     #m_stride = torch.tensor([2**len(list(g.neighbors(F))) for F in iter_factor_nodes(g)])
-    print(edges.m_stride.device)
     m_idx = torch.arange(edges.m_stride.size(0), device=theta.device).repeat_interleave(edges.m_stride)
     mu = torch.zeros(int(edges.n_ss.sum().item()), device=dev)
     
@@ -117,7 +116,6 @@ def residual_loopy_belief_propagation(theta, v2f, g, f2v_edges, f2v_subsum_idx, 
         max_idx = torch.argmax(max_residuals)
         v2f_mask = torch.zeros_like(v2f, dtype=torch.bool)
         v2f_mask[2*max_idx:2*max_idx+2] = 1
-        #print("max_id = ", max_idx)
 
         v2f[v2f_mask] = tmp_v2f[v2f_mask]
         
@@ -138,17 +136,18 @@ def residual_loopy_belief_propagation(theta, v2f, g, f2v_edges, f2v_subsum_idx, 
 
 
 def max_sum_loopy_belief_propagation(theta, v2f, edges, max_iter=100, tol=1e-6, damping=0.):
+    dev = theta.device
     # strides
-    q_stride = torch.full((int(v2f.shape[0]/2),), 2)
-    q_idx = torch.arange(q_stride.size(0)).repeat_interleave(2)
+    q_stride = torch.full((int(v2f.shape[0]/2),), 2, device=dev)
+    q_idx = torch.arange(q_stride.size(0), device=dev).repeat_interleave(2)
     #m_stride = torch.tensor([2**len(list(g.neighbors(F))) for F in iter_factor_nodes(g)])
-    m_idx = torch.arange(edges.m_stride.size(0)).repeat_interleave(edges.m_stride)
+    m_idx = torch.arange(edges.m_stride.size(0), device=dev).repeat_interleave(edges.m_stride)
     #mu = torch.zeros(sufficient_statistics_dim(g))
     #mu = torch.zeros(int(edges.n_ss.sum().item()))
 
 
     nv = edges.n_vars.sum() #number_of_variables(g)
-    mu = torch.zeros(2 * nv)
+    mu = torch.zeros(2 * nv, device=dev)
 
     q_n = int(v2f.size(0) / 2)
    
@@ -158,14 +157,14 @@ def max_sum_loopy_belief_propagation(theta, v2f, edges, max_iter=100, tol=1e-6, 
         stack = torch.concatenate((theta,v2f), 0)
         # subsum vect
         #v2f_subsum = torch.zeros(len(f2v_subsum_idx))
-        v2f_subsum = torch.zeros(edges.n_f2v_ss.sum(), dtype=theta.dtype)
+        v2f_subsum = torch.zeros(edges.n_f2v_ss.sum(), dtype=theta.dtype, device=dev)
         v2f_subsum.scatter_add_(0, edges.f2v_edges[:,0], stack[edges.f2v_edges[:,1]])
         r = torch.zeros_like(v2f).scatter_reduce_(0, edges.r_edges[:,0], v2f_subsum[edges.r_edges[:,1]], "amax", include_self=False)
 
         # variable to factor messages
         qbar = torch.zeros_like(v2f).scatter_add_(0, edges.q_edges[:,0], r[edges.q_edges[:,1]])
         delta = torch.repeat_interleave(
-                    torch.zeros(int(q_n)).scatter_add_(0, q_idx, qbar) / 2,
+                    torch.zeros(int(q_n), device=dev).scatter_add_(0, q_idx, qbar) / 2,
                     2
                 )
         v2f = qbar - delta
@@ -247,11 +246,6 @@ def _loopy_belief_propagation(data, theta, v2f, f2v_edges, r_edges, q_edges, m_e
 
         v2f_subsum.scatter_add_(0, f2v_edges[:,0], stack[f2v_edges[:,1]])
         
-        #print("v2f_subsum.shape = ", v2f_subsum.shape)
-        #print("r_edges[:,0].min/max = ", r_edges[:,0].min(), r_edges[:,0].max())
-        #print("r_edges[:,1].min/max = ", r_edges[:,1].min(), r_edges[:,1].max())
-        #print()
-
         r = torch_scatter.scatter_logsumexp(v2f_subsum[r_edges[:,1]], r_edges[:,0])
         
         # variable to factor messages
