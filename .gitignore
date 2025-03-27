@@ -6,7 +6,6 @@ imgs/
 venv/
 runs/
 dummy*
-datasets/
 results/
 logs*/
 
