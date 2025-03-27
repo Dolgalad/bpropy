@@ -18,7 +18,7 @@ def loopy_belief_propagation(theta, v2f, edges, max_iter=100, tol=1e-6, damping=
         
         stack = torch.concatenate((theta,v2f), 0)
         # subsum vect
-        v2f_subsum = torch.zeros(edges.n_f2v_ss.sum(), dtype=theta.dtype)
+        v2f_subsum = torch.zeros(edges.n_f2v_ss.sum(), dtype=theta.dtype, device=theta.device)
         v2f_subsum.scatter_add_(0, edges.f2v_edges[:,0], stack[edges.f2v_edges[:,1]])
         
         r = torch_scatter.scatter_logsumexp(v2f_subsum[edges.r_edges[:,1]], edges.r_edges[:,0])
