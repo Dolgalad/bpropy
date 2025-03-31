@@ -36,7 +36,7 @@ def tgdata_to_networkx(data):
     return g
 
 
-def mis_importance_sampling(pb, theta, U=10.0, max_iter=10, inference_f=loopy_belief_propagation):
+def mis_importance_sampling(pb, theta, U=2., max_iter=10, inference_f=loopy_belief_propagation):
     fixed_variables = np.zeros(pb.nv(), dtype=int)
     solution = np.zeros(pb.nv(), dtype=int)
     mu0 = torch.zeros_like(theta)
@@ -56,44 +56,45 @@ def mis_importance_sampling(pb, theta, U=10.0, max_iter=10, inference_f=loopy_be
         u = np.argmax(marginals)
         solution[u] = 1
         fixed_variables[u] = 1
-        theta[2*u] = -U
-        theta[2*u+1] = U
+        theta[2*u] -= U
+        theta[2*u+1] += U
         u_neighbors = list(pb.g.neighbors(u))
         for v in u_neighbors:
-            fixed_variables[v] = 1
-            theta[2*v] = U
-            theta[2*v+1] = -U
-            eidx = edges.index([min(u,v), max(u,v)])
-            if u == min(u,v):
-                theta[2*pb.nv()+4*eidx] = -U
-                theta[2*pb.nv()+4*eidx+1] = U
-                theta[2*pb.nv()+4*eidx+2] = -U
-                theta[2*pb.nv()+4*eidx+3] = -U
-            else:
-                theta[2*pb.nv()+4*eidx] = -U
-                theta[2*pb.nv()+4*eidx+1] = -U
-                theta[2*pb.nv()+4*eidx+2] = U
-                theta[2*pb.nv()+4*eidx+3] = -U
+            if not fixed_variables[v]:
+                theta[2*v] += U
+                theta[2*v+1] -= U
+                fixed_variables[v] = 1
+            #eidx = edges.index([min(u,v), max(u,v)])
+            #if u == min(u,v):
+            #    theta[2*pb.nv()+4*eidx] = -U
+            #    theta[2*pb.nv()+4*eidx+1] = U
+            #    theta[2*pb.nv()+4*eidx+2] = -U
+            #    theta[2*pb.nv()+4*eidx+3] = -U
+            #else:
+            #    theta[2*pb.nv()+4*eidx] = -U
+            #    theta[2*pb.nv()+4*eidx+1] = -U
+            #    theta[2*pb.nv()+4*eidx+2] = U
+            #    theta[2*pb.nv()+4*eidx+3] = -U
 
-            for w in pb.g.neighbors(v):
-                if w!=u:
-                    vwidx = edges.index([min(w,v), max(w,v)])
-                    if w in u_neighbors:
-                        theta[2*pb.nv()+4*vwidx] = U
-                        theta[2*pb.nv()+4*vwidx+1] = -U
-                        theta[2*pb.nv()+4*vwidx+2] = -U
-                        theta[2*pb.nv()+4*vwidx+3] = -U
-                    else:
-                        if v == min(w,v):
-                            theta[2*pb.nv()+4*vwidx] = U
-                            theta[2*pb.nv()+4*vwidx+1] = -U
-                            theta[2*pb.nv()+4*vwidx+2] = U
-                            theta[2*pb.nv()+4*vwidx+3] = -U
-                        else:
-                            theta[2*pb.nv()+4*vwidx] = U
-                            theta[2*pb.nv()+4*vwidx+1] = U
-                            theta[2*pb.nv()+4*vwidx+2] = -U
-                            theta[2*pb.nv()+4*vwidx+3] = -U
+            #for w in pb.g.neighbors(v):
+            #    if w!=u:
+            #        vwidx = edges.index([min(w,v), max(w,v)])
+            #        if w in u_neighbors:
+            #            theta[2*pb.nv()+4*vwidx] = U
+            #            theta[2*pb.nv()+4*vwidx+1] = -U
+            #            theta[2*pb.nv()+4*vwidx+2] = -U
+            #            theta[2*pb.nv()+4*vwidx+3] = -U
+            #        else:
+            #            if v == min(w,v):
+            #                theta[2*pb.nv()+4*vwidx] = U
+            #                theta[2*pb.nv()+4*vwidx+1] = -U
+            #                theta[2*pb.nv()+4*vwidx+2] = U
+            #                theta[2*pb.nv()+4*vwidx+3] = -U
+            #            else:
+            #                theta[2*pb.nv()+4*vwidx] = U
+            #                theta[2*pb.nv()+4*vwidx+1] = U
+            #                theta[2*pb.nv()+4*vwidx+2] = -U
+            #                theta[2*pb.nv()+4*vwidx+3] = -U
 
 
         mu0 = mu.clone()

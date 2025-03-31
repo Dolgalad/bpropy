@@ -59,6 +59,8 @@ def eb_features(pb, md):
     cfeat[:,2] = (slacks == 0)
     cfeat[:,3] = duals
 
+    pb.C = C
+
     return C, nfeat, efeat, cfeat
 
 def cf_features(pb, cliques, md):
@@ -87,6 +89,8 @@ def cf_features(pb, cliques, md):
                 cfeat[i,:] += _cfeat[j,:]
                 a += 1
         cfeat[i,:] /= a
+
+    pb.C = edges
     return edges,nfeat,efeat,cfeat
 
 def cp_features(pb):
@@ -100,7 +104,7 @@ def cp_features(pb):
 
     MC,W = nx.max_weight_clique(_g)
     while W > 1000:
-        C.append(MC)
+        C.append(sorted(MC))
         C = lenlex_sort(C)
         md = cplex_model(pb, continuous_relaxation=True, cliques=C)
         varlist = [md.get_var_by_name(f"x{i}") for i in range(pb.g.number_of_nodes())]
@@ -114,6 +118,8 @@ def cp_features(pb):
     _,nfeat,_,cfeat = eb_features(pb, md)
     efeat = np.ones(2 * sum(len(c) for c in C))
 
+    pb.C = C
+
     return C,nfeat,efeat,cfeat
 
 def get_features(pb, mode):
@@ -126,6 +132,7 @@ def get_features(pb, mode):
         md = cplex_model(pb, continuous_relaxation=True, cliques=C)
         _,nfeat,_,cfeat = eb_features(pb, md)
         efeat = np.ones(2 * sum(len(c) for c in C))
+        pb.C = C
         return C,nfeat,efeat,cfeat
     if mode == "CF":
         C = clique_cover(pb.g, randomize=False)
@@ -137,6 +144,7 @@ def get_features(pb, mode):
         md = cplex_model(pb, continuous_relaxation=True, cliques=C)
         _,nfeat,_,cfeat = eb_features(pb, md)
         efeat = np.ones(2 * sum(len(c) for c in C))
+        pb.C = C
         return C,nfeat,efeat,cfeat
     if mode == "CP":
         return cp_features(pb)

@@ -12,15 +12,6 @@ from bpropy.datasets.mis_features import get_features
 def mis_to_data(pb, feature_category="EB"):
     """Create a torch_geometric.data.Data object from MIS problem data
     """
-    vcg = VCGraph(pb)
-    g = vcg.to_directed()
-    edge_index = torch.empty((2, g.number_of_edges()), dtype=torch.long)
-    bipartite = torch.empty(g.number_of_nodes())
-    for i,(src,dst) in enumerate(g.edges):
-        edge_index[0,i] = src
-        edge_index[1,i] = dst
-    for n,d in g.nodes(data=True):
-        bipartite[n] = d["bipartite"]
     # features
     C, nfeat, efeat, cfeat = get_features(pb, feature_category)
     nfeat = nfeat - np.mean(nfeat,axis=0)
@@ -31,6 +22,17 @@ def mis_to_data(pb, feature_category="EB"):
     #data.x = torch.from_numpy(x)
     #data.e = torch.from_numpy(np.concatenate((efeat,efeat)))
 
+    vcg = VCGraph(pb)
+    g = vcg.to_directed()
+    edge_index = torch.empty((2, g.number_of_edges()), dtype=torch.long)
+    bipartite = torch.empty(g.number_of_nodes())
+    for i,(src,dst) in enumerate(g.edges):
+        edge_index[0,i] = src
+        edge_index[1,i] = dst
+    for n,d in g.nodes(data=True):
+        bipartite[n] = d["bipartite"]
+
+
     return Data(edge_index=edge_index, 
                 bipartite=bipartite,
                 x=torch.from_numpy(x),
@@ -38,7 +40,7 @@ def mis_to_data(pb, feature_category="EB"):
                 )
 
 def get_neighbors(data, u):
-    return data.edge_index[1, data.edge_index[0,:]==u].tolist()
+    return sorted(data.edge_index[1, data.edge_index[0,:]==u].tolist())
 
 def data_to_mis(data):
     """Create a MIS problem from torch_geometric.data.Data object

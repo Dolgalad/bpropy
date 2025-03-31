@@ -152,11 +152,12 @@ def cplex_model(pb, continuous_relaxation=False, cliques=None):
 
     # add the constraints
     if cliques is None:
-        for e in ordered_edges(pb.g):
-            model.add_constraint( x[e[0]] + x[e[1]] <= 1 )
-    else:
-        for clq in cliques:
-            model.add_constraint(sum([x[u] for u in clq]) <= 1)
+        cliques = pb.C
+        #for e in ordered_edges(pb.g):
+        #    model.add_constraint( x[e[0]] + x[e[1]] <= 1 )
+    #else:
+    for clq in cliques:
+        model.add_constraint(sum([x[u] for u in clq]) <= 1)
     # add objective
     model.maximize( np.dot( x, pb.w) )
     return model

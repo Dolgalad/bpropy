@@ -113,8 +113,7 @@ def clique_cover(g, randomize=False):
 
             c.append(w)
             W = W.intersection(_g.neighbors(w))
-        A = [perm[i] for i in c]
-        A.sort()
+        A = sorted([perm[i] for i in c])
         C.append(A)
     return lenlex_sort(C)
 
