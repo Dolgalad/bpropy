@@ -9,9 +9,12 @@ from bpropy.utils.graph_utils import get_edge_index
 from bpropy.vc_graph import VCGraph
 from bpropy.co.mis import MIS
 
+from bpropy.mrf.mis_factor_graph import MISFactorGraph
+from bpropy.mrf.lbp_edges import LBPEdges
+
 from bpropy.datasets.mis_features import get_features
 
-def mis_to_data(pb, feature_category="EB"):
+def mis_to_data(pb, feature_category="EB", with_lbp_edges=False):
     """Create a torch_geometric.data.Data object from MIS problem data
     """
     # features
@@ -37,11 +40,15 @@ def mis_to_data(pb, feature_category="EB"):
     #    bipartite[n] = d["bipartite"]
 
 
-    return Data(edge_index=edge_index, 
+    data = Data(edge_index=edge_index, 
                 bipartite=bipartite,
                 x=torch.from_numpy(x),
                 e=torch.from_numpy(efeat),
                 )
+    if with_lbp_edges:
+        fg = MISFactorGraph(pb)
+        data.lbp_edges = LBPEdges(fg)
+    return data
 
 def get_neighbors(data, u):
     return sorted(data.edge_index[1, data.edge_index[0,:]==u].tolist())

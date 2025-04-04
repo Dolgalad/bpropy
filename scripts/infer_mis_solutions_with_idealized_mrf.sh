@@ -1,0 +1,8 @@
+#!/bin/bash
+#
+python infer_mis_solutions_with_idealized_mrf.py /data2/datasets_archive/mis_er_n100-100_p0.15_tl1000.0_pooltl1000.0_inmem_mrf_EB_test.pkl infer_mis_solutions_with_idealized_mrf_v3.csv
+python infer_mis_solutions_with_idealized_mrf.py /data2/datasets_archive/mis_er_n100-100_p0.15_tl1000.0_pooltl1000.0_inmem_mrf_CC_test.pkl infer_mis_solutions_with_idealized_mrf_v3.csv
+python infer_mis_solutions_with_idealized_mrf.py /data2/datasets_archive/mis_er_n100-100_p0.15_tl1000.0_pooltl1000.0_inmem_mrf_CF_test.pkl infer_mis_solutions_with_idealized_mrf_v3.csv
+python infer_mis_solutions_with_idealized_mrf.py /data2/datasets_archive/mis_er_n100-100_p0.15_tl1000.0_pooltl1000.0_inmem_mrf_EC_test.pkl infer_mis_solutions_with_idealized_mrf_v3.csv
+python infer_mis_solutions_with_idealized_mrf.py /data2/datasets_archive/mis_er_n100-100_p0.15_tl1000.0_pooltl1000.0_inmem_mrf_CP_test.pkl infer_mis_solutions_with_idealized_mrf_v3.csv
+
