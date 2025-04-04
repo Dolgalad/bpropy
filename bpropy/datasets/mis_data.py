@@ -4,6 +4,8 @@ import numpy as np
 import networkx as nx
 from torch_geometric.data import Data
 
+from bpropy.utils.graph_utils import get_edge_index
+
 from bpropy.vc_graph import VCGraph
 from bpropy.co.mis import MIS
 
@@ -23,14 +25,16 @@ def mis_to_data(pb, feature_category="EB"):
     #data.e = torch.from_numpy(np.concatenate((efeat,efeat)))
 
     vcg = VCGraph(pb)
-    g = vcg.to_directed()
-    edge_index = torch.empty((2, g.number_of_edges()), dtype=torch.long)
-    bipartite = torch.empty(g.number_of_nodes())
-    for i,(src,dst) in enumerate(g.edges):
-        edge_index[0,i] = src
-        edge_index[1,i] = dst
-    for n,d in g.nodes(data=True):
-        bipartite[n] = d["bipartite"]
+    #g = vcg.to_directed()
+    edge_index = get_edge_index(vcg)
+    bipartite = torch.zeros(vcg.number_of_nodes())
+    bipartite[[n for n,d in vcg.nodes(data=True) if d["bipartite"]]] = 1
+
+    #for i,(src,dst) in enumerate(g.edges):
+    #    edge_index[0,i] = src
+    #    edge_index[1,i] = dst
+    #for n,d in g.nodes(data=True):
+    #    bipartite[n] = d["bipartite"]
 
 
     return Data(edge_index=edge_index, 

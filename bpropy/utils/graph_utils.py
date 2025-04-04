@@ -1,5 +1,6 @@
 import numpy as np
 import networkx as nx
+import torch
 
 from bpropy.utils.set_sort import lenlex_sort
 
@@ -20,6 +21,15 @@ def ordered_edges(g):
     """Returns edges in increasing lexicographical order (old implementation based on adjacency matrix)
     """
     return lenlex_sort([sorted(e) for e in g.edges])
+
+def get_edge_index(g):
+    if not g.is_directed():
+        g = g.to_directed()
+    edge_index = torch.empty((2, g.number_of_edges()), dtype=torch.long)
+    for i,(src,dst) in enumerate(g.edges):
+        edge_index[0,i] = src
+        edge_index[1,i] = dst
+    return edge_index
 
 if __name__=="__main__":
     import time

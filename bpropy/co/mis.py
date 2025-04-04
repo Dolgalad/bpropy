@@ -13,11 +13,15 @@ docplex_spec = importlib.util.find_spec("docplex")
 if docplex_spec is not None:
     from docplex.mp.model import Model
 
+import mip
+from mip import xsum, maximize, BINARY
+
 from bpropy.utils.graph_utils import ordered_edges
 from bpropy.clique_cover import is_edge_cover
 from bpropy.utils.set_sort import lenlex_sort
 
 from bpropy.vc_graph import VCGraph
+from bpropy.co.mis_solution import MISSolution
 
 class MIS:
     def __init__(self, g, weights=None, cliques=None):
@@ -56,16 +60,38 @@ class MIS:
                 row[u] = 1
             c.append(LinearConstraint(row, ub=1))
         return c
-    def solve(self, disp=False, cliques=None):
+    def solve(self, disp=False, cliques=None, solver="cbc", relax_integrality=False):
         """Solve MIS problem
         """
-        return milp(
+        if cliques is None:
+            cliques = self.C
+        if solver=="cplex":
+            if docplex_spec is None:
+                raise Exception("CPLEX solver not found. Missing package 'docplex'")
+            md = cplex_model(self, continuous_relaxation=relax_integrality, cliques=cliques)
+            sol = md.solve()
+            return MISSolution.from_cplex(sol, md)
+        if solver=="scipy":
+            if relax_integrality:
+                integrality = np.zeros(self.nv())
+            else:
+                integrality = np.ones(self.nv())
+            return MISSolution.from_scipy_milp(milp(
                     -self.w,
-                    integrality=np.ones(self.nv()),
+                    integrality=integrality,
                     constraints=self.constraints(cliques=cliques),
                     bounds=Bounds(np.zeros(self.nv()), np.ones(self.nv())),
                     options={"disp":disp}
-                )
+                    ))
+        # default is using CBC
+        md = mip.Model("mis")
+        x = [md.add_var(lb=0.0, ub=1.0, var_type=BINARY) for i in range(self.nv())]
+        md.objective = mip.maximize(xsum(x))
+        for c in cliques:
+            md += mip.xsum(x[u] for u in c) <= 1
+        md.verbose = 0
+        status = md.optimize(relax=relax_integrality)
+        return MISSolution.from_python_mip(x, md)
     def greedy(self, scores=None):
         """Solve the problem geedily
         """
@@ -184,28 +210,4 @@ def get_solution_pool(pb, absgap=None, relgap=None, limit=None, timelimit=None, 
     for i in range(n_sol):
         solutions.append(np.array(cpx.solution.pool.get_values(i)))
     return np.array(solutions)
-
-if __name__=="__main__":
-    from networkx.generators.trees import random_tree
-
-    g = random_tree(5)
-    pb = MIS(g)
-    sol = pb.solve()
-    print("Solution: ", sol.x)
-
-    # plot solution
-    plot_maxcut_solution(pb, sol.x)
-    plt.show()
-
-    # solving with CPLEX
-    print("Solving CPLEX Model")
-    model = cplex_model(pb)
-    cplex_sol = model.solve()
-    print(cplex_sol)
-
-    # getting solution pool
-    pool = get_solution_pool(pb)
-    for i in range(pool.shape[0]):
-        print(pool[i,:], np.dot(pool[i,:], pb.w))
-
 

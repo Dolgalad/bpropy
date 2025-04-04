@@ -11,71 +11,70 @@ np.random.seed(2024)
 
 from progress.bar import Bar
 
-from bpropy.co.mis import MIS, cplex_model
+from bpropy.co.mis import MIS
 from bpropy.clique_cover import clique_cover
 from bpropy.utils.graph_utils import ordered_edges
 from bpropy.utils.set_sort import lenlex_sort
 
-def variable_features(pb, md):
-    varlist = [md.get_var_by_name(f"x{i}") for i in range(pb.g.number_of_nodes())]
-    n = len(varlist)
-    sol = md.solve()
-    x = np.array([sol.get_value(var) for var in varlist])
-    if x.shape[0] != n:
+def variable_features(pb, sol):
+    """Compute the variable features by calling a solver to solve the continuous relaxation 
+    of the problem
+    """
+    n = pb.nv()
+
+    if sol.x.shape[0] != n:
         print(f"Solution shape {x.shape} does not match number of nodes {n}")
 
-    # variable basis status
-    varbasis = np.array([bstt.value for bstt in md.var_basis_statuses(varlist)])
-    varbasis_onehot = np.zeros((varbasis.size, 4))
-    varbasis_onehot[np.arange(varbasis.size), varbasis - 1] = 1
-
     # variable features
-    nfeat = np.zeros((pb.nv(), 10))
+    nfeat = np.zeros((n, 10))
     nfeat[:,0] = pb.w
-    nfeat[:,1] = (x == 0)
-    nfeat[:,2] = (x == 1)
-    nfeat[:,3] = ( (x > 0) & (x < 1))
-    nfeat[:,4:8] = varbasis_onehot
-    nfeat[:,8] = np.array(sol.get_reduced_costs(varlist))
-    nfeat[:,9] = x
+    nfeat[:,1] = (sol.x == 0)
+    nfeat[:,2] = (sol.x == 1)
+    nfeat[:,3] = ( (sol.x > 0) & (sol.x < 1))
+    nfeat[:,4:8] = sol.varbasis_onehot
+    nfeat[:,8] = sol.reduced_costs
+    nfeat[:,9] = sol.x
     return nfeat
 
-def eb_features(pb, md):
-    C = [list(e) for e in ordered_edges(pb.g)]
+def eb_features(pb, cliques = None, solver="cbc", solution=None):
+    if cliques is None:
+        cliques = pb.C
 
-    nfeat = variable_features(pb, md)
+    if solution is None:
+        sol = pb.solve(solver=solver, relax_integrality=True)
+    else:
+        sol = solution
+
+    nfeat = variable_features(pb, sol)
 
     # constraint features
-    constraints = list(md.iter_constraints())
+    n_constr = len(cliques)
 
     # edge features
-    efeat = np.ones(2 * sum(len(c) for c in C))
+    efeat = np.ones(2 * sum(len(c) for c in cliques))
     
-    slacks = np.array(md.slack_values(constraints))
-    duals = np.array(md.dual_values(constraints))
-    cfeat = np.zeros((len(constraints), 4))
-    cfeat[:,0] = np.cos(2) * np.ones(len(constraints))
-    cfeat[:,1] = slacks
-    cfeat[:,2] = (slacks == 0)
-    cfeat[:,3] = duals
-
-    pb.C = C
-
-    return C, nfeat, efeat, cfeat
-
-def cf_features(pb, cliques, md):
-    nfeat = variable_features(pb, md)
+    cfeat = np.zeros((n_constr, 4))
+    cfeat[:,0] = np.cos(2) * np.ones(n_constr)
+    cfeat[:,1] = sol.slacks
+    cfeat[:,2] = (sol.slacks == 0)
+    cfeat[:,3] = sol.duals
 
 
-    constraints = list(md.iter_constraints())
+    return pb.C, nfeat, efeat, cfeat
 
-    slacks = np.array(md.slack_values(constraints))
-    duals = np.array(md.dual_values(constraints))
-    _cfeat = np.zeros((len(constraints), 4))
-    _cfeat[:,0] = np.cos(2) * np.ones(len(constraints))
-    _cfeat[:,1] = slacks
-    _cfeat[:,2] = (slacks == 0)
-    _cfeat[:,3] = duals
+def cf_features(pb, cliques, solver="cbc"):
+    sol = pb.solve(solver=solver, relax_integrality=True, cliques=cliques)
+
+    nfeat = variable_features(pb, sol)
+
+    n_constr = len(cliques)
+
+
+    _cfeat = np.zeros((n_constr, 4))
+    _cfeat[:,0] = np.cos(2) * np.ones(n_constr)
+    _cfeat[:,1] = sol.slacks
+    _cfeat[:,2] = (sol.slacks == 0)
+    _cfeat[:,3] = sol.duals
 
 
     edges = list([e for e in ordered_edges(pb.g)])
@@ -93,29 +92,24 @@ def cf_features(pb, cliques, md):
     pb.C = edges
     return edges,nfeat,efeat,cfeat
 
-def cp_features(pb):
+def cp_features(pb, solver="cbc"):
     C = clique_cover(pb.g, randomize=False)
-    md = cplex_model(pb, continuous_relaxation=True, cliques=C)
-    varlist = [md.get_var_by_name(f"x{i}") for i in range(pb.g.number_of_nodes())]
-    sol = md.solve()
-    x = np.array([sol.get_value(var) for var in varlist])
+    sol = pb.solve(solver=solver, relax_integrality=True, cliques=C)
+
     _g = pb.g.copy()
-    nx.set_node_attributes(_g, {i:int(1000 * x[i]) for i in range(pb.nv())}, name="weight")
+    nx.set_node_attributes(_g, {i:int(1000 * sol.x[i]) for i in range(pb.nv())}, name="weight")
 
     MC,W = nx.max_weight_clique(_g)
     while W > 1000:
         C.append(sorted(MC))
         C = lenlex_sort(C)
-        md = cplex_model(pb, continuous_relaxation=True, cliques=C)
-        varlist = [md.get_var_by_name(f"x{i}") for i in range(pb.g.number_of_nodes())]
-        sol = md.solve()
-        x = np.array([sol.get_value(var) for var in varlist])
+        sol = pb.solve(solver=solver, relax_integrality=True, cliques=C)
         _g = pb.g.copy()
-        nx.set_node_attributes(_g, {i:int(1000 * x[i]) for i in range(pb.nv())}, name="weight")
+        nx.set_node_attributes(_g, {i:int(1000 * sol.x[i]) for i in range(pb.nv())}, name="weight")
 
         MC,W = nx.max_weight_clique(_g)
 
-    _,nfeat,_,cfeat = eb_features(pb, md)
+    _,nfeat,_,cfeat = eb_features(pb, solution=sol, cliques=C)
     efeat = np.ones(2 * sum(len(c) for c in C))
 
     pb.C = C
@@ -125,26 +119,23 @@ def cp_features(pb):
 def get_features(pb, mode):
     if mode == "EB":
         C = [list(e) for e in ordered_edges(pb.g)]
-        md = cplex_model(pb, continuous_relaxation=True)
-        return eb_features(pb, md)
+        pb.C = C
+        return eb_features(pb)
     if mode == "CC":
         C = clique_cover(pb.g, randomize=False)
-        md = cplex_model(pb, continuous_relaxation=True, cliques=C)
-        _,nfeat,_,cfeat = eb_features(pb, md)
-        efeat = np.ones(2 * sum(len(c) for c in C))
         pb.C = C
+        _,nfeat,_,cfeat = eb_features(pb)
+        efeat = np.ones(2 * sum(len(c) for c in C))
         return C,nfeat,efeat,cfeat
     if mode == "CF":
         C = clique_cover(pb.g, randomize=False)
-        md = cplex_model(pb, continuous_relaxation=True, cliques=C)
-        return cf_features(pb, C, md)
+        return cf_features(pb, C)
     if mode == "EC":
         C = [list(e) for e in ordered_edges(pb.g)] + clique_cover(pb.g, randomize=False)
         C = lenlex_sort(C)
-        md = cplex_model(pb, continuous_relaxation=True, cliques=C)
-        _,nfeat,_,cfeat = eb_features(pb, md)
-        efeat = np.ones(2 * sum(len(c) for c in C))
         pb.C = C
+        _,nfeat,_,cfeat = eb_features(pb)
+        efeat = np.ones(2 * sum(len(c) for c in C))
         return C,nfeat,efeat,cfeat
     if mode == "CP":
         return cp_features(pb)

@@ -82,6 +82,10 @@ class FactorGraph(Graph):
         """
         nF = self.factor_size(F)
         return np.unpackbits(np.argwhere(ssF).astype(np.uint8), count=nF, bitorder="little")
+    def ne(self):
+        """Return number of edges
+        """
+        return self.number_of_edges()
 
 
 
