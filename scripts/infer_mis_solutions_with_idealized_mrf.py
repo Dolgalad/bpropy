@@ -102,7 +102,7 @@ if __name__=="__main__":
             device = torch.device('cuda:0')
             free, total = torch.cuda.mem_get_info(device)
             mem_used_MB = (total - free) / 1024 ** 2
-            print("Memory used : ", mem_used_mb)
+            print("Memory used : ", mem_used_MB)
 
             if isinstance(dataset[k], str):
                 print("Instance = ", dataset[k])
