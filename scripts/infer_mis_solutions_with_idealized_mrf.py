@@ -101,6 +101,7 @@ if __name__=="__main__":
             if isinstance(dataset[k], str):
                 print("Instance = ", dataset[k])
                 if dataset[k] in gap_values["instance"]:
+                    print("Skipping")
                     continue
                 data = torch.load(dataset[k])
                 gap_values["instance"] = dataset[k]
@@ -118,6 +119,7 @@ if __name__=="__main__":
 
             edges = LBPEdges(fg).to(device)
             x = data.y.cpu().numpy()
+            data = None
             if pb.check_solution(x):
                 val = x.sum()
                 # create the vector of canonical parameters
@@ -191,6 +193,11 @@ if __name__=="__main__":
                 # save data
                 with open(output_path, "wb") as f:
                     pkl.dump(gap_values, f)
+
+                theta = None
+                v2f = None
+                fg = None
+                nmf_edges = None
                 
 
 
