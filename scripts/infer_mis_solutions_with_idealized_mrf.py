@@ -105,7 +105,7 @@ if __name__=="__main__":
             fg = MISFactorGraph(pb)
 
             y_ind = (data.y.cpu().numpy() > 0.5).astype(int)
-            x = (data.y[:2*pb.nv()].reshape(pb.nv(),2)[:,1].numpy() > 0.5)
+            x = (data.y[:2*pb.nv()].reshape(pb.nv(),2)[:,1].cpu().numpy() > 0.5)
             x_ind = x2ss(x, fg)
             if not np.all(x_ind == y_ind):
                 print("Recalculating edges and features")
@@ -144,15 +144,15 @@ if __name__=="__main__":
                 pb1 = data_to_mis(data1)
                 # factor graph
                 fg1 = MISFactorGraph(pb1)
-                y_ind1 = (data1.y.numpy() > 0.5).astype(int)
-                x1 = (data1.y[:2*pb1.nv()].reshape(pb1.nv(),2)[:,1].numpy() > 0.5)
+                y_ind1 = (data1.y.cpu().numpy() > 0.5).astype(int)
+                x1 = (data1.y[:2*pb1.nv()].reshape(pb1.nv(),2)[:,1].cpu().numpy() > 0.5)
                 x_ind1 = x2ss(x1, fg1)
                 dataset[k] = data1
                 data = data1
                 redump = True
 
             edges = LBPEdges(fg).to(device)
-            x = ss2x(data.y.numpy(), fg)
+            x = ss2x(data.y.cpu().numpy(), fg)
             for c in pb.C:
                 if x[c].sum() > 1:
                     print(c, x[c], x[c].sum())
