@@ -63,10 +63,11 @@ if __name__=="__main__":
     if dataset_path.endswith(".pkl"):
         dataset = pkl.load(open(dataset_path, "rb"))
     else:
-        dataset = [os.path.join(dataset_path, f) for f in os.listdir(dataset_path)]
-    redump = False
+        dataset = sorted([os.path.join(dataset_path, f) for f in os.listdir(dataset_path)])
 
     output_path = sys.argv[2]
+
+    # load output data
     columns = ["dataset", "sp_greedy_gap", "sp_greedy_t",
                "sp_is_gap", "sp_is_t",
                "ms_greedy_gap", "ms_greedy_t",
@@ -86,14 +87,24 @@ if __name__=="__main__":
                   "sp_greedy_t": [], "sp_is_t": [], 
                   "ms_greedy_t": [], "ms_is_t": [], 
                   "nmf_greedy_gap": [], "nmf_greedy_t": [],
-                  "nmf_is_gap": [], "nmf_is_t": []
+                  "nmf_is_gap": [], "nmf_is_t": [],
+                  "instance": []
                   }
+    if os.path.exists(output_path):
+        with open(output_path, "rb") as f:
+            gap_values = pkl.load(f)
    
     bar = Bar("Solving dataset: ", max = len(dataset))
     with torch.no_grad():
         for k in range(len(dataset)):
+            torch.cuda.empty_cache()
             if isinstance(dataset[k], str):
+                print("Instance = ", dataset[k])
+                if dataset[k] in gap_values["instance"]:
+                    continue
                 data = torch.load(dataset[k])
+                gap_values["instance"] = dataset[k]
+
             else:
                 data = dataset[k]
             data = data.to(device)
@@ -104,56 +115,9 @@ if __name__=="__main__":
             # factor graph
             fg = MISFactorGraph(pb)
 
-            #y_ind = (data.y.cpu().numpy() > 0.5).astype(int)
-            #x = (data.y[:2*pb.nv()].reshape(pb.nv(),2)[:,1].cpu().numpy() > 0.5)
-            #x_ind = x2ss(x, fg)
-            #if not np.all(x_ind == y_ind):
-            #    print("Recalculating edges and features")
-            #    # features
-            #    md = cplex_model(pb, continuous_relaxation=True, cliques=pb.C)
-
-            #    C = pb.C
-            #    _,nfeat,_,cfeat = eb_features(pb, md)
-            #    pb.C = C
-
-            #    efeat = np.ones(2 * sum(len(c) for c in pb.C))
-            #    nfeat = nfeat - np.mean(nfeat,axis=0)
-            #    cfeat = cfeat - np.mean(cfeat,axis=0)
-            #    efeat = efeat - np.mean(efeat,axis=0)
-            #    nn = nfeat.shape[1] - cfeat.shape[1]
-            #    xx = np.concatenate((nfeat, np.pad(cfeat, ((0,0), (0,nn)))), axis=0)
-            #
-            #    vcg = VCGraph(pb)
-            #    g = vcg.to_directed()
-            #    edge_index = torch.empty((2, g.number_of_edges()), dtype=torch.long)
-            #    bipartite = torch.empty(g.number_of_nodes())
-            #    for i,(src,dst) in enumerate(g.edges):
-            #        edge_index[0,i] = src
-            #        edge_index[1,i] = dst
-            #    for n,d in g.nodes(data=True):
-            #        bipartite[n] = d["bipartite"]
-
-
-            #    data1 = Data(edge_index=edge_index, 
-            #                bipartite=bipartite,
-            #                x=torch.from_numpy(xx),
-            #                e=torch.from_numpy(efeat),
-            #                y=torch.from_numpy(x2ss(x, fg))
-            #                )
-
-            #    pb1 = data_to_mis(data1)
-            #    # factor graph
-            #    fg1 = MISFactorGraph(pb1)
-            #    y_ind1 = (data1.y.cpu().numpy() > 0.5).astype(int)
-            #    x1 = (data1.y[:2*pb1.nv()].reshape(pb1.nv(),2)[:,1].cpu().numpy() > 0.5)
-            #    x_ind1 = x2ss(x1, fg1)
-            #    dataset[k] = data1
-            #    data = data1
-            #    redump = True
 
             edges = LBPEdges(fg).to(device)
             x = data.y.cpu().numpy()
-            print(pb.check_solution(x))
             if pb.check_solution(x):
                 val = x.sum()
                 # create the vector of canonical parameters
@@ -224,24 +188,27 @@ if __name__=="__main__":
                 gap_values["nmf_is_t"].append(t_nmf_is)
                 print("Naive Mean Field IS gap         = ", nmf_is_gap)
 
+                # save data
+                with open(output_path, "wb") as f:
+                    pkl.dump(gap_values, f)
+                
+
 
             count += 1
             if count >= limit:
                 break
 
-            bar.next()
-    bar.finish()
 
     #if redump:
     #    dataset = pkl.dump(dataset, open(dataset_path, "wb"))
 
-    row = {k:"${:.3f} (\pm {:.3f})$".format(round(np.mean(gap_values[k]), 3), round(np.std(gap_values[k]), 3)) for k  in gap_values.keys()}
-    row["dataset"] = os.path.basename(dataset_path)
-    header = not os.path.exists(output_path)
-    with open(output_path, "a") as f:
-        if header:
-            f.write(",".join(columns) + "\n")
-        f.write(",".join([row[k] for k in columns]) + "\n")
+    #row = {k:"${:.3f} (\pm {:.3f})$".format(round(np.mean(gap_values[k]), 3), round(np.std(gap_values[k]), 3)) for k  in gap_values.keys()}
+    #row["dataset"] = os.path.basename(dataset_path)
+    #header = not os.path.exists(output_path)
+    #with open(output_path, "a") as f:
+    #    if header:
+    #        f.write(",".join(columns) + "\n")
+    #    f.write(",".join([row[k] for k in columns]) + "\n")
 
 
 
