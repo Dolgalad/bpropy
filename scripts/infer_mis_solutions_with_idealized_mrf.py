@@ -152,12 +152,7 @@ if __name__=="__main__":
             #    redump = True
 
             edges = LBPEdges(fg).to(device)
-            x = ss2x(data.y.cpu().numpy(), fg)
-            for c in pb.C:
-                if x[c].sum() > 1:
-                    print(c, x[c], x[c].sum())
-            xx = data.y[:2*pb.nv()].reshape(pb.nv(),2)[:,1]
-            print(pb.check_solution(x))
+            x = data.y.cpu().numpy()
             if pb.check_solution(x):
                 val = x.sum()
                 # create the vector of canonical parameters
