@@ -104,9 +104,9 @@ if __name__=="__main__":
             # factor graph
             fg = MISFactorGraph(pb)
 
-            y_ind = (data.y.cpu().numpy() > 0.5).astype(int)
-            x = (data.y[:2*pb.nv()].reshape(pb.nv(),2)[:,1].cpu().numpy() > 0.5)
-            x_ind = x2ss(x, fg)
+            #y_ind = (data.y.cpu().numpy() > 0.5).astype(int)
+            #x = (data.y[:2*pb.nv()].reshape(pb.nv(),2)[:,1].cpu().numpy() > 0.5)
+            #x_ind = x2ss(x, fg)
             if not np.all(x_ind == y_ind):
                 print("Recalculating edges and features")
                 # features
