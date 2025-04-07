@@ -19,12 +19,6 @@ def naive_mean_field(fg, theta, pmprod_edges, pmprodsum_edges, max_iter=1000, to
     theta_rep = torch.repeat_interleave(theta_rep, 2**theta_rep)
     th = torch.repeat_interleave(theta, theta_rep)
 
-    print(th.device)
-    print(theta.device)
-    print(pmprod_edges.device)
-    print(pmprodsum_edges.device)
-    print(mu.device)
-
     for it in range(max_iter):
         x1 = th * torch_scatter.scatter_mul(mu[pmprod_edges[:,1]], pmprod_edges[:,0])
         y1 = torch_scatter.scatter_add(x1[pmprodsum_edges[:,1]], pmprodsum_edges[:,0])
