@@ -1,5 +1,7 @@
 """Naive Mean Field computation edges
 """
+import torch
+import numpy as np
 
 class NMFEdges:
     def __init__(self, fg=None):
@@ -27,7 +29,7 @@ class NMFEdges:
         ne.pmprodsum_edges = self.pmprodsum_edges.clone()
         return ne
     def to(self, device):
-        ne = LBPEdges()
+        ne = NMFEdges()
         ne.n_ss = self.n_ss.to(device)
         ne.n_vars = self.n_vars.to(device)
         ne.n_factors = self.n_factors.to(device)
@@ -39,8 +41,8 @@ class NMFEdges:
 
 
 def naive_mean_field_edges(fg):
-    nV = number_of_variables(fg)
-    nF = number_of_factors(fg)
+    nV = fg.nv()
+    nF = fg.nf()
 
     pmprod_index_map = {}
     pmprod_edges = []
@@ -49,8 +51,8 @@ def naive_mean_field_edges(fg):
 
     c,d = 0,0
 
-    for iF,F in enumerate(iter_factor_nodes(fg)):
-        neighbors = list(fg.neighbors(F))
+    for iF,F in enumerate(fg.iter_factors()):
+        neighbors = list(fg.factor_variables(F))
         nN = len(neighbors)
         for vals in range(2**nN):
             yF = np.unpackbits(np.array([vals],dtype=np.uint8), count=nN, bitorder="little")

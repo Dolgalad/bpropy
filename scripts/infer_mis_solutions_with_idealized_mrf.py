@@ -19,7 +19,9 @@ from bpropy.vc_graph import VCGraph
 from bpropy.mrf.mis_factor_graph import MISFactorGraph
 from bpropy.mrf.lbp_edges import LBPEdges
 from bpropy.mrf.lbp import loopy_belief_propagation, max_sum_loopy_belief_propagation
-from bpropy.mrf.importance_sampling import mis_importance_sampling
+from bpropy.mrf.nmf_edges import NMFEdges
+from bpropy.mrf.naive_mean_field import naive_mean_field
+from bpropy.mrf.importance_sampling import mis_importance_sampling, mis_importance_sampling_nmf
 from bpropy.mrf.sufficient_statistics import ss2x,x2ss
 from bpropy.datasets.mis_data import data_to_mis
 
@@ -58,26 +60,42 @@ def mis_idealized_canonical_parameters(fg, M=10.):
 
 if __name__=="__main__":
     dataset_path = sys.argv[1]
-    dataset = pkl.load(open(dataset_path, "rb"))
+    if dataset_path.endswith(".pkl"):
+        dataset = pkl.load(open(dataset_path, "rb"))
+    else:
+        dataset = [os.path.join(dataset_path, f) for f in os.listdir(dataset_path)]
     redump = False
 
     output_path = sys.argv[2]
-    print(sys.argv)
     columns = ["dataset", "sp_greedy_gap", "sp_greedy_t",
                "sp_is_gap", "sp_is_t",
                "ms_greedy_gap", "ms_greedy_t",
-               "ms_is_gap", "ms_is_t"
+               "ms_is_gap", "ms_is_t",
+               "nmf_greedy_gap", "nmf_greedy_t",
+               "nmf_is_gap", "nmf_is_t"
                ]
 
 
     max_iter = 10
     count = 0
     limit = 10
-    gap_values = {"sp_greedy_gap":[], "ms_greedy_gap":[], "sp_is_gap":[], "ms_is_gap":[], "sp_greedy_t": [], "sp_is_t": [], "ms_greedy_t": [], "ms_is_t": []}
+    if len(sys.argv) > 3:
+        limit = int(sys.argv[3])
+    gap_values = {"sp_greedy_gap":[], "ms_greedy_gap":[], 
+                  "sp_is_gap":[], "ms_is_gap":[], 
+                  "sp_greedy_t": [], "sp_is_t": [], 
+                  "ms_greedy_t": [], "ms_is_t": [], 
+                  "nmf_greedy_gap": [], "nmf_greedy_t": [],
+                  "nmf_is_gap": [], "nmf_is_t": []
+                  }
    
     bar = Bar("Solving dataset: ", max = len(dataset))
     for k in range(len(dataset)):
-        data = dataset[k]
+        if isinstance(dataset[k], str):
+            data = torch.load(dataset[k])
+        else:
+            data = dataset[k]
+        data = data.to(device)
         # recreate the MIS problem
         # generate MIS
         #C = cliques_from_data(data)
@@ -89,6 +107,7 @@ if __name__=="__main__":
         x = (data.y[:2*pb.nv()].reshape(pb.nv(),2)[:,1].numpy() > 0.5)
         x_ind = x2ss(x, fg)
         if not np.all(x_ind == y_ind):
+            print("Recalculating edges and features")
             # features
             md = cplex_model(pb, continuous_relaxation=True, cliques=pb.C)
 
@@ -153,7 +172,7 @@ if __name__=="__main__":
             sp_greedy_gap = 100 * (val - val_sp_greedy) / val
             gap_values["sp_greedy_gap"].append(sp_greedy_gap)
             gap_values["sp_greedy_t"].append(t_sp_greedy)
-            print("Sum-product greedy gap = ", sp_greedy_gap)
+            print("Sum-product greedy gap          = ", sp_greedy_gap)
 
             # Sum-product + importance sampling solve
             t_sp_is = time.time()
@@ -163,7 +182,7 @@ if __name__=="__main__":
             sp_is_gap = 100 * (val - val_sp_is) / val
             gap_values["sp_is_gap"].append(sp_is_gap)
             gap_values["sp_is_t"].append(t_sp_is)
-            print("Sum-product IS gap     = ", sp_is_gap)
+            print("Sum-product IS gap              = ", sp_is_gap)
 
             # Max-sum + greedy solve
             t_ms_greedy = time.time()
@@ -174,7 +193,7 @@ if __name__=="__main__":
             ms_greedy_gap = 100 * (val - val_ms_greedy) / val
             gap_values["ms_greedy_gap"].append(ms_greedy_gap)
             gap_values["ms_greedy_t"].append(t_ms_greedy)
-            print("Max-sum greedy gap     = ", ms_greedy_gap)
+            print("Max-sum greedy gap              = ", ms_greedy_gap)
 
             # Max-sum + importance sampling solve
             t_ms_is = time.time()
@@ -184,7 +203,29 @@ if __name__=="__main__":
             ms_is_gap = 100 * (val - val_ms_is) / val
             gap_values["ms_is_gap"].append(ms_is_gap)
             gap_values["ms_is_t"].append(t_ms_is)
-            print("Max-sum IS gap         = ", ms_greedy_gap)
+            print("Max-sum IS gap                  = ", ms_is_gap)
+
+            # naive mean field and greedy
+            nmf_edges = NMFEdges(fg)
+            t_nmf_greedy = time.time()
+            mu = naive_mean_field(fg, theta.clone(), nmf_edges.pmprod_edges, nmf_edges.pmprodsum_edges, max_iter=max_iter)
+            x_nmf_greedy = pb.greedy(mu[:2*pb.nv()].reshape(pb.nv(),2)[:,1].cpu().numpy())
+            t_nmf_greedy = time.time() - t_nmf_greedy
+            val_nmf_greedy = x_nmf_greedy.sum()
+            nmf_greedy_gap = 100 * (val - val_nmf_greedy) / val
+            gap_values["nmf_greedy_gap"].append(nmf_greedy_gap)
+            gap_values["nmf_greedy_t"].append(t_nmf_greedy)
+            print("Naive Mean Field greedy gap     = ", nmf_greedy_gap)
+
+            # naive mean field and importance sampling
+            t_nmf_is = time.time()
+            x_nmf_is = mis_importance_sampling_nmf(pb, theta.clone(), max_iter=max_iter, edges=nmf_edges)
+            t_nmf_is = time.time() - t_nmf_is
+            val_nmf_is = x_nmf_is.sum()
+            nmf_is_gap = 100 * (val - val_nmf_is) / val
+            gap_values["nmf_is_gap"].append(nmf_is_gap)
+            gap_values["nmf_is_t"].append(t_nmf_is)
+            print("Naive Mean Field IS gap         = ", nmf_is_gap)
 
 
         count += 1
@@ -196,8 +237,6 @@ if __name__=="__main__":
 
     #if redump:
     #    dataset = pkl.dump(dataset, open(dataset_path, "wb"))
-    print(gap_values)
-    print({k:np.mean(gap_values[k]) for k in gap_values.keys() if "gap" in k})
 
     row = {k:"${:.3f} (\pm {:.3f})$".format(round(np.mean(gap_values[k]), 3), round(np.std(gap_values[k]), 3)) for k  in gap_values.keys()}
     row["dataset"] = os.path.basename(dataset_path)

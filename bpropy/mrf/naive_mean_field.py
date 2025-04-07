@@ -6,13 +6,15 @@ import networkx as nx
 import torch
 import torch_scatter
 
-from bpropy.lbp import *
+#from bpropy.mrf.lbp import *
+from bpropy.mrf.nmf_edges import NMFEdges
 
 
 def naive_mean_field(fg, theta, pmprod_edges, pmprodsum_edges, max_iter=1000, tol=1e-6):
+    nV = fg.nv()
     mu = torch.zeros(2*nV, dtype=torch.float)
 
-    theta_rep = torch.tensor([factor_size(fg,F) for F in iter_factor_nodes(fg)], dtype=torch.long)
+    theta_rep = torch.tensor([fg.factor_size(F) for F in fg.iter_factors()], dtype=torch.long)
     theta_rep = torch.repeat_interleave(theta_rep, 2**theta_rep)
     th = torch.repeat_interleave(theta, theta_rep)
 

@@ -16,6 +16,8 @@ from bpropy.co.mis import MIS
 from bpropy.mrf.mis_factor_graph import MISFactorGraph
 from bpropy.mrf.lbp_edges import LBPEdges
 from bpropy.mrf.lbp import loopy_belief_propagation, _loopy_belief_propagation_with_evidence
+from bpropy.mrf.nmf_edges import NMFEdges
+from bpropy.mrf.naive_mean_field import naive_mean_field
 from bpropy.utils.graph_utils import ordered_edges
 #from models_mrf import *
 #from mis_er_mrf_dataset import MISERMRFDataset
@@ -100,6 +102,76 @@ def mis_importance_sampling(pb, theta, U=2., max_iter=10, inference_f=loopy_beli
         mu0 = mu.clone()
 
     return solution
+
+def mis_importance_sampling_nmf(pb, theta, U=2., max_iter=10, edges=None):
+    fixed_variables = np.zeros(pb.nv(), dtype=int)
+    solution = np.zeros(pb.nv(), dtype=int)
+    mu0 = torch.zeros_like(theta)
+    v2f = torch.zeros_like(theta)
+    #edges = [e for e in ordered_edges(pb.g)]
+    fg = MISFactorGraph(pb)
+    if edges is None:
+        edges = NMFEdges(fg)
+    edges = edges.to(theta.device)
+
+
+    while not np.all(fixed_variables):
+        # belief propagation
+        mu = naive_mean_field(fg, theta, edges.pmprod_edges, edges.pmprodsum_edges, max_iter=max_iter, tol=1e-6)
+
+        # vertex marginals for x_i=1
+        marginals = mu[:2*pb.nv()].reshape(pb.nv(), 2)[:,1].cpu().numpy()
+        # set fixed vertex marginals to -inf
+        marginals[fixed_variables==1] = -np.inf
+        # find candidate
+        u = np.argmax(marginals)
+        solution[u] = 1
+        fixed_variables[u] = 1
+        theta[2*u] -= U
+        theta[2*u+1] += U
+        u_neighbors = list(pb.g.neighbors(u))
+        for v in u_neighbors:
+            if not fixed_variables[v]:
+                theta[2*v] += U
+                theta[2*v+1] -= U
+                fixed_variables[v] = 1
+            #eidx = edges.index([min(u,v), max(u,v)])
+            #if u == min(u,v):
+            #    theta[2*pb.nv()+4*eidx] = -U
+            #    theta[2*pb.nv()+4*eidx+1] = U
+            #    theta[2*pb.nv()+4*eidx+2] = -U
+            #    theta[2*pb.nv()+4*eidx+3] = -U
+            #else:
+            #    theta[2*pb.nv()+4*eidx] = -U
+            #    theta[2*pb.nv()+4*eidx+1] = -U
+            #    theta[2*pb.nv()+4*eidx+2] = U
+            #    theta[2*pb.nv()+4*eidx+3] = -U
+
+            #for w in pb.g.neighbors(v):
+            #    if w!=u:
+            #        vwidx = edges.index([min(w,v), max(w,v)])
+            #        if w in u_neighbors:
+            #            theta[2*pb.nv()+4*vwidx] = U
+            #            theta[2*pb.nv()+4*vwidx+1] = -U
+            #            theta[2*pb.nv()+4*vwidx+2] = -U
+            #            theta[2*pb.nv()+4*vwidx+3] = -U
+            #        else:
+            #            if v == min(w,v):
+            #                theta[2*pb.nv()+4*vwidx] = U
+            #                theta[2*pb.nv()+4*vwidx+1] = -U
+            #                theta[2*pb.nv()+4*vwidx+2] = U
+            #                theta[2*pb.nv()+4*vwidx+3] = -U
+            #            else:
+            #                theta[2*pb.nv()+4*vwidx] = U
+            #                theta[2*pb.nv()+4*vwidx+1] = U
+            #                theta[2*pb.nv()+4*vwidx+2] = -U
+            #                theta[2*pb.nv()+4*vwidx+3] = -U
+
+
+        mu0 = mu.clone()
+
+    return solution
+
 
 def mis_is(pb, theta, data, U=10.0):
     # initialize solution and queue
