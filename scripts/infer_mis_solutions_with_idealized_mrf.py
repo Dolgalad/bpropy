@@ -110,7 +110,7 @@ if __name__=="__main__":
                     print("Skipping")
                     continue
                 data = torch.load(dataset[k])
-                gap_values["instance"] = dataset[k]
+                gap_values["instance"].append(dataset[k])
 
             else:
                 data = dataset[k]
