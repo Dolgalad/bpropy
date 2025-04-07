@@ -107,49 +107,49 @@ if __name__=="__main__":
             #y_ind = (data.y.cpu().numpy() > 0.5).astype(int)
             #x = (data.y[:2*pb.nv()].reshape(pb.nv(),2)[:,1].cpu().numpy() > 0.5)
             #x_ind = x2ss(x, fg)
-            if not np.all(x_ind == y_ind):
-                print("Recalculating edges and features")
-                # features
-                md = cplex_model(pb, continuous_relaxation=True, cliques=pb.C)
+            #if not np.all(x_ind == y_ind):
+            #    print("Recalculating edges and features")
+            #    # features
+            #    md = cplex_model(pb, continuous_relaxation=True, cliques=pb.C)
 
-                C = pb.C
-                _,nfeat,_,cfeat = eb_features(pb, md)
-                pb.C = C
+            #    C = pb.C
+            #    _,nfeat,_,cfeat = eb_features(pb, md)
+            #    pb.C = C
 
-                efeat = np.ones(2 * sum(len(c) for c in pb.C))
-                nfeat = nfeat - np.mean(nfeat,axis=0)
-                cfeat = cfeat - np.mean(cfeat,axis=0)
-                efeat = efeat - np.mean(efeat,axis=0)
-                nn = nfeat.shape[1] - cfeat.shape[1]
-                xx = np.concatenate((nfeat, np.pad(cfeat, ((0,0), (0,nn)))), axis=0)
-            
-                vcg = VCGraph(pb)
-                g = vcg.to_directed()
-                edge_index = torch.empty((2, g.number_of_edges()), dtype=torch.long)
-                bipartite = torch.empty(g.number_of_nodes())
-                for i,(src,dst) in enumerate(g.edges):
-                    edge_index[0,i] = src
-                    edge_index[1,i] = dst
-                for n,d in g.nodes(data=True):
-                    bipartite[n] = d["bipartite"]
+            #    efeat = np.ones(2 * sum(len(c) for c in pb.C))
+            #    nfeat = nfeat - np.mean(nfeat,axis=0)
+            #    cfeat = cfeat - np.mean(cfeat,axis=0)
+            #    efeat = efeat - np.mean(efeat,axis=0)
+            #    nn = nfeat.shape[1] - cfeat.shape[1]
+            #    xx = np.concatenate((nfeat, np.pad(cfeat, ((0,0), (0,nn)))), axis=0)
+            #
+            #    vcg = VCGraph(pb)
+            #    g = vcg.to_directed()
+            #    edge_index = torch.empty((2, g.number_of_edges()), dtype=torch.long)
+            #    bipartite = torch.empty(g.number_of_nodes())
+            #    for i,(src,dst) in enumerate(g.edges):
+            #        edge_index[0,i] = src
+            #        edge_index[1,i] = dst
+            #    for n,d in g.nodes(data=True):
+            #        bipartite[n] = d["bipartite"]
 
 
-                data1 = Data(edge_index=edge_index, 
-                            bipartite=bipartite,
-                            x=torch.from_numpy(xx),
-                            e=torch.from_numpy(efeat),
-                            y=torch.from_numpy(x2ss(x, fg))
-                            )
+            #    data1 = Data(edge_index=edge_index, 
+            #                bipartite=bipartite,
+            #                x=torch.from_numpy(xx),
+            #                e=torch.from_numpy(efeat),
+            #                y=torch.from_numpy(x2ss(x, fg))
+            #                )
 
-                pb1 = data_to_mis(data1)
-                # factor graph
-                fg1 = MISFactorGraph(pb1)
-                y_ind1 = (data1.y.cpu().numpy() > 0.5).astype(int)
-                x1 = (data1.y[:2*pb1.nv()].reshape(pb1.nv(),2)[:,1].cpu().numpy() > 0.5)
-                x_ind1 = x2ss(x1, fg1)
-                dataset[k] = data1
-                data = data1
-                redump = True
+            #    pb1 = data_to_mis(data1)
+            #    # factor graph
+            #    fg1 = MISFactorGraph(pb1)
+            #    y_ind1 = (data1.y.cpu().numpy() > 0.5).astype(int)
+            #    x1 = (data1.y[:2*pb1.nv()].reshape(pb1.nv(),2)[:,1].cpu().numpy() > 0.5)
+            #    x_ind1 = x2ss(x1, fg1)
+            #    dataset[k] = data1
+            #    data = data1
+            #    redump = True
 
             edges = LBPEdges(fg).to(device)
             x = ss2x(data.y.cpu().numpy(), fg)
