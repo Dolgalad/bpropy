@@ -153,6 +153,7 @@ if __name__=="__main__":
 
             edges = LBPEdges(fg).to(device)
             x = data.y.cpu().numpy()
+            print(pb.check_solution(x))
             if pb.check_solution(x):
                 val = x.sum()
                 # create the vector of canonical parameters
@@ -202,7 +203,7 @@ if __name__=="__main__":
                 print("Max-sum IS gap                  = ", ms_is_gap)
 
                 # naive mean field and greedy
-                nmf_edges = NMFEdges(fg)
+                nmf_edges = NMFEdges(fg).to(device)
                 t_nmf_greedy = time.time()
                 mu = naive_mean_field(fg, theta.clone(), nmf_edges.pmprod_edges, nmf_edges.pmprodsum_edges, max_iter=max_iter)
                 x_nmf_greedy = pb.greedy(mu[:2*pb.nv()].reshape(pb.nv(),2)[:,1].cpu().numpy())
