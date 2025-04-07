@@ -98,6 +98,12 @@ if __name__=="__main__":
     with torch.no_grad():
         for k in range(len(dataset)):
             torch.cuda.empty_cache()
+
+            device = torch.device('cuda:0')
+            free, total = torch.cuda.mem_get_info(device)
+            mem_used_MB = (total - free) / 1024 ** 2
+            print("Memory used : ", mem_used_mb)
+
             if isinstance(dataset[k], str):
                 print("Instance = ", dataset[k])
                 if dataset[k] in gap_values["instance"]:
