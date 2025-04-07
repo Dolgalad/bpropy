@@ -102,12 +102,12 @@ if __name__=="__main__":
             device = torch.device('cuda:0')
             free, total = torch.cuda.mem_get_info(device)
             mem_used_MB = (total - free) / 1024 ** 2
-            print("Memory used : ", mem_used_MB)
+            print("Memory used : ", mem_used_MB, flush=True)
 
             if isinstance(dataset[k], str):
-                print("Instance = ", dataset[k])
+                print("Instance = ", dataset[k], flush=True)
                 if dataset[k] in gap_values["instance"]:
-                    print("Skipping")
+                    print("Skipping", flush=True)
                     continue
                 data = torch.load(dataset[k])
                 gap_values["instance"].append(dataset[k])
@@ -141,7 +141,7 @@ if __name__=="__main__":
                 sp_greedy_gap = 100 * (val - val_sp_greedy) / val
                 gap_values["sp_greedy_gap"].append(sp_greedy_gap)
                 gap_values["sp_greedy_t"].append(t_sp_greedy)
-                print("Sum-product greedy gap          = ", sp_greedy_gap)
+                print("Sum-product greedy gap          = ", sp_greedy_gap, flush=True)
 
                 # Sum-product + importance sampling solve
                 t_sp_is = time.time()
@@ -151,7 +151,7 @@ if __name__=="__main__":
                 sp_is_gap = 100 * (val - val_sp_is) / val
                 gap_values["sp_is_gap"].append(sp_is_gap)
                 gap_values["sp_is_t"].append(t_sp_is)
-                print("Sum-product IS gap              = ", sp_is_gap)
+                print("Sum-product IS gap              = ", sp_is_gap, flush=True)
 
                 # Max-sum + greedy solve
                 t_ms_greedy = time.time()
@@ -162,7 +162,7 @@ if __name__=="__main__":
                 ms_greedy_gap = 100 * (val - val_ms_greedy) / val
                 gap_values["ms_greedy_gap"].append(ms_greedy_gap)
                 gap_values["ms_greedy_t"].append(t_ms_greedy)
-                print("Max-sum greedy gap              = ", ms_greedy_gap)
+                print("Max-sum greedy gap              = ", ms_greedy_gap, flush=True)
 
                 # Max-sum + importance sampling solve
                 t_ms_is = time.time()
@@ -172,7 +172,7 @@ if __name__=="__main__":
                 ms_is_gap = 100 * (val - val_ms_is) / val
                 gap_values["ms_is_gap"].append(ms_is_gap)
                 gap_values["ms_is_t"].append(t_ms_is)
-                print("Max-sum IS gap                  = ", ms_is_gap)
+                print("Max-sum IS gap                  = ", ms_is_gap, flush=True)
 
                 # naive mean field and greedy
                 nmf_edges = NMFEdges(fg).to(device)
@@ -184,7 +184,7 @@ if __name__=="__main__":
                 nmf_greedy_gap = 100 * (val - val_nmf_greedy) / val
                 gap_values["nmf_greedy_gap"].append(nmf_greedy_gap)
                 gap_values["nmf_greedy_t"].append(t_nmf_greedy)
-                print("Naive Mean Field greedy gap     = ", nmf_greedy_gap)
+                print("Naive Mean Field greedy gap     = ", nmf_greedy_gap, flush=True)
 
                 # naive mean field and importance sampling
                 t_nmf_is = time.time()
@@ -194,7 +194,7 @@ if __name__=="__main__":
                 nmf_is_gap = 100 * (val - val_nmf_is) / val
                 gap_values["nmf_is_gap"].append(nmf_is_gap)
                 gap_values["nmf_is_t"].append(t_nmf_is)
-                print("Naive Mean Field IS gap         = ", nmf_is_gap)
+                print("Naive Mean Field IS gap         = ", nmf_is_gap, flush=True)
 
                 # save data
                 with open(output_path, "wb") as f:
