@@ -116,12 +116,12 @@ if __name__=="__main__":
             device = torch.device('cuda:0')
             free, total = torch.cuda.mem_get_info(device)
             mem_used_MB = (total - free) / 1024 ** 2
-            print("Memory used : ", mem_used_MB)
+            print("Memory used : ", mem_used_MB, flush=True)
 
             if isinstance(dataset[k], str):
-                print("Instance = ", dataset[k])
+                print("Instance = ", dataset[k], flush=True)
                 if dataset[k] in gap_values["instance"]:
-                    print("Skipping")
+                    print("Skipping", flush=True)
                     continue
                 data = torch.load(dataset[k])
 
