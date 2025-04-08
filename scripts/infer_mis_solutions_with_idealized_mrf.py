@@ -9,6 +9,7 @@ import numpy as np
 import torch
 from progress.bar import Bar
 import pandas as pd
+from filelock import FileLock
 
 from torch_geometric.data import Data
 
@@ -66,6 +67,18 @@ if __name__=="__main__":
         dataset = sorted([os.path.join(dataset_path, f) for f in os.listdir(dataset_path)])
 
     output_path = sys.argv[2]
+    lock = FileLock(f"{output_path}.lock")
+
+    task_id = int(sys.argv[3])
+    max_tasks = int(sys.argv[4])
+
+    n_inst = int(len(dataset) / max_tasks)
+
+    if task_id < max_tasks:
+        dataset = dataset[n_inst*(task_id-1):n_inst*task_id]
+    else:
+        dataset = dataset[n_inst*(task_id-1):]
+
 
     # load output data
     columns = ["dataset", "sp_greedy_gap", "sp_greedy_t",
@@ -79,9 +92,9 @@ if __name__=="__main__":
 
     max_iter = 10
     count = 0
-    limit = 10
-    if len(sys.argv) > 3:
-        limit = int(sys.argv[3])
+    limit = 10000
+
+
     gap_values = {"sp_greedy_gap":[], "ms_greedy_gap":[], 
                   "sp_is_gap":[], "ms_is_gap":[], 
                   "sp_greedy_t": [], "sp_is_t": [], 
@@ -91,8 +104,9 @@ if __name__=="__main__":
                   "instance": []
                   }
     if os.path.exists(output_path):
-        with open(output_path, "rb") as f:
-            gap_values = pkl.load(f)
+        with lock:
+            with open(output_path, "rb") as f:
+                gap_values = pkl.load(f)
    
     bar = Bar("Solving dataset: ", max = len(dataset))
     with torch.no_grad():
@@ -110,7 +124,6 @@ if __name__=="__main__":
                     print("Skipping")
                     continue
                 data = torch.load(dataset[k])
-                gap_values["instance"].append(dataset[k])
 
             else:
                 data = dataset[k]
@@ -139,8 +152,6 @@ if __name__=="__main__":
                 t_sp_greedy = time.time() - t_sp_greedy
                 val_sp_greedy = x_sp_greedy.sum()
                 sp_greedy_gap = 100 * (val - val_sp_greedy) / val
-                gap_values["sp_greedy_gap"].append(sp_greedy_gap)
-                gap_values["sp_greedy_t"].append(t_sp_greedy)
                 print("Sum-product greedy gap          = ", sp_greedy_gap)
 
                 # Sum-product + importance sampling solve
@@ -149,8 +160,6 @@ if __name__=="__main__":
                 t_sp_is = time.time() - t_sp_is
                 val_sp_is = x_sp_is.sum()
                 sp_is_gap = 100 * (val - val_sp_is) / val
-                gap_values["sp_is_gap"].append(sp_is_gap)
-                gap_values["sp_is_t"].append(t_sp_is)
                 print("Sum-product IS gap              = ", sp_is_gap)
 
                 # Max-sum + greedy solve
@@ -160,8 +169,6 @@ if __name__=="__main__":
                 t_ms_greedy = time.time() - t_ms_greedy
                 val_ms_greedy = x_ms_greedy.sum()
                 ms_greedy_gap = 100 * (val - val_ms_greedy) / val
-                gap_values["ms_greedy_gap"].append(ms_greedy_gap)
-                gap_values["ms_greedy_t"].append(t_ms_greedy)
                 print("Max-sum greedy gap              = ", ms_greedy_gap)
 
                 # Max-sum + importance sampling solve
@@ -170,8 +177,6 @@ if __name__=="__main__":
                 t_ms_is = time.time() - t_ms_is
                 val_ms_is = x_ms_is.sum()
                 ms_is_gap = 100 * (val - val_ms_is) / val
-                gap_values["ms_is_gap"].append(ms_is_gap)
-                gap_values["ms_is_t"].append(t_ms_is)
                 print("Max-sum IS gap                  = ", ms_is_gap)
 
                 # naive mean field and greedy
@@ -182,8 +187,6 @@ if __name__=="__main__":
                 t_nmf_greedy = time.time() - t_nmf_greedy
                 val_nmf_greedy = x_nmf_greedy.sum()
                 nmf_greedy_gap = 100 * (val - val_nmf_greedy) / val
-                gap_values["nmf_greedy_gap"].append(nmf_greedy_gap)
-                gap_values["nmf_greedy_t"].append(t_nmf_greedy)
                 print("Naive Mean Field greedy gap     = ", nmf_greedy_gap)
 
                 # naive mean field and importance sampling
@@ -192,13 +195,28 @@ if __name__=="__main__":
                 t_nmf_is = time.time() - t_nmf_is
                 val_nmf_is = x_nmf_is.sum()
                 nmf_is_gap = 100 * (val - val_nmf_is) / val
-                gap_values["nmf_is_gap"].append(nmf_is_gap)
-                gap_values["nmf_is_t"].append(t_nmf_is)
                 print("Naive Mean Field IS gap         = ", nmf_is_gap)
 
                 # save data
-                with open(output_path, "wb") as f:
-                    pkl.dump(gap_values, f)
+                with lock:
+                    if os.path.exists(output_path):
+                        with open(output_path, "rb") as f:
+                            gap_values = pkl.load(f)
+                    gap_values["sp_greedy_gap"].append(sp_greedy_gap)
+                    gap_values["sp_greedy_t"].append(t_sp_greedy)
+                    gap_values["nmf_is_gap"].append(nmf_is_gap)
+                    gap_values["nmf_is_t"].append(t_nmf_is)
+                    gap_values["nmf_greedy_gap"].append(nmf_greedy_gap)
+                    gap_values["nmf_greedy_t"].append(t_nmf_greedy)
+                    gap_values["ms_is_gap"].append(ms_is_gap)
+                    gap_values["ms_is_t"].append(t_ms_is)
+                    gap_values["ms_greedy_gap"].append(ms_greedy_gap)
+                    gap_values["ms_greedy_t"].append(t_ms_greedy)
+                    gap_values["sp_is_gap"].append(sp_is_gap)
+                    gap_values["sp_is_t"].append(t_sp_is)
+                    gap_values["instance"].append(dataset[k])
+                    with open(output_path, "wb") as f:
+                        pkl.dump(gap_values, f)
 
                 theta = None
                 v2f = None
