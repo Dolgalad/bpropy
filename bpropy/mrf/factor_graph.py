@@ -50,10 +50,14 @@ class FactorGraph(Graph):
         """Return number of variable nodes adjacent to factor node `F`
         """
         return len(self.factor_variables(F))
+    def containing_factors(self, i):
+        return sorted(list(self.neighbors(i)))
     def number_sufficient_statistics(self):
         """Number of sufficient statistics needed for the Over-Complete representation
         """
         return sum([2**self.factor_size(F) for F in self.iter_factors()])
+    def nss(self):
+        return self.number_sufficient_statistics()
     def number_of_variables(self):
         """Return number of variables
         """

@@ -24,7 +24,7 @@ from bpropy.vc_graph import VCGraph
 from bpropy.co.mis_solution import MISSolution
 
 class MIS:
-    def __init__(self, g, weights=None, cliques=None):
+    def __init__(self, g, weights=None, cliques=None, num_graphs=1, graph_sizes=None):
         self.g = g
         if weights is None:
             self.w = np.ones(nx.number_of_nodes(g))
@@ -36,6 +36,12 @@ class MIS:
             self.C = lenlex_sort(cliques)
         if not is_edge_cover(self.C, self.g):
             raise Exception("MIS: cliques do not cover all edges of graph")
+        # batch information
+        self.num_graphs = num_graphs
+        if graph_sizes is None:
+            self.graph_sizes = np.array([g.number_of_nodes()])
+        else:
+            self.graph_sizes = graph_sizes
     def nv(self):
         """Get number of variables
         """
@@ -102,6 +108,22 @@ class MIS:
         """Check if solution is feasible
         """
         return solution_feasible(self, x)
+    def get_problem(self, idx):
+        """Get `idx`-th problem
+        """
+        if idx>=self.num_graphs:
+            raise Exception(f"Subproblem {idx} greater than number of graphs {self.num_graphs}")
+        offset = np.roll(self.graph_sizes.cumsum(),1)
+        nV = self.graph_sizes[idx]
+        offset[0] = 0
+        g = nx.subgraph(self.g, [n for n in range(offset[idx], offset[idx]+nV)]).copy()
+        nmap = {n+offset[idx]:n for n in range(nV)}
+        g = nx.relabel_nodes(g, nmap)
+        C = []
+        for c in self.C:
+            if np.all([u>=offset[idx] and u<offset[idx]+nV for u in c]):
+                C.append([u-offset[idx] for u in c])
+        return MIS(g, cliques=C)
     @staticmethod
     def from_vcgraph(vcg):
         """Construct MIS instance from a VCGraph representation
@@ -127,7 +149,8 @@ def mis_equal(pb1, pb2):
     for e in pb1.g.edges:
         if not pb2.g.has_edge(*e):
             return False
-    return True
+    # check cliques
+    return pb1.C == pb2.C
     
 
 def plot_maxcut_solution(pb, x, ax=None, pos=None, node_color=None, cmap=None):
@@ -210,4 +233,21 @@ def get_solution_pool(pb, absgap=None, relgap=None, limit=None, timelimit=None, 
     for i in range(n_sol):
         solutions.append(np.array(cpx.solution.pool.get_values(i)))
     return np.array(solutions)
+
+def offset_clique(c, o):
+    return [u+o for u in c]
+def mis_batch(pbs):
+    g = nx.Graph()
+    C = []
+    graph_sizes = []
+    offset = 0
+    for i,pb in enumerate(pbs):
+        graph_sizes.append(pb.g.number_of_nodes())
+        C += [offset_clique(c,offset) for c in pb.C]
+        g.add_nodes_from([offset+n for n in pb.g.nodes])
+        g.add_edges_from([[e[0]+offset, e[1]+offset] for e in pb.g.edges])
+        offset += pb.g.number_of_nodes()
+    pb = MIS(g, cliques=C, num_graphs=len(pbs), graph_sizes=np.array(graph_sizes))
+    #pb.C = C
+    return pb
 
