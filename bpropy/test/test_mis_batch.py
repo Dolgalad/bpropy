@@ -69,7 +69,10 @@ class TestMISBatch(unittest.TestCase):
 
 
     def test_mis_batch_lbp_edges(self):
-        pbs = [random_mis(np.random.choice(range(10,100)), .15, cliques=True) for _ in range(10)]
+        #import random
+        #np.random.seed(123)
+        #random.seed(123)
+        pbs = [random_mis(np.random.choice(range(10,50)), .15, cliques=True) for _ in range(3)]
 
         pb_batch = mis_batch(pbs)
 

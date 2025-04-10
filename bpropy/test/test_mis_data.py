@@ -67,7 +67,7 @@ class TestMISData(unittest.TestCase):
             self.assertTrue(pb_cat.check_solution(y))
             self.assertTrue(len(pb.C) == fg.nf() - pb.nv())
             fg_factors = [fg.factor_variables(F) for F in fg.iter_factors()]
-            self.assertTrue(pb.C == fg_factors[pb.nv():])
+            self.assertTrue(np.all([np.all(c1==c2) for c1,c2 in zip(pb.C,fg_factors[pb.nv():])]))
             off = 0
             for F in fg.iter_factors():
                 nF = fg.factor_size(F)

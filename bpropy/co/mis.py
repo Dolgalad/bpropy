@@ -31,9 +31,9 @@ class MIS:
         else:
             self.w = weights
         if cliques is None:
-            self.C = ordered_edges(self.g)
+            self.C = np.array([np.array(e) for e in ordered_edges(self.g)], dtype=object)
         else:
-            self.C = lenlex_sort(cliques)
+            self.C = np.array([np.array(c) for c in lenlex_sort(cliques)], dtype=object)
         if not is_edge_cover(self.C, self.g):
             raise Exception("MIS: cliques do not cover all edges of graph")
         # batch information
@@ -42,6 +42,27 @@ class MIS:
             self.graph_sizes = np.array([g.number_of_nodes()])
         else:
             self.graph_sizes = graph_sizes
+        self.clique_indicator = self.get_clique_indicators()
+    def set_cliques(self, cliques, sort=False):
+        if sort:
+            self.C = np.array([np.array(c) for c in lenlex_sort(cliques)], dtype=object)
+        else:
+            self.C = np.array([np.array(c) for c in cliques], dtype=object)
+        self.clique_indicator = self.get_clique_indicators()
+
+
+    def get_clique_indicators(self):
+        var_offsets = np.roll(self.graph_sizes.cumsum(), 1)
+        var_offsets[0] = 0
+        var_offsets = np.flip(var_offsets)
+        ind = np.zeros(len(self.C), dtype=int)
+        for i,c in enumerate(self.C):
+            ind[i] = self.num_graphs - 1 - np.argmax(var_offsets <= c.min())
+        return ind
+
+
+
+
     def nv(self):
         """Get number of variables
         """
@@ -119,10 +140,11 @@ class MIS:
         g = nx.subgraph(self.g, [n for n in range(offset[idx], offset[idx]+nV)]).copy()
         nmap = {n+offset[idx]:n for n in range(nV)}
         g = nx.relabel_nodes(g, nmap)
-        C = []
-        for c in self.C:
-            if np.all([u>=offset[idx] and u<offset[idx]+nV for u in c]):
-                C.append([u-offset[idx] for u in c])
+        #C = []
+        #for c in self.C:
+        #    if np.all([u>=offset[idx] and u<offset[idx]+nV for u in c]):
+        #        C.append([u-offset[idx] for u in c])
+        C = self.C[self.clique_indicator == idx] - offset[idx]
         return MIS(g, cliques=C)
     @staticmethod
     def from_vcgraph(vcg):
@@ -153,7 +175,7 @@ def mis_equal(pb1, pb2):
         if not pb2.g.has_edge(*e):
             return False
     # check cliques
-    return pb1.C == pb2.C
+    return np.all([np.all(c1==c2) for c1,c2 in zip(pb1.C,pb2.C)])
     
 
 def plot_maxcut_solution(pb, x, ax=None, pos=None, node_color=None, cmap=None):

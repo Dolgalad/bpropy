@@ -12,7 +12,8 @@ class TestMISFeatures(unittest.TestCase):
 
         self.assertTrue(len(C) == pb.ne())
         self.assertTrue(is_edge_cover(C, pb.g))
-        self.assertTrue(C == pb.C)
+        #self.assertTrue(C == pb.C)
+        self.assertTrue(np.all([np.all(c1==c2) for c1,c2 in zip(C, pb.C)]))
         self.assertTrue(nfeat.shape[0] == pb.nv())
         self.assertTrue(efeat.shape[0] == 4*pb.ne())
         self.assertTrue(cfeat.shape[0] == pb.ne())
@@ -22,7 +23,8 @@ class TestMISFeatures(unittest.TestCase):
         C,nfeat,efeat,cfeat = get_features(pb, "CC")
 
         self.assertTrue(is_edge_cover(C, pb.g))
-        self.assertTrue(C == pb.C)
+        #self.assertTrue(C == pb.C)
+        self.assertTrue(np.all([np.all(c1==c2) for c1,c2 in zip(C, pb.C)]))
         self.assertTrue(nfeat.shape[0] == pb.nv())
         self.assertTrue(efeat.shape[0] == 2*sum(len(c) for c in C))
         self.assertTrue(cfeat.shape[0] == len(C))
@@ -32,7 +34,7 @@ class TestMISFeatures(unittest.TestCase):
         C,nfeat,efeat,cfeat = get_features(pb, "CF")
 
         self.assertTrue(is_edge_cover(C, pb.g))
-        self.assertTrue(C == pb.C)
+        self.assertTrue(np.all([np.all(c1==c2) for c1,c2 in zip(C, pb.C)]))
         self.assertTrue(nfeat.shape[0] == pb.nv())
         self.assertTrue(efeat.shape[0] == 4*pb.ne())
         self.assertTrue(cfeat.shape[0] == len(C))
@@ -41,7 +43,7 @@ class TestMISFeatures(unittest.TestCase):
         pb = random_mis(50)
         C,nfeat,efeat,cfeat = get_features(pb, "EC")
 
-        self.assertTrue(C == pb.C)
+        self.assertTrue(np.all([np.all(c1==c2) for c1,c2 in zip(C, pb.C)]))
         self.assertTrue(is_edge_cover(C, pb.g))
         self.assertTrue(nfeat.shape[0] == pb.nv())
         self.assertTrue(efeat.shape[0] == 2*sum(len(c) for c in C))
@@ -51,7 +53,8 @@ class TestMISFeatures(unittest.TestCase):
         pb = random_mis(50)
         C,nfeat,efeat,cfeat = get_features(pb, "CP")
 
-        self.assertTrue(C == pb.C)
+        #self.assertTrue(C == pb.C)
+        self.assertTrue(np.all([np.all(c1==c2) for c1,c2 in zip(C, pb.C)]))
         self.assertTrue(is_edge_cover(C, pb.g))
         self.assertTrue(nfeat.shape[0] == pb.nv())
         self.assertTrue(efeat.shape[0] == 2*sum(len(c) for c in C))

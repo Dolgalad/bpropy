@@ -90,6 +90,7 @@ t_grd,x_sp_greedy = time_f(batch_pb.greedy,batch_mu[:2*batch_pb.nv()].reshape(ba
 t0 = time.time() - t0
 
 print("One big batch = ", t0)
+print("\tbatch = ", t_batch)
 print("\tfg    = ", t_fg)
 print("\tedges = ", t_edges)
 print("\ttheta = ", t_theta)

@@ -89,7 +89,7 @@ def cf_features(pb, cliques, solver="cbc"):
                 a += 1
         cfeat[i,:] /= a
 
-    pb.C = edges
+    pb.set_cliques(edges, sort=False)
     return edges,nfeat,efeat,cfeat
 
 def cp_features(pb, solver="cbc"):
@@ -112,28 +112,35 @@ def cp_features(pb, solver="cbc"):
     _,nfeat,_,cfeat = eb_features(pb, solution=sol, cliques=C)
     efeat = np.ones(2 * sum(len(c) for c in C))
 
-    pb.C = C
+    #pb.C = C
+    pb.set_cliques(C, sort=False)
 
-    return C,nfeat,efeat,cfeat
+    return pb.C,nfeat,efeat,cfeat
 
 def get_features(pb, mode):
     if mode == "EB":
-        C = [list(e) for e in ordered_edges(pb.g)]
-        pb.C = C
+        C = np.array([np.array(list(e), dtype=int) for e in ordered_edges(pb.g)], dtype=object)
+        #pb.C = C
+        pb.set_cliques(C, sort=False)
         return eb_features(pb)
     if mode == "CC":
-        C = clique_cover(pb.g, randomize=False)
-        pb.C = C
+        C = np.array([np.array(c, dtype=int) for c in clique_cover(pb.g, randomize=False)], dtype=object)
+        #pb.C = C
+        pb.set_cliques(C, sort=False)
         _,nfeat,_,cfeat = eb_features(pb)
         efeat = np.ones(2 * sum(len(c) for c in C))
         return C,nfeat,efeat,cfeat
     if mode == "CF":
-        C = clique_cover(pb.g, randomize=False)
+        #C = clique_cover(pb.g, randomize=False)
+        C = np.array([np.array(c, dtype=int) for c in clique_cover(pb.g, randomize=False)], dtype=object)
+
         return cf_features(pb, C)
     if mode == "EC":
         C = [list(e) for e in ordered_edges(pb.g)] + clique_cover(pb.g, randomize=False)
         C = lenlex_sort(C)
-        pb.C = C
+        C = np.array([np.array(c, dtype=int) for c in C], dtype=object)
+        #pb.C = C
+        pb.set_cliques(C, sort=False)
         _,nfeat,_,cfeat = eb_features(pb)
         efeat = np.ones(2 * sum(len(c) for c in C))
         return C,nfeat,efeat,cfeat

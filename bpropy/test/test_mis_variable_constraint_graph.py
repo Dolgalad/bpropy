@@ -1,5 +1,6 @@
 import unittest
 import networkx as nx
+import numpy as np
 
 from bpropy.vc_graph import VCGraph
 from bpropy.co.mis import MIS
@@ -33,13 +34,13 @@ class TestMISVCGraph(unittest.TestCase):
         self.assertTrue(vcg.nc() == len(cc))
 
         pb1 = MIS.from_vcgraph(vcg)
-        self.assertTrue(pb.C == pb1.C)
+        self.assertTrue(np.all([np.all(c1==c2) for c1,c2 in zip(pb.C,pb1.C)]))
         self.assertTrue(pb.nv() == pb1.nv())
         self.assertTrue(pb.ne() == pb1.ne())
 
         for i in range(len(cc)):
-            self.assertTrue(pb.C[i] == sorted(list(vcg.neighbors(i+pb.nv()))))
-            self.assertTrue(pb.C[i] == pb1.C[i])
+            self.assertTrue(np.all(pb.C[i] == np.array(sorted(list(vcg.neighbors(i+pb.nv()))), dtype=int)))
+            self.assertTrue(np.all(pb.C[i] == pb1.C[i]))
 
 
 if __name__=="__main__":
