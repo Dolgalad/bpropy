@@ -1,5 +1,6 @@
 import unittest
 import time
+import importlib.util
 
 import numpy as np
 import networkx as nx
@@ -60,10 +61,12 @@ class TestMIS(unittest.TestCase):
         self.assertTrue(self.random_pb_cc.check_solution(res_cbc.x))
         t_cbc = time.time() - t_cbc
 
-        t_cplex = time.time()
-        res_cplex = self.random_pb_cc.solve(solver="cplex", relax_integrality=True)
-        self.assertTrue(self.random_pb_cc.check_solution(res_cplex.x))
-        t_cplex = time.time() - t_cplex
+        docplex_spec = importlib.util.find_spec("docplex")
+        if docplex_spec is not None:
+            t_cplex = time.time()
+            res_cplex = self.random_pb_cc.solve(solver="cplex", relax_integrality=True)
+            self.assertTrue(self.random_pb_cc.check_solution(res_cplex.x))
+            t_cplex = time.time() - t_cplex
 
         t_scipy = time.time()
         res_scipy = self.random_pb_cc.solve(solver="scipy", relax_integrality=True)
