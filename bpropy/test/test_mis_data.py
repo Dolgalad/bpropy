@@ -74,6 +74,22 @@ class TestMISData(unittest.TestCase):
                 self.assertTrue(x_ind[off:off+2**nF].sum() == 1)
                 self.assertTrue(y[fg.factor_variables(F)].sum() <= 1)
                 off += 2**nF
+    def test_mis_data_device(self):
+        if torch.cuda.is_available():
+            device = torch.device("cuda")
+            pb = random_mis(50)
+            x = pb.greedy()
+            data = mis_to_data(pb)
+            data = data.to(device)
+            for k,v in data.to_dict().items():
+                self.assertTrue(v.is_cuda)
+
+            data = mis_to_data(pb, with_lbp_edges=True)
+            data = data.to(device)
+            for k,v in data.to_dict().items():
+                self.assertTrue(v.is_cuda)
+
+
 
 
 if __name__=="__main__":

@@ -35,6 +35,7 @@ def create_in_memory_dataset(N=10, n=100, p=0.15, formulation="EB"):
         # save to temporary pickle file
         data_file = tempfile.NamedTemporaryFile("w+b", delete=False)
         pkl.dump(data, data_file, protocol=pkl.HIGHEST_PROTOCOL)
+
         data_file.close()
         return data_file.name, data
 
@@ -48,7 +49,7 @@ def create_on_disk_dataset(N=10, n=100, p=0.15):
         for i,d in enumerate(data):
             with open(os.path.join(data_dir, f"{i}.dat"), "wb") as f:
                 pkl.dump(d, f, protocol=pkl.HIGHEST_PROTOCOL)
-            #torch.save(d, os.path.join(data_dir, f"{i}.dat"))
+
         return data_dir, data
 
 class TestMISMRFDataset(unittest.TestCase):
@@ -211,4 +212,4 @@ class TestMISMRFDataset(unittest.TestCase):
 
 
 if __name__=="__main__":
-    unittest.main()
+    unittest.main(verbosity=2)

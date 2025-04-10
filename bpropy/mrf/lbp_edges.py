@@ -23,6 +23,22 @@ class LBPEdges:
         self.m_stride = None
         if not fg is None:
             self.fill(fg)
+    @property
+    def device(self):
+        return self.n_ss.device
+    @property
+    def is_cuda(self):
+        return self.n_ss.is_cuda and \
+                self.n_vars.is_cuda and \
+                self.n_factors.is_cuda and \
+                self.n_f2v_ss.is_cuda and \
+                self.n_f2v_msg.is_cuda and \
+                self.f2v_edges.is_cuda and \
+                self.r_edges.is_cuda and \
+                self.q_edges.is_cuda and \
+                self.m_edges.is_cuda and \
+                self.vm_edges.is_cuda and \
+                self.m_stride.is_cuda
     def fill(self, fg):
         if fg.num_graphs == 1:
             self.n_ss = torch.tensor([fg.number_sufficient_statistics()])
@@ -77,8 +93,8 @@ class LBPEdges:
         return self.n_ss.shape[0]
     def graph_indicator(self):
         if self.num_graphs == 1:
-            return torch.zeros(self.n_ss, dtype=torch.int16)
-        return torch.arange(self.num_graphs).repeat_interleave(self.n_ss)
+            return torch.zeros(self.n_ss, dtype=torch.int16, device=self.device)
+        return torch.arange(self.num_graphs, device=self.device).repeat_interleave(self.n_ss)
     def clone(self):
         ne = LBPEdges()
         ne.n_ss = self.n_ss.clone()
@@ -94,7 +110,7 @@ class LBPEdges:
         ne.vm_edges = self.vm_edges.clone()
         ne.m_stride = self.m_stride.clone()
         return ne
-    def to(self, device):
+    def to(self, device, non_blocking=False, *args):
         ne = LBPEdges()
         ne.n_ss = self.n_ss.to(device)
         ne.n_vars = self.n_vars.to(device)
@@ -149,8 +165,8 @@ class LBPEdges:
         idx_less = (aa <= self.f2v_edges[:,1]) * (self.f2v_edges[:,1] < bb)
         idx_more = (cc <= self.f2v_edges[:,1]) * (self.f2v_edges[:,1] < dd)
 
-        less_offset = torch.tensor([f2v_ss_offsets[idx], ss_offsets[idx]])
-        more_offset = torch.tensor([f2v_ss_offsets[idx], self.n_ss.sum()+f2v_msg_offsets[idx]-self.n_ss[idx]])
+        less_offset = torch.tensor([f2v_ss_offsets[idx], ss_offsets[idx]], device=self.device)
+        more_offset = torch.tensor([f2v_ss_offsets[idx], self.n_ss.sum()+f2v_msg_offsets[idx]-self.n_ss[idx]], device=self.device)
 
         new_f2v_edges = self.f2v_edges[torch.logical_or(idx_less, idx_more)].clone()
         new_idx_less = (aa <= new_f2v_edges[:,1]) * (new_f2v_edges[:,1] < bb)
@@ -165,7 +181,7 @@ class LBPEdges:
         ne.m_edges -= ne.m_edges.min(dim=0)[0]
 
         ne.q_edges = self.q_edges[(f2v_msg_offsets[idx] <= self.q_edges[:,1]) * (self.q_edges[:,1] < f2v_msg_offsets[idx]+self.n_f2v_msg[idx])].clone() - f2v_msg_offsets[idx]
-        ne.vm_edges = self.vm_edges[(2*vars_offsets[idx] <= self.vm_edges[:,0]) * (self.vm_edges[:,0] < 2*(vars_offsets[idx]+self.n_vars[idx]))].clone() - torch.tensor([2*vars_offsets[idx], f2v_msg_offsets[idx]])
+        ne.vm_edges = self.vm_edges[(2*vars_offsets[idx] <= self.vm_edges[:,0]) * (self.vm_edges[:,0] < 2*(vars_offsets[idx]+self.n_vars[idx]))].clone() - torch.tensor([2*vars_offsets[idx], f2v_msg_offsets[idx]], device=self.device)
         ne.m_stride = self.m_stride[factors_offsets[idx]:factors_offsets[idx]+self.n_factors[idx]].clone()
 
         return ne
