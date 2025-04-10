@@ -138,6 +138,9 @@ class MIS:
                 if e[0]!=e[1]:
                     g.add_edge(*e)
         return MIS(g, cliques=cliques)
+    @staticmethod
+    def batch(pbs):
+        return mis_batch(pbs)
 
 def mis_equal(pb1, pb2):
     """Check if two MIS problems are defined on the same graph
