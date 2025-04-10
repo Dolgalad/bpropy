@@ -33,12 +33,20 @@ class LBPEdges:
             # creating message passing edges
             f2v_edges,r_edges = f2v_subsum_indexes(fg, f2v_idx, ss_idx)
 
+            #self.f2v_edges = lexsort(torch.from_numpy(f2v_edges))
+            #self.r_edges = lexsort(torch.from_numpy(r_edges))
+            ## scatter indices
+            #self.q_edges = lexsort(torch.from_numpy(v2f_indexes(fg, f2v_idx)))
+            #self.m_edges = lexsort(torch.from_numpy(marginal_indexes(fg, f2v_idx, ss_idx)))
+            #self.vm_edges = lexsort(torch.from_numpy(variable_marginal_indexes(fg, f2v_idx, ss_idx)))
+
             self.f2v_edges = lexsort(torch.from_numpy(f2v_edges))
             self.r_edges = lexsort(torch.from_numpy(r_edges))
             # scatter indices
             self.q_edges = lexsort(torch.from_numpy(v2f_indexes(fg, f2v_idx)))
             self.m_edges = lexsort(torch.from_numpy(marginal_indexes(fg, f2v_idx, ss_idx)))
             self.vm_edges = lexsort(torch.from_numpy(variable_marginal_indexes(fg, f2v_idx, ss_idx)))
+
 
             self.n_f2v_ss = torch.tensor([len(f2v_subsum_idx)])
             self.n_f2v_msg = torch.tensor([sum(2*fg.factor_size(F) for F in fg.iter_factors())])
@@ -51,16 +59,26 @@ class LBPEdges:
             self.n_factors = edges_batch.n_factors 
             self.n_f2v_ss  = edges_batch.n_f2v_ss  
             self.n_f2v_msg = edges_batch.n_f2v_msg 
-            self.f2v_edges = lexsort(edges_batch.f2v_edges)
-            self.r_edges   = lexsort(edges_batch.r_edges)
-            self.q_edges   = lexsort(edges_batch.q_edges)
-            self.m_edges   = lexsort(edges_batch.m_edges)
-            self.vm_edges  = lexsort(edges_batch.vm_edges)
+            #self.f2v_edges = lexsort(edges_batch.f2v_edges)
+            #self.r_edges   = lexsort(edges_batch.r_edges)
+            #self.q_edges   = lexsort(edges_batch.q_edges)
+            #self.m_edges   = lexsort(edges_batch.m_edges)
+            #self.vm_edges  = lexsort(edges_batch.vm_edges)
+            self.f2v_edges = edges_batch.f2v_edges
+            self.r_edges   = edges_batch.r_edges
+            self.q_edges   = edges_batch.q_edges
+            self.m_edges   = edges_batch.m_edges
+            self.vm_edges  = edges_batch.vm_edges
+
             self.m_stride  = edges_batch.m_stride  
 
-
+    @property
     def num_graphs(self):
         return self.n_ss.shape[0]
+    def graph_indicator(self):
+        if self.num_graphs == 1:
+            return torch.zeros(self.n_ss, dtype=torch.int16)
+        return torch.arange(self.num_graphs).repeat_interleave(self.n_ss)
     def clone(self):
         ne = LBPEdges()
         ne.n_ss = self.n_ss.clone()
@@ -91,20 +109,97 @@ class LBPEdges:
         ne.vm_edges = self.vm_edges.to(device)
         ne.m_stride = self.m_stride.to(device)
         return ne
+    def __getitem__(self, idx):
+        if self.num_graphs==1:
+            return self
+
+        ne = LBPEdges()
+        ne.n_ss = self.n_ss[idx].unsqueeze(0)
+        ne.n_vars = self.n_vars[idx].unsqueeze(0)
+        ne.n_factors = self.n_factors[idx].unsqueeze(0)
+        ne.n_f2v_ss = self.n_f2v_ss[idx].unsqueeze(0)
+        ne.n_f2v_msg = self.n_f2v_msg[idx].unsqueeze(0)
+
+        r_offsets = torch.roll(torch.cumsum(self.n_f2v_ss,0), 1)
+        r_offsets[0] = 0
+
+        ss_offsets = torch.roll(torch.cumsum(self.n_ss,0), 1)
+        ss_offsets[0] = 0
+
+        vars_offsets = torch.roll(torch.cumsum(self.n_vars,0), 1)
+        vars_offsets[0] = 0
+
+        factors_offsets = torch.roll(torch.cumsum(self.n_factors, 0), 1)
+        factors_offsets[0] = 0
+
+
+        f2v_ss_offsets = torch.roll(torch.cumsum(self.n_f2v_ss,0), 1)
+        f2v_ss_offsets[0] = 0
+
+        f2v_msg_offsets = torch.roll(torch.cumsum(self.n_f2v_msg,0), 1)
+        f2v_msg_offsets[0] = 0
+
+        aa = ss_offsets[idx].item()
+        bb = (ss_offsets[idx]+self.n_ss[idx]).item()
+        #cc = (self.n_ss.sum()+ss_offsets[idx]).item()
+        #dd = (self.n_ss.sum()+ss_offsets[idx]+self.n_ss[idx]).item()
+        cc = (self.n_ss.sum()+f2v_msg_offsets[idx]+2*self.n_vars[idx]).item() # TODO: find out why I had to add 2*self.n_vars[idx]
+        dd = (self.n_ss.sum()+f2v_msg_offsets[idx]+self.n_f2v_msg[idx]).item()
+
+        idx_less = (aa <= self.f2v_edges[:,1]) * (self.f2v_edges[:,1] < bb)
+        idx_more = (cc <= self.f2v_edges[:,1]) * (self.f2v_edges[:,1] < dd)
+
+        less_offset = torch.tensor([f2v_ss_offsets[idx], ss_offsets[idx]])
+        more_offset = torch.tensor([f2v_ss_offsets[idx], self.n_ss.sum()+f2v_msg_offsets[idx]-self.n_ss[idx]])
+
+        new_f2v_edges = self.f2v_edges[torch.logical_or(idx_less, idx_more)].clone()
+        new_idx_less = (aa <= new_f2v_edges[:,1]) * (new_f2v_edges[:,1] < bb)
+        new_idx_more = (cc <= new_f2v_edges[:,1]) * (new_f2v_edges[:,1] < dd)
+        new_f2v_edges[new_idx_less] -= less_offset
+        new_f2v_edges[new_idx_more] -= more_offset
+
+        ne.f2v_edges = new_f2v_edges
+        ne.r_edges = self.r_edges[r_offsets[idx]:r_offsets[idx]+self.n_f2v_ss[idx]].clone()
+        ne.r_edges -= ne.r_edges.min(dim=0)[0]
+        ne.m_edges = self.m_edges[r_offsets[idx]:r_offsets[idx]+self.n_f2v_ss[idx]].clone()
+        ne.m_edges -= ne.m_edges.min(dim=0)[0]
+
+        ne.q_edges = self.q_edges[(f2v_msg_offsets[idx] <= self.q_edges[:,1]) * (self.q_edges[:,1] < f2v_msg_offsets[idx]+self.n_f2v_msg[idx])].clone() - f2v_msg_offsets[idx]
+        ne.vm_edges = self.vm_edges[(2*vars_offsets[idx] <= self.vm_edges[:,0]) * (self.vm_edges[:,0] < 2*(vars_offsets[idx]+self.n_vars[idx]))].clone() - torch.tensor([2*vars_offsets[idx], f2v_msg_offsets[idx]])
+        ne.m_stride = self.m_stride[factors_offsets[idx]:factors_offsets[idx]+self.n_factors[idx]].clone()
+
+        return ne
+
+    @staticmethod
+    def show_diff(a, b):
+        print("same n_ss      = ", torch.all(a.n_ss == b.n_ss) )
+        print("same n_vars    = ", torch.all(a.n_vars == b.n_vars) )
+        print("same n_factors = ", torch.all(a.n_factors == b.n_factors) )
+        print("same n_f2v_ss  = ", torch.all(a.n_f2v_ss == b.n_f2v_ss) )
+        print("same n_f2v_msg = ", torch.all(a.n_f2v_msg == b.n_f2v_msg)) 
+        print("same f2v_edges.shape = ", a.f2v_edges.shape == b.f2v_edges.shape)
+        print("same r_edges  shape  = ", a.r_edges.shape ==   b.r_edges.shape) 
+        print("same q_edges  shape  = ", a.q_edges.shape ==   b.q_edges.shape) 
+        print("same m_edges  shape  = ", a.m_edges.shape ==   b.m_edges.shape) 
+        print("same vm_edges shape  = ", a.vm_edges.shape ==  b.vm_edges.shape )
+        print("same m_stride shape  = ", a.m_stride.shape ==  b.m_stride.shape)
+        if a.f2v_edges.shape == b.f2v_edges.shape:
+            print("same f2v_edges = ", torch.all(a.f2v_edges== b.f2v_edges))
+        else:
+            print("a.shape = ", a.f2v_edges.shape, ", b.shape = ", b.f2v_edges.shape)
+        if a.r_edges.shape == b.r_edges.shape:
+            print("same r_edges   = ", torch.all(a.r_edges == b.r_edges) )
+        if a.q_edges.shape == b.q_edges.shape:
+            print("same q_edges   = ", torch.all(a.q_edges == b.q_edges) )
+        if a.m_edges.shape == b.m_edges.shape:
+            print("same m_edges   = ", torch.all(a.m_edges == b.m_edges) )
+        if a.vm_edges.shape == b.vm_edges.shape:
+            print("same vm_edges  = ", torch.all(a.vm_edges == b.vm_edges ))
+        if a.m_stride.shape == b.m_stride.shape:
+            print("same m_stride  = ", torch.all(a.m_stride == b.m_stride))
+
 
     def __eq__(self, other):
-        #print(torch.all(self.n_ss == other.n_ss) )
-        #print(torch.all(self.n_vars == other.n_vars) )
-        #print(torch.all(self.n_factors == other.n_factors) )
-        #print(torch.all(self.n_f2v_ss == other.n_f2v_ss) )
-        #print(torch.all(self.n_f2v_msg == other.n_f2v_msg) )
-        #print("same f2v_edges = ", torch.all(self.f2v_edges == other.f2v_edges) )
-        #print("same r_edges  = ", torch.all(self.r_edges == other.r_edges)) 
-        #print("same q_edges  = ", torch.all(self.q_edges == other.q_edges)) 
-        #print("same m_edges  = ", torch.all(self.m_edges == other.m_edges)) 
-        #print("same vm_edges = ", torch.all(self.vm_edges == other.vm_edges) )
-        #print("same m_stride = ", torch.all(self.m_stride == other.m_stride))
-
 
         if (self.n_ss.shape != other.n_ss.shape) or \
            (self.n_vars.shape != other.n_vars.shape) or \
@@ -118,6 +213,9 @@ class LBPEdges:
            (self.vm_edges.shape != other.vm_edges.shape) or \
            (self.m_stride.shape != other.m_stride.shape):
             return False
+
+
+
 
         return torch.all(self.n_ss == other.n_ss) and \
                torch.all(self.n_vars == other.n_vars) and \
@@ -237,6 +335,7 @@ class LBPEdges:
             num_f2v_subsum = e.f2v_edges[:,0].max().item()+1
             num_f2v_messages_1 = e.n_f2v_msg.sum()
 
+
             r_offset += torch.tensor([num_f2v_messages_1, num_f2v_subsum])
             q_offset += torch.tensor([num_f2v_messages_1, num_f2v_messages_1])
 
@@ -245,8 +344,10 @@ class LBPEdges:
             tmp_f2v_edges = e.f2v_edges.clone()
             idx_less = (tmp_f2v_edges[:,1] < n_ss)
             idx_more = (tmp_f2v_edges[:,1] >= n_ss)
+
             tmp_f2v_edges[idx_less,:] = tmp_f2v_edges[idx_less,:] + torch.tensor([n_f2v_subsum_offset, n_ss_offset])
             tmp_f2v_edges[idx_more,:] = tmp_f2v_edges[idx_more,:] + torch.tensor([n_f2v_subsum_offset, n_ss_tot+n_f2v_msg_offset-n_ss])
+
             n_ss_offset += n_ss
             n_f2v_msg_offset += num_f2v_messages_1
             n_f2v_subsum_offset += num_f2v_subsum

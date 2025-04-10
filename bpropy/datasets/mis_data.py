@@ -7,7 +7,7 @@ from torch_geometric.data import Data
 from bpropy.utils.graph_utils import get_edge_index
 
 from bpropy.vc_graph import VCGraph
-from bpropy.co.mis import MIS
+from bpropy.co.mis import MIS, mis_batch
 
 from bpropy.mrf.mis_factor_graph import MISFactorGraph
 from bpropy.mrf.lbp_edges import LBPEdges
@@ -32,6 +32,10 @@ def mis_to_data(pb, feature_category="EB", with_lbp_edges=False):
     edge_index = get_edge_index(vcg)
     bipartite = torch.zeros(vcg.number_of_nodes())
     bipartite[[n for n,d in vcg.nodes(data=True) if d["bipartite"]]] = 1
+    factor_sizes = torch.ones(vcg.number_of_nodes(), dtype=torch.int)
+    for n,d in vcg.nodes(data=True):
+        if d["bipartite"]==1:
+            factor_sizes[n] = len(list(vcg.neighbors(n)))
 
     #for i,(src,dst) in enumerate(g.edges):
     #    edge_index[0,i] = src
@@ -42,8 +46,9 @@ def mis_to_data(pb, feature_category="EB", with_lbp_edges=False):
 
     data = Data(edge_index=edge_index, 
                 bipartite=bipartite,
-                x=torch.from_numpy(x),
-                e=torch.from_numpy(efeat),
+                factor_sizes=factor_sizes,
+                x=torch.from_numpy(x).to(dtype=torch.float32),
+                e=torch.from_numpy(efeat).to(dtype=torch.float32),
                 )
     if with_lbp_edges:
         fg = MISFactorGraph(pb)
@@ -53,10 +58,12 @@ def mis_to_data(pb, feature_category="EB", with_lbp_edges=False):
 def get_neighbors(data, u):
     return sorted(data.edge_index[1, data.edge_index[0,:]==u].tolist())
 
-def data_to_mis(data):
+def data_to_mis(data, batch=False):
     """Create a MIS problem from torch_geometric.data.Data object
     """
     if hasattr(data, "num_graphs"):
+        if batch:
+            return mis_batch([data_to_mis(data.get_example(i)) for i in range(data.num_graphs)])
         return [data_to_mis(data.get_example(i)) for i in range(data.num_graphs)]
     else:
         nv = int(torch.sum(data.bipartite==0).item())
