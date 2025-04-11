@@ -39,8 +39,8 @@ def time_f(func, *args, **kwargs):
     return t, r
 
 
-N = 10
-bp_max_iter = 10
+N = 100
+bp_max_iter = 100
 
 # generate a list of instances
 pbs = [random_mis(100, 0.15) for _ in range(N)]

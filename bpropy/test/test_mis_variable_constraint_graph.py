@@ -3,10 +3,10 @@ import networkx as nx
 import numpy as np
 
 from bpropy.vc_graph import VCGraph
-from bpropy.co.mis import MIS
+from bpropy.co.mis import MIS, random_mis
 from bpropy.clique_cover import clique_cover
 
-from bpropy.test.test_mis import simple_mis, random_mis
+from bpropy.test.test_mis import simple_mis
 
 class TestMISVCGraph(unittest.TestCase):
     def test_variable_constraint_graph(self):

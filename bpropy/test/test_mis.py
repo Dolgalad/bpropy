@@ -5,7 +5,7 @@ import importlib.util
 import numpy as np
 import networkx as nx
 
-from bpropy.co.mis import MIS
+from bpropy.co.mis import MIS, random_mis
 from bpropy.clique_cover import clique_cover
 
 def very_simple_mis():
@@ -18,12 +18,6 @@ def simple_mis():
     g = nx.Graph()
     g.add_nodes_from([0,1,2])
     g.add_edges_from([[0,1],[1,2],[0,2]])
-    return MIS(g)
-
-def random_mis(n=100, p=0.15):
-    g = nx.generators.random_graphs.erdos_renyi_graph(n, p)
-    while g.number_of_edges()==0:
-        g = nx.generators.random_graphs.erdos_renyi_graph(n, p)
     return MIS(g)
 
 class TestMIS(unittest.TestCase):

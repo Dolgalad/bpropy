@@ -17,7 +17,7 @@ import mip
 from mip import xsum, maximize, BINARY
 
 from bpropy.utils.graph_utils import ordered_edges
-from bpropy.clique_cover import is_edge_cover
+from bpropy.clique_cover import is_edge_cover, clique_cover
 from bpropy.utils.set_sort import lenlex_sort
 
 from bpropy.vc_graph import VCGraph
@@ -274,5 +274,21 @@ def mis_batch(pbs):
         offset += pb.g.number_of_nodes()
     pb = MIS(g, cliques=C, num_graphs=len(pbs), graph_sizes=np.array(graph_sizes))
     #pb.C = C
+    return pb
+
+def random_mis(n=100, p=0.15, cliques=False):
+    g = nx.generators.random_graphs.erdos_renyi_graph(n, p)
+    if cliques:
+        cc = clique_cover(g)
+        pb = MIS(g, cliques=cc)
+    else:
+        pb = MIS(g)
+    while pb.g.number_of_edges() == 0:
+        g = nx.generators.random_graphs.erdos_renyi_graph(n, p)
+        if cliques:
+            cc = clique_cover(g)
+            pb = MIS(g, cliques=cc)
+        else:
+            pb = MIS(g)
     return pb
 

@@ -1,9 +1,8 @@
 import unittest
 
+from bpropy.co.mis import random_mis
 from bpropy.datasets.mis_features import *
 from bpropy.clique_cover import is_edge_cover
-
-from bpropy.test.test_mis import random_mis
 
 class TestMISFeatures(unittest.TestCase):
     def test_eb_features(self):

@@ -3,6 +3,7 @@ import torch
 import time
 import numpy as np
 
+from bpropy.co.mis import MIS
 from bpropy.mrf.mis_factor_graph import MISFactorGraph
 from bpropy.mrf.lbp_edges import LBPEdges
 from bpropy.mrf.lbp import loopy_belief_propagation, max_sum_loopy_belief_propagation
@@ -154,6 +155,55 @@ class TestMISLBP(unittest.TestCase):
         self.assertTrue(torch.all(batch.n_factors == batch1.n_factors))
         self.assertTrue(torch.all(batch.n_f2v_ss == batch1.n_f2v_ss))
         self.assertTrue(torch.all(batch.n_f2v_msg == batch1.n_f2v_msg))
+
+    def test_mis_batch_lbp(self):
+        # create a list of problems
+        batch_size = 10
+        max_iter = 10
+        pbs = [random_mis(np.random.choice(range(10,20))) for _ in range(batch_size)]
+        # batch mis problems
+        batch_pb = MIS.batch(pbs)
+        batch_fg = MISFactorGraph(batch_pb)
+        batch_edges = LBPEdges(batch_fg)
+        batch_theta = torch.randn(batch_fg.nss())
+        batch_v2f = torch.zeros_like(batch_theta)
+        batch_mu = loopy_belief_propagation(batch_theta, batch_v2f, batch_edges, max_iter=max_iter, tol=1e-6, damping=0.)
+
+        offset = 0
+        for i,pb in enumerate(pbs):
+            fg = MISFactorGraph(pb)
+            edges = LBPEdges(fg)
+            theta = batch_theta[offset:offset+fg.nss()]
+            v2f = torch.zeros_like(theta)
+            mu = loopy_belief_propagation(theta, v2f, edges, max_iter=max_iter, tol=1e-6, damping=0.)
+
+            self.assertTrue(torch.all(torch.isclose(mu, batch_mu[offset:offset+fg.nss()])))
+            offset += fg.nss()
+
+    def test_mis_cc_batch_lbp(self):
+        # create a list of problems
+        batch_size = 10
+        max_iter = 10
+        pbs = [random_mis(np.random.choice(range(10,20)), cliques=True) for _ in range(batch_size)]
+        # batch mis problems
+        batch_pb = MIS.batch(pbs)
+        batch_fg = MISFactorGraph(batch_pb)
+        batch_edges = LBPEdges(batch_fg)
+        batch_theta = torch.randn(batch_fg.nss())
+        batch_v2f = torch.zeros_like(batch_theta)
+        batch_mu = loopy_belief_propagation(batch_theta, batch_v2f, batch_edges, max_iter=max_iter, tol=1e-6, damping=0.)
+
+        offset = 0
+        for i,pb in enumerate(pbs):
+            fg = MISFactorGraph(pb)
+            edges = LBPEdges(fg)
+            theta = batch_theta[offset:offset+fg.nss()]
+            v2f = torch.zeros_like(theta)
+            mu = loopy_belief_propagation(theta, v2f, edges, max_iter=max_iter, tol=1e-6, damping=0.)
+
+            self.assertTrue(torch.all(torch.isclose(mu, batch_mu[offset:offset+fg.nss()])))
+            offset += fg.nss()
+
 
 
 

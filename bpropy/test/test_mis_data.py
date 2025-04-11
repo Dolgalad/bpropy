@@ -4,12 +4,12 @@ import numpy as np
 
 from torch_geometric.data import Batch
 
-from bpropy.co.mis import mis_equal
+from bpropy.co.mis import mis_equal, random_mis
 from bpropy.datasets.mis_data import mis_to_data, data_to_mis
 from bpropy.mrf.sufficient_statistics import x2ss, ss2x
 from bpropy.mrf.mis_factor_graph import MISFactorGraph
 
-from bpropy.test.test_mis import simple_mis, random_mis
+from bpropy.test.test_mis import simple_mis
 
 class TestMISData(unittest.TestCase):
     def test_mis_to_data_and_back(self):

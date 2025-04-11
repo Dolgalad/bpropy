@@ -10,17 +10,11 @@ import shutil
 
 from torch_geometric.data.batch import Batch
 
-from bpropy.co.mis import MIS
+from bpropy.co.mis import MIS, random_mis
 from bpropy.datasets.mis_data import mis_to_data
 from bpropy.mrf.lbp_edges import LBPEdges, lexsort
 from bpropy.datasets.mrf_dataset import MRFDataset
 from bpropy.datasets.mrf_dataloader import MRFDataLoader, MRFDataCollater
-
-def random_mis(n=100, p=0.15):
-    g = nx.generators.random_graphs.erdos_renyi_graph(n, p)
-    while g.number_of_edges() == 0:
-        g = nx.generators.random_graphs.erdos_renyi_graph(n, p)
-    return MIS(g)
 
 def create_in_memory_dataset(N=10, n=100, p=0.15, formulation="EB"):
         # create a small dataset of problems

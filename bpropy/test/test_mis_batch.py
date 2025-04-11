@@ -2,18 +2,11 @@ import unittest
 import networkx as nx
 import numpy as np
 
-from bpropy.co.mis import MIS, mis_batch, mis_equal
+from bpropy.co.mis import MIS, mis_batch, mis_equal, random_mis
 from bpropy.clique_cover import clique_cover
 from bpropy.mrf.lbp_edges import LBPEdges
 from bpropy.mrf.mis_factor_graph import MISFactorGraph
 
-def random_mis(n=100, p=0.15, cliques=False):
-    g = nx.generators.random_graphs.erdos_renyi_graph(n, p)
-    cc = clique_cover(g)
-    while g.number_of_edges() == 0:
-        g = nx.generators.random_graphs.erdos_renyi_graph(n, p)
-        cc = clique_cover(g)
-    return MIS(g, cliques=cc)
 
 class TestMISBatch(unittest.TestCase):
     def __init__(self, *args, **kwargs):

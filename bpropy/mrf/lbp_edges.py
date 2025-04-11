@@ -435,7 +435,7 @@ def f2v_index_map(fg):
                         d += 1
     return m,n,ss
 
-def f2v_subsum_indexes(fg, f2v_idx,ss_idx):
+def f2v_subsum_indexes(fg, f2v_idx, ss_idx):
     #factor_sizes = np.array([len(list(fg.neighbors(F))) for F in fg.iter_factors()])
     factor_sizes = np.array([fg.factor_size(F) for F in fg.iter_factors()])
 
