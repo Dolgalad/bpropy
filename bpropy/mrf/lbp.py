@@ -5,6 +5,13 @@ import numpy as np
 import time
 import torch_scatter
 
+class BPSolution:
+    def __init__(self, mu=None, u=None, n_iter=None):
+        self.mu = mu
+        self.u = u
+        self.n_iter = None
+
+
 def loopy_belief_propagation(theta, v2f, edges, max_iter=100, tol=1e-6, damping=0.0):
     # strides
     dev = theta.device
@@ -42,6 +49,7 @@ def loopy_belief_propagation(theta, v2f, edges, max_iter=100, tol=1e-6, damping=
 
         if u < tol:
             break
+    return BPSolution(mu, u, T)
     return mu
 
 def loopy_belief_propagation_bak(theta, v2f, g, f2v_edges, f2v_subsum_idx, r_edges, q_edges, m_edges, max_iter=100, tol=1e-6, damping=0.0):
@@ -179,6 +187,7 @@ def max_sum_loopy_belief_propagation(theta, v2f, edges, max_iter=100, tol=1e-6, 
         mu = mup
         if u < tol:
             break
+    return BPSolution(mu, u, T)
     return mu
 
 def max_sum_loopy_belief_propagation_bak(theta, v2f, g, f2v_edges, f2v_subsum_idx, r_edges, q_edges, m_edges, vm_edges, max_iter=100, tol=1e-6, damping=0.):

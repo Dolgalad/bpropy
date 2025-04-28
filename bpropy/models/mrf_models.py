@@ -23,5 +23,4 @@ class GCN_MRF_v4(torch.nn.Module):
         x = self.conv(x, edge_index)
 
         x = self.efc(x, data)
-        return loopy_belief_propagation(x, torch.zeros_like(x), data.lbp_edges, max_iter=self.bp_max_iter, tol=self.bp_tol, damping=self.bp_damping)
-        return x
+        return loopy_belief_propagation(x, torch.zeros_like(x), data.lbp_edges, max_iter=self.bp_max_iter, tol=self.bp_tol, damping=self.bp_damping).mu

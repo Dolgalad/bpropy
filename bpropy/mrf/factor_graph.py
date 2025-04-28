@@ -50,8 +50,18 @@ class FactorGraph(Graph):
         """Return number of variable nodes adjacent to factor node `F`
         """
         return len(self.factor_variables(F))
+    def factor_sizes(self):
+        """Return all factor sizes
+        """
+        return np.array([self.factor_size(F) for F in self.iter_factors()], dtype=int)
     def containing_factors(self, i):
         return sorted(list(self.neighbors(i)))
+    def factor_index_map(self):
+        return {F:iF for iF,F in enumerate(self.iter_factors())} 
+    def factor_variables_map(self):
+        return {F:self.factor_variables(F) for F in self.iter_factors()}
+    def containing_factors_map(self):
+        return {v:self.containing_factors(v) for v in self.iter_variables()}
     def number_sufficient_statistics(self):
         """Number of sufficient statistics needed for the Over-Complete representation
         """
@@ -90,7 +100,22 @@ class FactorGraph(Graph):
         """Return number of edges
         """
         return self.number_of_edges()
-
+    def num_f2v_edges(self):
+        fs = self.factor_sizes()
+        return (np.power(2,fs) * np.power(fs,2)).sum()
+    def num_r_edges(self):
+        fs = self.factor_sizes()
+        return (np.power(2,fs) * fs).sum()
+    def num_q_edges(self):
+        res=0
+        for F in self.iter_factors():
+            for v in self.factor_variables(F):
+                res += 2*(len(self.containing_factors(v))-1)
+        return res
+    def num_m_edges(self):
+        return self.num_r_edges()
+    def num_vm_edges(self):
+        return (2 * np.array([len(self.containing_factors(v)) for v in self.iter_variables()], dtype=int)).sum()
 
 
     # Loopy Belief Propagation computation graph edges, will be moved

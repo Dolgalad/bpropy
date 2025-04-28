@@ -23,6 +23,9 @@ class LBPEdges:
         self.m_stride = None
         if not fg is None:
             self.fill(fg)
+
+
+
     @property
     def device(self):
         return self.n_ss.device
@@ -41,32 +44,24 @@ class LBPEdges:
                 self.m_stride.is_cuda
     def fill(self, fg):
         if fg.num_graphs == 1:
+            #import time
+            #t0 = time.time()
             self.n_ss = torch.tensor([fg.number_sufficient_statistics()])
             self.n_vars = torch.tensor([fg.nv()])
             self.n_factors = torch.tensor([fg.nf()])
             # create the computation edges
             f2v_idx, f2v_subsum_idx,ss_idx = f2v_index_map(fg)
             # creating message passing edges
-            f2v_edges,r_edges = f2v_subsum_indexes(fg, f2v_idx, ss_idx)
 
-            #self.f2v_edges = lexsort(torch.from_numpy(f2v_edges))
-            #self.r_edges = lexsort(torch.from_numpy(r_edges))
-            ## scatter indices
-            #self.q_edges = lexsort(torch.from_numpy(v2f_indexes(fg, f2v_idx)))
-            #self.m_edges = lexsort(torch.from_numpy(marginal_indexes(fg, f2v_idx, ss_idx)))
-            #self.vm_edges = lexsort(torch.from_numpy(variable_marginal_indexes(fg, f2v_idx, ss_idx)))
-
-            self.f2v_edges = lexsort(torch.from_numpy(f2v_edges))
-            self.r_edges = lexsort(torch.from_numpy(r_edges))
-            # scatter indices
-            self.q_edges = lexsort(torch.from_numpy(v2f_indexes(fg, f2v_idx)))
-            self.m_edges = lexsort(torch.from_numpy(marginal_indexes(fg, f2v_idx, ss_idx)))
-            self.vm_edges = lexsort(torch.from_numpy(variable_marginal_indexes(fg, f2v_idx, ss_idx)))
+            # try more efficient edge computation
 
 
-            self.n_f2v_ss = torch.tensor([len(f2v_subsum_idx)])
+            self.n_f2v_ss = torch.tensor([fg.num_r_edges()])
+
             self.n_f2v_msg = torch.tensor([sum(2*fg.factor_size(F) for F in fg.iter_factors())])
             self.m_stride = torch.tensor([2**len(list(fg.neighbors(F))) for F in fg.iter_factors()])
+            self.f2v_edges, self.r_edges, self.q_edges, self.m_edges, self.vm_edges = make_lbp_edges(fg)
+
         else:
             edge_list = [LBPEdges(fg.get_subgraph(i)) for i in range(fg.num_graphs)]
             edges_batch = LBPEdges.batch(edge_list)
@@ -75,11 +70,6 @@ class LBPEdges:
             self.n_factors = edges_batch.n_factors 
             self.n_f2v_ss  = edges_batch.n_f2v_ss  
             self.n_f2v_msg = edges_batch.n_f2v_msg 
-            #self.f2v_edges = lexsort(edges_batch.f2v_edges)
-            #self.r_edges   = lexsort(edges_batch.r_edges)
-            #self.q_edges   = lexsort(edges_batch.q_edges)
-            #self.m_edges   = lexsort(edges_batch.m_edges)
-            #self.vm_edges  = lexsort(edges_batch.vm_edges)
             self.f2v_edges = edges_batch.f2v_edges
             self.r_edges   = edges_batch.r_edges
             self.q_edges   = edges_batch.q_edges
@@ -213,6 +203,7 @@ class LBPEdges:
             print("same vm_edges  = ", torch.all(a.vm_edges == b.vm_edges ))
         if a.m_stride.shape == b.m_stride.shape:
             print("same m_stride  = ", torch.all(a.m_stride == b.m_stride))
+
 
 
     def __eq__(self, other):
@@ -411,6 +402,130 @@ def number_vm_edges(fg):
 def f2v_messages_dim(fg):
     return sum([2*fg.factor_size(F) for F in fg.iter_factors()])
 
+def get_edge_dimensions(fg):
+    f2v_edges_n = 0
+    r_edges_n = 0
+    q_edges_n = 0
+    vm_edges_n = 0
+    for F in fg.iter_factors():
+        fs = fg.factor_size(F)
+        f2v_edges_n += np.power(2, fs) * np.power(fs,2)
+        r_edges_n += fs * np.power(2,fs)
+        for v in fg.factor_variables(F):
+            q_edges_n += 2*(len(fg.containing_factors(v))-1)
+    for v in fg.iter_variables():
+        vm_edges_n += 2*len(fg.containing_factors(v))
+
+    m_edges_n = r_edges_n
+    return f2v_edges_n, r_edges_n, q_edges_n, m_edges_n, vm_edges_n
+
+def make_lbp_edges(fg):
+    nSS = fg.nss()
+    factor_value_offsets = np.roll((2**fg.factor_sizes()).cumsum(), 1)
+    factor_value_offsets[0] = 0
+
+    factor_ss_value_offsets = np.roll((2*fg.factor_sizes()).cumsum(), 1)
+    factor_ss_value_offsets[0] = 0
+
+
+    f2v_edges_n, r_edges_n, q_edges_n, m_edges_n, vm_edges_n = get_edge_dimensions(fg)
+
+    #f2v_edges_n = fg.num_f2v_edges()
+    f2v_edges_c=0
+    #f2v_edges = torch.zeros((f2v_edges_n,2), dtype=torch.long)
+    #f2v_edges_vec = [None for _ in range(f2v_edges_n)]
+    f2v_edges_vec = np.empty((f2v_edges_n, 2), dtype=int)
+  
+    #r_edges_n = fg.num_r_edges()
+    r_edges_c=0
+    #r_edges = torch.zeros((r_edges_n,2), dtype=torch.long)
+    #r_edges_vec = [None for _ in range(r_edges_n)]
+    r_edges_vec = np.empty((r_edges_n, 2), dtype=int)
+   
+    #q_edges_n = fg.num_q_edges()
+    q_edges_c=0
+    #q_edges = torch.zeros((q_edges_n,2), dtype=torch.long)
+    #q_edges_vec = [None for _ in range(q_edges_n)]
+    q_edges_vec = np.empty((q_edges_n, 2), dtype=int)
+
+    #
+    #m_edges_n = fg.num_m_edges()
+    m_edges_c=0
+    #m_edges = torch.zeros((m_edges_n,2), dtype=torch.long)
+    #m_edges_vec = [None for _ in range(m_edges_n)]
+    m_edges_vec = np.empty((m_edges_n, 2), dtype=int)
+
+    #
+    #vm_edges_n = fg.num_vm_edges()
+    vm_edges_c=0
+    #vm_edges = torch.zeros((vm_edges_n,2), dtype=torch.long)
+    #vm_edges_vec = [None for _ in range(vm_edges_n)]
+    vm_edges_vec = np.empty((vm_edges_n, 2), dtype=int)
+
+    fmap = fg.factor_index_map()
+    fvmap = fg.factor_variables_map()
+    cfmap = fg.containing_factors_map()
+
+    for iV,V in enumerate(fg.iter_variables()):
+        factors = cfmap[V]
+        for iF,F in enumerate(factors):
+            fvn = fvmap[F]
+
+            iidx = fvn.index(V)
+            for v in [0,1]:
+                vm_edges_vec[vm_edges_c] = [2*iV+v, factor_ss_value_offsets[fmap[F]]+2*iidx+v]
+                vm_edges_c += 1;
+
+    for iF,F in enumerate(fg.iter_factors()):
+        factor_size = fg.factor_size(F)
+
+        #factor_neighbors = fg.factor_variables(F)
+        factor_neighbors = fvmap[F]
+        for vnii,vneighbor in enumerate(factor_neighbors):
+            variable_neighbors = cfmap[vneighbor]
+            for vni in [0, 1]:
+                for fni,fneighbor in enumerate(variable_neighbors):
+                    if(F!=fneighbor):
+                        fvn = fvmap[fneighbor]
+
+                        iidx = fvn.index(vneighbor)
+
+                        q_edges_vec[q_edges_c] = [factor_ss_value_offsets[fmap[F]]+2*vnii+vni,factor_ss_value_offsets[fmap[fneighbor]]+2*iidx+vni]
+                        q_edges_c += 1;
+
+
+
+        for v in range(2**factor_size):
+            vals = np.unpackbits(np.array([v],dtype=np.uint8), count=factor_size, bitorder="little")
+            for i_n in range(factor_size):
+                m_edges_vec[m_edges_c] = [factor_value_offsets[fmap[F]]+v,factor_ss_value_offsets[fmap[F]]+2*i_n+vals[i_n]]
+                m_edges_c += 1
+
+
+        
+                for yvi in [0,1]:
+                    if vals[i_n]==yvi:
+                        r_edges_vec[r_edges_c] = [factor_ss_value_offsets[fmap[F]]+2*i_n+yvi,r_edges_c]
+
+
+                        f2v_edges_vec[f2v_edges_c] = [r_edges_c,factor_value_offsets[fmap[F]]+v]
+                        f2v_edges_c += 1
+
+
+                        for iu in range(factor_size):
+                            if iu!=i_n:
+                                f2v_edges_vec[f2v_edges_c] = [r_edges_c,nSS+factor_ss_value_offsets[fmap[F]]+2*iu+vals[iu]]
+                                f2v_edges_c += 1
+
+        
+                        r_edges_c += 1
+
+    return torch.from_numpy(f2v_edges_vec), torch.from_numpy(r_edges_vec), torch.from_numpy(q_edges_vec), torch.from_numpy(m_edges_vec), torch.from_numpy(vm_edges_vec)
+
+    #return torch.tensor(f2v_edges_vec, dtype=torch.long), torch.tensor(r_edges_vec, dtype=torch.long), torch.tensor(q_edges_vec, dtype=torch.long), torch.tensor(m_edges_vec, dtype=torch.long), torch.tensor(vm_edges_vec, dtype=torch.long)
+    #return f2v_edges, r_edges, q_edges, m_edges, vm_edges
+
+
 def f2v_index_map(fg):
     m,n,ss = {}, {}, {}
     c,d,e = 0,0,0
@@ -425,7 +540,6 @@ def f2v_index_map(fg):
             for i in neighbors:
                 iidx = neighbors.index(i)
                 for s,v in enumerate([0,1]):
-                    #if not fi_value_set[i][s]:
                     if not (F,i,v) in m.keys():
                         m[F,i,v] = c
                         c += 1
@@ -436,7 +550,6 @@ def f2v_index_map(fg):
     return m,n,ss
 
 def f2v_subsum_indexes(fg, f2v_idx, ss_idx):
-    #factor_sizes = np.array([len(list(fg.neighbors(F))) for F in fg.iter_factors()])
     factor_sizes = np.array([fg.factor_size(F) for F in fg.iter_factors()])
 
     nSS = len(ss_idx)

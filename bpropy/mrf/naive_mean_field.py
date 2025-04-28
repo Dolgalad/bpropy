@@ -6,22 +6,24 @@ import networkx as nx
 import torch
 import torch_scatter
 
-#from bpropy.mrf.lbp import *
 from bpropy.mrf.nmf_edges import NMFEdges
 
+class NMFSolution:
+    def __init__(self, mu, u, n_iter):
+        self.mu = mu
+        self.u = u
+        self.n_iter = n_iter
 
-def naive_mean_field(fg, theta, pmprod_edges, pmprodsum_edges, max_iter=1000, tol=1e-6):
+def naive_mean_field(theta, edges, max_iter=1000, tol=1e-6):
     dev = theta.device
-    nV = fg.nv()
+    nV = edges.n_vars.sum()
     mu = torch.zeros(2*nV, dtype=torch.float, device=dev)
 
-    theta_rep = torch.tensor([fg.factor_size(F) for F in fg.iter_factors()], dtype=torch.long, device=dev)
-    theta_rep = torch.repeat_interleave(theta_rep, 2**theta_rep)
-    th = torch.repeat_interleave(theta, theta_rep)
+    th = torch.repeat_interleave(theta, edges.theta_rep)
 
     for it in range(max_iter):
-        x1 = th * torch_scatter.scatter_mul(mu[pmprod_edges[:,1]], pmprod_edges[:,0])
-        y1 = torch_scatter.scatter_add(x1[pmprodsum_edges[:,1]], pmprodsum_edges[:,0])
+        x1 = th * torch_scatter.scatter_mul(mu[edges.pmprod_edges[:,1]], edges.pmprod_edges[:,0])
+        y1 = torch_scatter.scatter_add(x1[edges.pmprodsum_edges[:,1]], edges.pmprodsum_edges[:,0])
 
         # softmax result
         mup = torch.flatten(torch.nn.functional.softmax(y1.reshape(nV,2), dim=1))
@@ -31,6 +33,7 @@ def naive_mean_field(fg, theta, pmprod_edges, pmprodsum_edges, max_iter=1000, to
             mu = mup
             break
         mu = mup
+    return NMFSolution(mu, u, it)
     return mu
 
 def _naive_mean_field(data, theta, max_iter=1000, tol=1e-6, mu0=None):

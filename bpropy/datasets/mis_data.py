@@ -11,10 +11,11 @@ from bpropy.co.mis import MIS, mis_batch
 
 from bpropy.mrf.mis_factor_graph import MISFactorGraph
 from bpropy.mrf.lbp_edges import LBPEdges
+from bpropy.mrf.nmf_edges import NMFEdges
 
 from bpropy.datasets.mis_features import get_features
 
-def mis_to_data(pb, feature_category="EB", with_lbp_edges=False):
+def mis_to_data(pb, feature_category="EB", with_lbp_edges=False, with_nmf_edges=False):
     """Create a torch_geometric.data.Data object from MIS problem data
     """
     # features
@@ -24,8 +25,6 @@ def mis_to_data(pb, feature_category="EB", with_lbp_edges=False):
     efeat = efeat - np.mean(efeat,axis=0)
     nn = nfeat.shape[1] - cfeat.shape[1]
     x = np.concatenate((nfeat, np.pad(cfeat, ((0,0), (0,nn)))), axis=0)
-    #data.x = torch.from_numpy(x)
-    #data.e = torch.from_numpy(np.concatenate((efeat,efeat)))
 
     vcg = VCGraph(pb)
     #g = vcg.to_directed()
@@ -37,22 +36,18 @@ def mis_to_data(pb, feature_category="EB", with_lbp_edges=False):
         if d["bipartite"]==1:
             factor_sizes[n] = len(list(vcg.neighbors(n)))
 
-    #for i,(src,dst) in enumerate(g.edges):
-    #    edge_index[0,i] = src
-    #    edge_index[1,i] = dst
-    #for n,d in g.nodes(data=True):
-    #    bipartite[n] = d["bipartite"]
-
-
     data = Data(edge_index=edge_index, 
                 bipartite=bipartite,
                 factor_sizes=factor_sizes,
                 x=torch.from_numpy(x).to(dtype=torch.float32),
                 e=torch.from_numpy(efeat).to(dtype=torch.float32),
                 )
-    if with_lbp_edges:
+    if with_lbp_edges or with_nmf_edges:
         fg = MISFactorGraph(pb)
-        data.lbp_edges = LBPEdges(fg)
+        if with_lbp_edges:
+            data.lbp_edges = LBPEdges(fg)
+        if with_nmf_edges:
+            data.nmf_edges = NMFEdges(fg)
     return data
 
 def get_neighbors(data, u):

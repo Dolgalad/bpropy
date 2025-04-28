@@ -33,7 +33,7 @@ class TestMISLBP(unittest.TestCase):
         #theta = torch.randn(edges.n_ss)
         theta = torch.from_numpy(x2ss(x.astype(bool), fg)).to(torch.float)
         v2f = torch.zeros_like(theta)
-        mu = loopy_belief_propagation(theta, v2f, edges, max_iter=10, tol=1e-6, damping=0.)
+        mu = loopy_belief_propagation(theta, v2f, edges, max_iter=10, tol=1e-6, damping=0.).mu
 
         self.assertTrue(mu.shape[0] == edges.n_ss)
         
@@ -55,7 +55,7 @@ class TestMISLBP(unittest.TestCase):
         #theta = torch.randn(edges.n_ss)
         theta = torch.from_numpy(x2ss(x.astype(bool), fg)).to(torch.float)
         v2f = torch.zeros_like(theta)
-        mu = loopy_belief_propagation(theta, v2f, edges, max_iter=10, tol=1e-6, damping=0.)
+        mu = loopy_belief_propagation(theta, v2f, edges, max_iter=10, tol=1e-6, damping=0.).mu
 
         self.assertTrue(mu.shape[0] == edges.n_ss)
         
@@ -66,7 +66,7 @@ class TestMISLBP(unittest.TestCase):
             offset += 2**nF
 
         # max sum lbp
-        mu = max_sum_loopy_belief_propagation(theta, v2f, edges, max_iter=10, tol=1e-6, damping=0.)
+        mu = max_sum_loopy_belief_propagation(theta, v2f, edges, max_iter=10, tol=1e-6, damping=0.).mu
         self.assertTrue(mu.shape[0] == 2*edges.n_vars.sum())
 
     def test_stack_lbpedges(self):
@@ -83,7 +83,7 @@ class TestMISLBP(unittest.TestCase):
             edges = LBPEdges(fg)
             theta = torch.randn(fg.number_sufficient_statistics())
             v2f = torch.zeros_like(theta)
-            mu = loopy_belief_propagation(theta, v2f, edges, max_iter=max_iter, tol=1e-6, damping=0.)
+            mu = loopy_belief_propagation(theta, v2f, edges, max_iter=max_iter, tol=1e-6, damping=0.).mu
             mus.append(mu)
             batch_edges.append(edges)
             batch_thetas.append(theta)
@@ -92,7 +92,7 @@ class TestMISLBP(unittest.TestCase):
         batch = LBPEdges.batch(batch_edges)
         batch_theta = torch.concatenate(batch_thetas, dim=0)
         batch_v2f = torch.zeros_like(batch_theta)
-        batch_mus = loopy_belief_propagation(batch_theta, batch_v2f, batch, max_iter=max_iter, tol=1e-6, damping=0.)
+        batch_mus = loopy_belief_propagation(batch_theta, batch_v2f, batch, max_iter=max_iter, tol=1e-6, damping=0.).mu
         
         end_offset = batch.n_ss.cumsum(dim=0)
         beg_offset = end_offset.roll(1)
@@ -113,7 +113,7 @@ class TestMISLBP(unittest.TestCase):
             edges = LBPEdges(fg)
             theta = torch.randn(fg.number_sufficient_statistics())
             v2f = torch.zeros_like(theta)
-            mu = max_sum_loopy_belief_propagation(theta, v2f, edges, max_iter=max_iter, tol=1e-6, damping=0.)
+            mu = max_sum_loopy_belief_propagation(theta, v2f, edges, max_iter=max_iter, tol=1e-6, damping=0.).mu
             mus.append(mu)
             batch_edges.append(edges)
             batch_thetas.append(theta)
@@ -122,7 +122,7 @@ class TestMISLBP(unittest.TestCase):
         batch = LBPEdges.batch(batch_edges)
         batch_theta = torch.concatenate(batch_thetas, dim=0)
         batch_v2f = torch.zeros_like(batch_theta)
-        batch_mus = max_sum_loopy_belief_propagation(batch_theta, batch_v2f, batch, max_iter=max_iter, tol=1e-6, damping=0.)
+        batch_mus = max_sum_loopy_belief_propagation(batch_theta, batch_v2f, batch, max_iter=max_iter, tol=1e-6, damping=0.).mu
         
         end_offset = (2*batch.n_vars).cumsum(dim=0)
         beg_offset = end_offset.roll(1)
@@ -167,7 +167,7 @@ class TestMISLBP(unittest.TestCase):
         batch_edges = LBPEdges(batch_fg)
         batch_theta = torch.randn(batch_fg.nss())
         batch_v2f = torch.zeros_like(batch_theta)
-        batch_mu = loopy_belief_propagation(batch_theta, batch_v2f, batch_edges, max_iter=max_iter, tol=1e-6, damping=0.)
+        batch_mu = loopy_belief_propagation(batch_theta, batch_v2f, batch_edges, max_iter=max_iter, tol=1e-6, damping=0.).mu
 
         offset = 0
         for i,pb in enumerate(pbs):
@@ -175,23 +175,25 @@ class TestMISLBP(unittest.TestCase):
             edges = LBPEdges(fg)
             theta = batch_theta[offset:offset+fg.nss()]
             v2f = torch.zeros_like(theta)
-            mu = loopy_belief_propagation(theta, v2f, edges, max_iter=max_iter, tol=1e-6, damping=0.)
+            mu = loopy_belief_propagation(theta, v2f, edges, max_iter=max_iter, tol=1e-6, damping=0.).mu
 
             self.assertTrue(torch.all(torch.isclose(mu, batch_mu[offset:offset+fg.nss()])))
             offset += fg.nss()
 
     def test_mis_cc_batch_lbp(self):
         # create a list of problems
-        batch_size = 10
-        max_iter = 10
-        pbs = [random_mis(np.random.choice(range(10,20)), cliques=True) for _ in range(batch_size)]
+        batch_size = 4
+        max_iter = 5
+        #pbs = [random_mis(15, p=0.10, cliques=True) for _ in range(batch_size)]
+        pbs = [random_mis(np.random.choice(range(20,40)), p=0.10, cliques=True) for _ in range(batch_size)]
+
         # batch mis problems
         batch_pb = MIS.batch(pbs)
         batch_fg = MISFactorGraph(batch_pb)
         batch_edges = LBPEdges(batch_fg)
         batch_theta = torch.randn(batch_fg.nss())
         batch_v2f = torch.zeros_like(batch_theta)
-        batch_mu = loopy_belief_propagation(batch_theta, batch_v2f, batch_edges, max_iter=max_iter, tol=1e-6, damping=0.)
+        batch_mu = loopy_belief_propagation(batch_theta, batch_v2f, batch_edges, max_iter=max_iter, tol=1e-6, damping=0.).mu
 
         offset = 0
         for i,pb in enumerate(pbs):
@@ -199,7 +201,7 @@ class TestMISLBP(unittest.TestCase):
             edges = LBPEdges(fg)
             theta = batch_theta[offset:offset+fg.nss()]
             v2f = torch.zeros_like(theta)
-            mu = loopy_belief_propagation(theta, v2f, edges, max_iter=max_iter, tol=1e-6, damping=0.)
+            mu = loopy_belief_propagation(theta, v2f, edges, max_iter=max_iter, tol=1e-6, damping=0.).mu
 
             self.assertTrue(torch.all(torch.isclose(mu, batch_mu[offset:offset+fg.nss()])))
             offset += fg.nss()
