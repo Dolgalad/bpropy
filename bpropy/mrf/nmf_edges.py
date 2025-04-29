@@ -11,6 +11,7 @@ class NMFEdges:
         self.n_ss = None
         self.n_vars = None
         self.n_factors = None
+        self.n_prodsum = None
         if not fg is None:
             self.fill(fg)
     @property
@@ -21,6 +22,7 @@ class NMFEdges:
         return self.n_ss.is_cuda and \
                 self.n_vars.is_cuda and \
                 self.n_factors.is_cuda and \
+                self.n_prodsum.is_cuda and \
                 self.pmprod_edges.is_cuda and \
                 self.pmprodsum_edges.is_cuda and \
                 self.theta_rep.is_cuda
@@ -30,10 +32,11 @@ class NMFEdges:
 
     def fill(self, fg):
         if fg.num_graphs == 1:
-            self.pmprod_edges, self.pmprodsum_edges = naive_mean_field_edges(fg)
+            self.pmprod_edges, self.pmprodsum_edges, n_prodsum = naive_mean_field_edges(fg)
             self.n_ss = torch.tensor([fg.number_sufficient_statistics()])
             self.n_vars = torch.tensor([fg.nv()])
             self.n_factors = torch.tensor([fg.nf()])
+            self.n_prodsum = torch.tensor([n_prodsum])
             theta_rep = torch.tensor([fg.factor_size(F) for F in fg.iter_factors()], dtype=torch.long)
             self.theta_rep = torch.repeat_interleave(theta_rep, 2**theta_rep)
         else:
@@ -42,6 +45,7 @@ class NMFEdges:
             self.n_ss      = edges_batch.n_ss      
             self.n_vars    = edges_batch.n_vars    
             self.n_factors = edges_batch.n_factors 
+            self.n_prodsum = edges_batch.n_prodsum
             self.pmprod_edges = edges_batch.pmprod_edges
             self.pmprodsum_edges   = edges_batch.pmprodsum_edges
             self.theta_rep = edges_batch.theta_rep
@@ -53,6 +57,7 @@ class NMFEdges:
         ne.n_ss = self.n_ss.clone()
         ne.n_vars = self.n_vars.clone()
         ne.n_factors = self.n_factors.clone()
+        ne.n_prodsum = self.n_prodsum.clone()
 
         ne.pmprod_edges = self.pmprod_edges.clone()
         ne.pmprodsum_edges = self.pmprodsum_edges.clone()
@@ -63,7 +68,7 @@ class NMFEdges:
         ne.n_ss = self.n_ss.to(device)
         ne.n_vars = self.n_vars.to(device)
         ne.n_factors = self.n_factors.to(device)
-
+        ne.n_prodsum = self.n_prodsum.to(device)
         ne.pmprod_edges = self.pmprod_edges.to(device)
         ne.pmprodsum_edges = self.pmprodsum_edges.to(device)
         ne.theta_rep = self.theta_rep.to(device)
@@ -73,6 +78,7 @@ class NMFEdges:
         if (self.n_ss.shape != other.n_ss.shape) or \
            (self.n_vars.shape != other.n_vars.shape) or \
            (self.n_factors.shape != other.n_factors.shape) or \
+           (self.n_prodsum.shape != other.n_prodsum.shape) or \
            (self.pmprod_edges.shape != other.pmprod_edges.shape) or \
            (self.pmprodsum_edges.shape != other.pmprodsum_edges.shape) or \
            (self.theta_rep.shape != other.theta_rep.shape):
@@ -81,6 +87,7 @@ class NMFEdges:
         return torch.all(self.n_ss == other.n_ss) and \
                torch.all(self.n_vars == other.n_vars) and \
                torch.all(self.n_factors == other.n_factors) and \
+               torch.all(self.n_prodsum == other.n_prodsum) and \
                torch.all(self.pmprod_edges == other.pmprod_edges) and \
                torch.all(self.pmprodsum_edges == other.pmprodsum_edges) and \
                torch.all(self.theta_rep == other.theta_rep)
@@ -91,6 +98,7 @@ class NMFEdges:
         ne.n_ss = self.n_ss[idx].unsqueeze(0)
         ne.n_vars = self.n_vars[idx].unsqueeze(0)
         ne.n_factors = self.n_factors[idx].unsqueeze(0)
+        ne.n_prodsum = self.n_prodsum[idx].unsqueeze(0)
 
         ss_offsets = torch.roll(torch.cumsum(self.n_ss,0), 1)
         ss_offsets[0] = 0
@@ -98,24 +106,23 @@ class NMFEdges:
         vars_offsets = torch.roll(torch.cumsum(self.n_vars,0), 1)
         vars_offsets[0] = 0
 
+        prodsum_offsets = torch.roll(torch.cumsum(self.n_prodsum,0), 1)
+        prodsum_offsets[0] = 0
+
         ne.theta_rep = self.theta_rep[ss_offsets[idx]:ss_offsets[idx]+self.n_ss[idx]]
 
-        pmprod_idx = (self.pmprod_edges[:,1] >= vars_offsets[idx]) * (self.pmprod_edges[:,1] < vars_offsets[idx]+2*self.n_vars[idx])
+        pmprod_idx = (self.pmprod_edges[:,1] >= 2*vars_offsets[idx]) * (self.pmprod_edges[:,1] < 2*vars_offsets[idx]+2*self.n_vars[idx])
         ne.pmprod_edges = self.pmprod_edges[pmprod_idx].clone()
-        ne.pmprod_edges = ne.pmprod_edges - ne.pmprod_edges.min(dim=0).values
+        ne.pmprod_edges = ne.pmprod_edges - torch.tensor([prodsum_offsets[idx], 2*vars_offsets[idx]])
 
-        pmprodsum_idx = (self.pmprodsum_edges[:,1] >= ss_offsets[idx]) * (self.pmprodsum_edges[:,1] < ss_offsets[idx]+self.n_ss[idx])
-        pmprodsum_idx_tmp = (self.pmprodsum_edges[:,1] >= ss_offsets[idx]) * (self.pmprodsum_edges[:,1] < ss_offsets[idx]+self.n_vars[idx])
+        pmprodsum_idx = (self.pmprodsum_edges[:,0] >= 2*vars_offsets[idx]) * (self.pmprodsum_edges[:,0] < 2*vars_offsets[idx]+2*self.n_vars[idx])
 
-        print("idx shape = ", pmprodsum_idx.sum())
-        print("idx shape = ", pmprodsum_idx_tmp.sum())
-        print(ne.n_ss, ne.n_vars, ne.n_factors)
-        print("AAAA ", self.pmprodsum_edges.shape, self.n_ss.sum())
-        print("BBBB ", self.pmprodsum_edges.max(dim=0).values)
+
 
         ne.pmprodsum_edges = self.pmprodsum_edges[pmprodsum_idx].clone()
-        print("NE ", ne.pmprodsum_edges.shape)
-        ne.pmprodsum_edges = ne.pmprodsum_edges - ne.pmprodsum_edges.min(dim=0).values
+        ne.pmprodsum_edges = ne.pmprodsum_edges - torch.tensor([2*vars_offsets[idx], prodsum_offsets[idx]])
+
+
 
         return ne
 
@@ -144,12 +151,13 @@ class NMFEdges:
     
     @staticmethod
     def batch(edge_l):
-        n_pmprod_edges, n_pmprodsum_edges, n_n_vars, n_n_factors, n_n_ss, n_ss_tot, n_theta_rep = 0,0,0,0,0,0,0
+        n_pmprod_edges, n_pmprodsum_edges, n_n_vars, n_n_factors, n_n_prodsum, n_n_ss, n_ss_tot, n_theta_rep = 0,0,0,0,0,0,0,0
         for e in edge_l:
             n_pmprod_edges += e.pmprod_edges.shape[0]
             n_pmprodsum_edges += e.pmprodsum_edges.shape[0]
             n_n_vars += e.n_vars.shape[0]
             n_n_factors += e.n_factors.shape[0]
+            n_n_prodsum += e.n_prodsum.shape[0]
             n_n_ss += e.n_ss.shape[0]
             n_ss_tot += e.n_ss.sum().item()
             n_theta_rep += e.theta_rep.shape[0]
@@ -165,16 +173,23 @@ class NMFEdges:
         n_vars_pos = 0
         ne.n_factors = torch.empty(n_n_factors, dtype=torch.long)
         n_factors_pos = 0
+        ne.n_prodsum = torch.empty(n_n_prodsum, dtype=torch.long)
+        n_prodsum_pos = 0
+
         ne.n_ss = torch.empty(n_n_ss, dtype=torch.long)
         n_ss_pos = 0
         ne.theta_rep = torch.empty(n_theta_rep, dtype=torch.long)
         theta_rep_pos = 0
         for i,e in enumerate(edge_l):
             ne.pmprod_edges[pmprod_pos:pmprod_pos+e.pmprod_edges.shape[0]] = e.pmprod_edges.clone() + pmprod_offset
-            pmprod_offset += 1+e.pmprod_edges.max(dim=0).values
+            pmprod_offset += torch.tensor([e.n_prodsum.sum(), 2*e.n_vars.sum()])
+
             pmprod_pos += e.pmprod_edges.shape[0]
             ne.pmprodsum_edges[pmprodsum_pos:pmprodsum_pos+e.pmprodsum_edges.shape[0]] = e.pmprodsum_edges.clone() + pmprodsum_offset
-            pmprodsum_offset += 1+e.pmprodsum_edges.max(dim=0).values
+
+
+            pmprodsum_offset += torch.tensor([2*e.n_vars.sum(), e.n_prodsum.sum()])
+
             pmprodsum_pos += e.pmprodsum_edges.shape[0]
 
             ne.n_vars[n_vars_pos:n_vars_pos+e.n_vars.shape[0]] = e.n_vars.clone()
@@ -185,6 +200,9 @@ class NMFEdges:
 
             ne.n_factors[n_factors_pos:n_factors_pos+e.n_factors.shape[0]] = e.n_factors.clone()
             n_factors_pos += e.n_factors.shape[0]
+
+            ne.n_prodsum[n_prodsum_pos:n_prodsum_pos+e.n_prodsum.shape[0]] = e.n_prodsum.clone()
+            n_prodsum_pos += e.n_prodsum.shape[0]
 
             ne.theta_rep[theta_rep_pos:theta_rep_pos+e.theta_rep.shape[0]] = e.theta_rep.clone()
             theta_rep_pos += e.theta_rep.shape[0]
@@ -220,5 +238,7 @@ def naive_mean_field_edges(fg):
                         pmprodsum_edges.append([2*u+u_val, d])
                 d += 1
             c += 1
-    return torch.tensor(pmprod_edges),torch.tensor(pmprodsum_edges)
+    a,b = torch.tensor(pmprod_edges),torch.tensor(pmprodsum_edges)
+
+    return a,b,d
 
