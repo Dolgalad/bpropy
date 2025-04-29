@@ -29,7 +29,7 @@ def load_mis(path):
     g = nx.read_adjlist(os.path.join(path, "graph.adjlist"), nodetype=int)
     return MIS(g)
 
-def create_features(args):
+def create_features(args, save_to_disk=True):
     instance_path, output, category = args
     print(f"Instance {instance_path}, output = {output}, category = {category}", flush=True)
      # load problem
@@ -38,7 +38,10 @@ def create_features(args):
     # solve continuous relaxation
     data = mis_to_data(pb, category, with_lbp_edges=True)
     data.y = torch.from_numpy(y)
-    torch.save(data, output)
+    if save_to_disk:
+        return torch.save(data, output)
+    else:
+        return data
 
 if __name__=="__main__":
     args = parser.parse_args()

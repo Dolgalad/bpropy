@@ -48,7 +48,7 @@ def mis_importance_sampling(pb, theta, U=2., max_iter=10, inference_f=loopy_beli
     lbpedges = LBPEdges(fg).to(theta.device)
     while not np.all(fixed_variables):
         # belief propagation
-        mu = inference_f(theta, v2f, lbpedges, max_iter=max_iter, tol=1e-6, damping=0.0)
+        mu = inference_f(theta, v2f, lbpedges, max_iter=max_iter, tol=1e-6, damping=0.0).mu
 
         # vertex marginals for x_i=1
         marginals = mu[:2*pb.nv()].reshape(pb.nv(), 2)[:,1].cpu().numpy()
@@ -117,7 +117,7 @@ def mis_importance_sampling_nmf(pb, theta, U=2., max_iter=10, edges=None):
 
     while not np.all(fixed_variables):
         # belief propagation
-        mu = naive_mean_field(fg, theta, edges.pmprod_edges, edges.pmprodsum_edges, max_iter=max_iter, tol=1e-6)
+        mu = naive_mean_field(theta, edges, max_iter=max_iter, tol=1e-6).mu
 
         # vertex marginals for x_i=1
         marginals = mu[:2*pb.nv()].reshape(pb.nv(), 2)[:,1].cpu().numpy()
