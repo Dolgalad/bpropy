@@ -9,8 +9,9 @@ from bpropy.mrf.lbp import loopy_belief_propagation
 from bpropy.models.efcanonicalparam import EFCanonicalParam
 
 class GCN_MRF_v4(torch.nn.Module):
-    def __init__(self, in_dim, n_layers=4, hidden_dim=64, dropout_p=0.25, normalize=False, bp_max_iter=10, bp_tol=1e-6, bp_damping=0.5, factor_sizes=[1,2], jk="lstm", norm="LayerNorm", act="elu"):
+    def __init__(self, in_dim, n_layers=4, hidden_dim=64, dropout_p=0.25, normalize=False, bp_max_iter=10, bp_tol=1e-6, bp_damping=0.5, factor_sizes=[1,2], jk="lstm", norm="LayerNorm", act="elu", inference="loopy_belief_propagation"):
         super().__init__()
+        self.inference = inference 
         self.bp_max_iter = bp_max_iter
         self.bp_tol = bp_tol
         self.bp_damping = bp_damping
@@ -23,4 +24,7 @@ class GCN_MRF_v4(torch.nn.Module):
         x = self.conv(x, edge_index)
 
         x = self.efc(x, data)
-        return loopy_belief_propagation(x, torch.zeros_like(x), data.lbp_edges, max_iter=self.bp_max_iter, tol=self.bp_tol, damping=self.bp_damping).mu
+        if self.inference == "loopy_belief_propagation":
+            return loopy_belief_propagation(x, torch.zeros_like(x), data.lbp_edges, max_iter=self.bp_max_iter, tol=self.bp_tol, damping=self.bp_damping).mu
+        if self.inference == "naive_mean_field":
+            return loopy_belief_propagation(x, data.nmf_edges, max_iter=self.bp_max_iter, tol=self.bp_tol).mu
