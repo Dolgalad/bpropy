@@ -29,6 +29,10 @@ class NMFEdges:
     @property
     def num_graphs(self):
         return self.n_ss.shape[0]
+    def graph_indicator(self):
+        if self.num_graphs == 1:
+            return torch.zeros(self.n_ss, dtype=torch.int16, device=self.device)
+        return torch.arange(self.num_graphs, device=self.device).repeat_interleave(self.n_ss)
 
     def fill(self, fg):
         if fg.num_graphs == 1:
