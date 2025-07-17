@@ -39,7 +39,6 @@ class SCPFactorGraph(FactorGraph):
             for n in np.argwhere(C.A!=0).flatten():
                 self.add_edge(n+c0, c)
 
-            print("Neighbors of ",c, list(self.neighbors(c)))
             c += 1
         self.num_graphs += 1
         self.num_vars = np.append(self.num_vars, pb.nv())
