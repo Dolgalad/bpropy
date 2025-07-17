@@ -36,7 +36,7 @@ class SCPFactorGraph(FactorGraph):
         for fn in range(len(constraints)):
             C = constraints[fn]
             self.add_node(c, bipartite=1)
-            for n in np.argwhere(C.A!=0).flatten():
+            for n in np.argwhere(C.A.flatten()!=0).flatten():
                 self.add_edge(n+c0, c)
 
             c += 1
