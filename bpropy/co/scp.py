@@ -73,7 +73,7 @@ class SCP:
     def adj_vec(self, f):
         return np.array([a in f for a in self.A])
     def adj_matrix(self):
-        return np.stack([self.adj_vec(f) for f in self.F])
+        return np.stack([self.adj_vec(f) for f in self.F]).T
     def greedy(self, scores=None):
         # initialize list of covered elements
         covered = np.zeros(self.ne(), dtype=bool)

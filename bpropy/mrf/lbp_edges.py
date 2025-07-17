@@ -533,6 +533,7 @@ def f2v_index_map(fg):
         neighbors = fg.factor_variables(F)
 
         nN = len(neighbors)
+        print("Nn ", nN)
         for vals in range(2**nN):
             yF = np.unpackbits(np.array([vals],dtype=np.uint8), count=nN, bitorder="little")
             ss[F,vals] = e
