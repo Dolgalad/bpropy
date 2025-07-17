@@ -71,6 +71,8 @@ class MIS:
         """Get number of edges
         """
         return nx.number_of_edges(self.g)
+    def nc(self):
+        return len(self.C)
     def constraints(self, cliques=None):
         """Get list of scipy.LinearConstraint objects. If provided `cliques` should be a list of cliques covering all edges of the graph.
         """

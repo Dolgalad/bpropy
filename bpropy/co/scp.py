@@ -67,6 +67,8 @@ class SCP:
         return SCPSolution.from_python_mip(x, md)
     def adj_vec(self, f):
         return np.array([a in f for a in self.A])
+    def adj_matrix(self):
+        return np.stack([self.adj_vec(f) for f in self.F])
     def greedy(self, scores=None):
         # initialize list of covered elements
         covered = np.zeros(self.ne(), dtype=bool)
@@ -75,8 +77,16 @@ class SCP:
             # list candidate sets
             candidate_sets = [i for i in range(self.nv()) if x[i]==0]
             # compute improvement ratio for each set
-            improvement_ratios = [self.w[i] / (np.logical_not(covered) & self.adj_vec(self.F[i])).sum() for i in candidate_sets]
-            idx = np.argmin(improvement_ratios)
+            if scores is None:
+                improvement_ratios = [self.w[i] / (np.logical_not(covered) & self.adj_vec(self.F[i])).sum() for i in candidate_sets]
+                idx = np.argmin(improvement_ratios)
+            else:
+                #improvement_ratios = [scores[i] / (np.logical_not(covered) & self.adj_vec(self.F[i])).sum() for i in candidate_sets]
+                #idx = np.argmin(improvement_ratios)
+
+                improvement_ratios = [scores[i] for i in candidate_sets]
+                idx = np.argmax(improvement_ratios)
+
             x[candidate_sets[idx]] = 1
             covered = covered | self.adj_vec(self.F[candidate_sets[idx]])
         return x
@@ -102,6 +112,33 @@ def random_scp(n, m):
         if adj[i,:].sum() == 0:
             adj[i, np.random.choice(range(m))] = 1
     return SCP(list(range(n)), adjacency_matrix_to_sets(adj))
+
+def random_choice_scp(n, m, max_set_per_item=None):
+    F = []
+    covered = np.zeros(n, dtype=int)
+    while not np.all(covered > 0):
+        A = np.array(list(range(n)))
+        if max_set_per_item is None:
+            f = np.random.choice(A, size=m, replace=False)
+        else:
+            if (covered < max_set_per_item).sum() < m:
+                f = A[covered < max_set_per_item]
+            else:
+                f = np.random.choice(A[covered < max_set_per_item], size=m, replace=False)
+        F.append(f)
+        covered[F[-1]] += 1
+    return SCP(list(range(n)), F)
+
+def fixed_factor_scp(n, m, nF):
+    F = []
+    adj_m = np.random.rand(n,m)
+    for i in range(n):
+        x = adj_m[i,:]
+        x_sort = np.sort(x)
+        adj_m[i, np.argwhere(x>=x_sort[-nF]).flatten()] = 1
+        adj_m[i, np.argwhere(x<x_sort[-nF]).flatten()] = 0
+    F = adjacency_matrix_to_sets(adj_m)
+    return SCP(list(range(n)), F)
 
 
 
