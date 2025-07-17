@@ -1,6 +1,7 @@
 import numpy as np
 import mip
 from mip import xsum, minimize, BINARY
+from scipy.optimize import milp, LinearConstraint, Bounds
 
 from bpropy.co.scp_solution import SCPSolution
 
@@ -27,12 +28,16 @@ class SCP:
         """Get number of variables
         """
         return len(self.F)
-    def constraints(self):
+    def number_of_variables(self):
+        return self.nv()
+    def number_of_constraints(self):
+        return len(self.constraints())
+    def constraints(self, cliques=None):
         """Get list of scipy.LinearConstraint objects.
         """
         c = []
-        for a in A: 
-            row = np.array([a in f for f in F])
+        for a in self.A: 
+            row = np.array([a in f for f in self.F])
             c.append(LinearConstraint(row, lb=1))
         return c
     def solve(self, disp=False, solver="cbc", relax_integrality=False):
