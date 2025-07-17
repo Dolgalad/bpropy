@@ -25,7 +25,7 @@ import bpropy.co.mis
 from bpropy.co.mis import *
 from bpropy.mrf.importance_sampling import tgdata_to_networkx
 from bpropy.models.mrf_models import *
-from bpropy.datasets.mis_data import mis_to_data, data_to_mis
+from bpropy.datasets.mis_data import mis_to_hetero_data, data_to_mis, hetero_data_to_mis
 from bpropy.datasets.mrf_dataset import MRFDataset
 from bpropy.datasets.mrf_dataloader import MRFDataLoader
 
@@ -37,7 +37,7 @@ import pickle as pkl
 
 from early_stopper import EarlyStopper
 
-parser = argparse.ArgumentParser(prog="learning_mis_solution_full_cover.py",
+parser = argparse.ArgumentParser(prog="learning_mis_solution_full_cover_hetero.py",
                                  description="Learning MIS solution with Nair et. al. approach + Naive Mean Field + Tree Cover")
 parser.add_argument("train_dataset_path")
 parser.add_argument("val_dataset_path")
@@ -49,13 +49,13 @@ parser.add_argument("-a", "--hidden_dim", default=64, type=int)
 parser.add_argument("-E", "--max_epochs", default=10000, type=int)
 parser.add_argument("-p", "--es_patience", default=100, type=int)
 parser.add_argument("-d", "--dropout_p", default=0.25, type=float)
-parser.add_argument("-m", "--model_name_prefix", default="mis_nmf_full_cover")
+parser.add_argument("-m", "--model_name_prefix", default="mis_nmf_full_cover_hetero")
 parser.add_argument("-o", "--optimizer", default="torch.optim.RAdam")
 parser.add_argument("-O", "--optimizer_args", default="{\"lr\":0.0001, \"decoupled_weight_decay\": true, \"weight_decay\": 5e-4}")
 parser.add_argument("-s", "--seed", default=0, type=int)
 parser.add_argument("-g", "--gap_limit", default=-1, type=float)
-parser.add_argument("-M", "--model_class", default="GCN_MRF_v4")
-parser.add_argument("-A", "--model_args", default="{}")
+parser.add_argument("-M", "--model_class", default="Hetero_GCN_MRF_v4")
+parser.add_argument("-A", "--model_args", default="{\"dropout_p\":0.05}")
 parser.add_argument("-D", "--dataset_args", default="{}")
 parser.add_argument("-V", "--validation_dataset_args", default='{"unravel_pool":false, "solution_limit":1, "aggregate":false, "gap_limit": 0.0}')
 parser.add_argument("-j", "--description_file", default="", type=str)
@@ -187,13 +187,16 @@ print("Loading data")
 def create_simplified_factor_graph(data):
     pb = data_to_mis(data)
 
-    data_ = mis_to_data(pb, None, with_nmf_edges=True, y=data.y)
-    data_.x = data.x
-    data_.e = data.e
-    data_.y = data.y
+    #data_ = mis_to_data(pb, None, with_nmf_edges=True, y=data.y)
+    data_ = mis_to_hetero_data(pb, "EB", with_nmf_edges=True, y=data.y)
+
+    #data_["variable"].x = data.x[:pb.nv(),:]
+    #data_["constraint"].x = data.x[pb.nv():,:5]
+    #data_.e = data.e
+    #data_.y = data.y
     return data_
 
-train_graphs_processed_filename = "_".join([args.train_dataset_path, "processed_full_cover.pkl"])
+train_graphs_processed_filename = "_".join([args.train_dataset_path, "processed_full_cover_hetero.pkl"])
 if not os.path.exists(train_graphs_processed_filename):
     train_graphs = pkl.load(open(args.train_dataset_path, "rb"))
     for i in range(len(train_graphs)):
@@ -202,7 +205,7 @@ if not os.path.exists(train_graphs_processed_filename):
     with open(train_graphs_processed_filename, "wb") as f:
         pkl.dump(train_graphs, f)
 
-val_graphs_processed_filename = "_".join([args.val_dataset_path, "processed_full_cover.pkl"])
+val_graphs_processed_filename = "_".join([args.val_dataset_path, "processed_full_cover_hetero.pkl"])
 if not os.path.exists(val_graphs_processed_filename):
     val_graphs = pkl.load(open(args.val_dataset_path, "rb"))
     for i in range(len(val_graphs)):
@@ -212,7 +215,7 @@ if not os.path.exists(val_graphs_processed_filename):
         pkl.dump(val_graphs, f)
 
 train_dataset = MRFDataset(train_graphs_processed_filename)
-train_loader = MRFDataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+train_loader = MRFDataLoader(train_dataset, batch_size=1, shuffle=True)
 val_dataset = MRFDataset(val_graphs_processed_filename)
 val_loader = MRFDataLoader(val_dataset, batch_size=1, shuffle=False)
 
@@ -225,10 +228,11 @@ print(json.dumps(training_description, sort_keys=True, indent=4))
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print("Using device ", device)
-#model = GCN(9, args.hidden_dim).to(device)
 model = eval(args.model_class)(10, factor_sizes=list(range(1,10)), inference="naive_mean_field", **model_args).to(device)
 
 optimizer = eval(args.optimizer)(model.parameters(), **optimizer_args)
+from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
+scheduler = CosineAnnealingWarmRestarts(optimizer, 20, eta_min=1e-8)
 
 training_description["start_time"] = time.time()
 training_description["status"] = "running"
@@ -288,8 +292,10 @@ for epoch in range(args.max_epochs):
             break
 
         # loss unary factors
-        nV = int((data.bipartite==0).sum().item())
-        nC = int((data.bipartite==1).sum().item())
+        nV = data["variable"].x.shape[0]
+        nC = data["constraint"].x.shape[0]
+        #nV = int((data.bipartite==0).sum().item())
+        #nC = int((data.bipartite==1).sum().item())
         factor_labels = data.y[:2 * nV].reshape(-1, 2).argmax(dim=1)
 
         loss = F.nll_loss((out.reshape(nV,2)+1e-8).log(), factor_labels) + 0.0001 * torch.linalg.norm(theta)
@@ -318,7 +324,7 @@ for epoch in range(args.max_epochs):
         model.eval()
         for i,data in enumerate(val_loader):
             # retrieve graph
-            pb = data_to_mis(data, batch=True)
+            pb = hetero_data_to_mis(data, batch=True)
 
             data = data.to(device)
             data.nmf_edges = data.nmf_edges.to(device)
@@ -353,13 +359,13 @@ for epoch in range(args.max_epochs):
             epoch_val_loss.append(loss.item())
             epoch_val_gap.append(gap)
             
-            labels = sol_tmp[:,1].cpu().numpy()
-            if positive_scores is None:
-                positive_scores = node_scores[labels == 1]
-                negative_scores = node_scores[labels == 0]
-            else:
-                positive_scores = np.concatenate((positive_scores, node_scores[labels==1]))
-                negative_scores = np.concatenate((negative_scores, node_scores[labels==0]))
+            #labels = sol_tmp[:,1].cpu().numpy()
+            #if positive_scores is None:
+            #    positive_scores = node_scores[labels == 1]
+            #    negative_scores = node_scores[labels == 0]
+            #else:
+            #    positive_scores = np.concatenate((positive_scores, node_scores[labels==1]))
+            #    negative_scores = np.concatenate((negative_scores, node_scores[labels==0]))
 
             bar.next()
             if args.debug and i>10:
@@ -372,93 +378,97 @@ for epoch in range(args.max_epochs):
     mtrainloss = np.mean(epoch_train_loss)
     mvalloss = np.mean(epoch_val_loss)
     mvalgap = np.mean(epoch_val_gap)
-    print(f"epoch {epoch}, loss = {mtrainloss}, val_gap = {mvalgap}, val_loss = {mvalloss}")
-    writer.add_scalars("loss", {"train": mtrainloss, "val": mvalloss}, epoch)
-    writer.add_scalars("gap", {"val": mvalgap}, epoch)
-    writer.add_scalars("scores", {"pos": np.mean(positive_scores), "neg": np.mean(negative_scores)}, epoch)
-    for tag, value in model.named_parameters():
-        writer.add_histogram(tag, value.cpu(), epoch)
-        if value.grad is not None:
-            writer.add_histogram(tag + "/grad", value.grad.cpu(), epoch)
+    print(f"epoch {epoch}, lr = {scheduler.get_lr()[0]}, loss = {mtrainloss}, val_gap = {mvalgap}, val_loss = {mvalloss}")
+    scheduler.step()
 
-    fig = plt.figure()
-    plt.boxplot([negative_scores, positive_scores], labels=["0", "1"])
-    writer.add_figure("scores", fig, global_step=epoch)
-    plt.close()
+    #print(f"epoch {epoch}, loss = {mtrainloss}")
 
-    # save checkpoint if gap is better
-    if mvalgap <= best_val_gap:
-        best_val_gap = mvalgap
-        checkpoint_filename = os.path.join(checkpoint_dir, f"checkpoint.pt")
-        _model = copy.deepcopy(model).cpu()
-        checkpoint = {
-                "epoch": epoch,
-                "model": _model.state_dict(),
-                "optimizer": optimizer.state_dict()
-                }
-        torch.save(checkpoint, checkpoint_filename)
+    #writer.add_scalars("loss", {"train": mtrainloss, "val": mvalloss}, epoch)
+    #writer.add_scalars("gap", {"val": mvalgap}, epoch)
+    #writer.add_scalars("scores", {"pos": np.mean(positive_scores), "neg": np.mean(negative_scores)}, epoch)
+    #for tag, value in model.named_parameters():
+    #    writer.add_histogram(tag, value.cpu(), epoch)
+    #    if value.grad is not None:
+    #        writer.add_histogram(tag + "/grad", value.grad.cpu(), epoch)
 
-    # early stopping
-    if es.early_stop(epoch, mvalloss):
-        print("Stopping early")
-        break
+    #fig = plt.figure()
+    #plt.boxplot([negative_scores, positive_scores], labels=["0", "1"])
+    #writer.add_figure("scores", fig, global_step=epoch)
+    #plt.close()
 
-checkpoint_path = os.path.join(log_dir, "checkpoints", "checkpoint.pt")
-if os.path.exists(os.path.join(log_dir, "checkpoints", "checkpoint.pt")):
-    test_graphs_processed_filename = "_".join([args.test_dataset_path,"processed_full_cover.pkl"])
-    if not os.path.exists(test_graphs_processed_filename):
-        test_graphs = pkl.load(open(args.test_dataset_path, "rb"))
-        for i in range(len(test_graphs)):
-            test_graphs[i] = create_simplified_factor_graph(test_graphs[i])
-            print("Simplification test: ", i, " / ", len(test_graphs))
-        with open(test_graphs_processed_filename,"wb") as f:
-            pkl.dump(test_graphs, f)
-    test_dataset = MRFDataset(test_graphs_processed_filename)
-    test_loader = MRFDataLoader(test_dataset, batch_size=1, shuffle=False)
+    ## save checkpoint if gap is better
+    #if mvalgap <= best_val_gap:
+    #    best_val_gap = mvalgap
+    #    checkpoint_filename = os.path.join(checkpoint_dir, f"checkpoint.pt")
+    #    _model = copy.deepcopy(model).cpu()
+    #    checkpoint = {
+    #            "epoch": epoch,
+    #            "model": _model.state_dict(),
+    #            "optimizer": optimizer.state_dict()
+    #            }
+    #    torch.save(checkpoint, checkpoint_filename)
 
-    # model 
-    checkpoint = torch.load(checkpoint_path, weights_only=True)
-    model.load_state_dict(checkpoint["model"])
-    model = model.to(device)
-    model.eval()
-    
-    gaps = []
-    bar = Bar("Testing: ", max=len(test_graphs))
-    with torch.no_grad():
-        for data in test_loader:
-            pb = data_to_mis(data, batch=True)
+    ## early stopping
+    #if es.early_stop(epoch, mvalloss):
+    #    print("Stopping early")
+    #    break
 
-            data = data.to(device)
-            data.nmf_edges = data.nmf_edges.to(device)
-
-            out,theta = model(data)
-
-            unary_marginals = out[:2*pb.nv()].reshape(pb.nv(), 2)
-            node_scores = unary_marginals[:,1].cpu().numpy()
-
-            # solve greedy
-            sol = mis_greedy(pb, node_scores)
-
-            # gap
-            sol_tmp = data.y[:2*pb.nv()].reshape(pb.nv(), 2)
-            opt_val = sol_tmp[:,1].sum().item()
-            if opt_val == 0:
-                continue
-            grd_val = sol.sum()
-            gap = (opt_val - grd_val) / opt_val
-
-            gaps.append(gap)
-            bar.suffix = f" {np.mean(gaps)}"
-            bar.next()
-        bar.finish()
-    training_description["test_gap"] = np.mean(gaps)
-
-
-training_description["stop_time"] = time.time()
-training_description["min_validation_gap"] = es.min_validation_loss
-training_description["min_validation_gap_epoch"] = es.min_validation_loss_epoch
-training_description["epochs"] = epoch
-training_description["status"] = "success"
-with open(os.path.join(log_dir, "description.json"), "w") as f:
-    f.write(json.dumps(training_description, sort_keys=True, indent=4))
+#checkpoint_path = os.path.join(log_dir, "checkpoints", "checkpoint.pt")
+#if os.path.exists(os.path.join(log_dir, "checkpoints", "checkpoint.pt")):
+#    test_graphs_processed_filename = "_".join([args.test_dataset_path,"processed_full_cover_hetero.pkl"])
+#    if not os.path.exists(test_graphs_processed_filename):
+#        test_graphs = pkl.load(open(args.test_dataset_path, "rb"))
+#        for i in range(len(test_graphs)):
+#            test_graphs[i] = create_simplified_factor_graph(test_graphs[i])
+#            print("Simplification test: ", i, " / ", len(test_graphs))
+#        with open(test_graphs_processed_filename,"wb") as f:
+#            pkl.dump(test_graphs, f)
+#    test_dataset = MRFDataset(test_graphs_processed_filename)
+#    test_loader = MRFDataLoader(test_dataset, batch_size=1, shuffle=False)
+#
+#    # model 
+#    checkpoint = torch.load(checkpoint_path, weights_only=True)
+#    model.load_state_dict(checkpoint["model"])
+#    model = model.to(device)
+#    model.eval()
+#    
+#    gaps = []
+#    bar = Bar("Testing: ", max=len(test_graphs))
+#    with torch.no_grad():
+#        for data in test_loader:
+#            pb = data_to_mis(data, batch=True)
+#
+#            data = data.to(device)
+#            data.nmf_edges = data.nmf_edges.to(device)
+#
+#            out,theta = model(data)
+#
+#            unary_marginals = out[:2*pb.nv()].reshape(pb.nv(), 2)
+#            node_scores = unary_marginals[:,1].cpu().numpy()
+#
+#            # solve greedy
+#            sol = mis_greedy(pb, node_scores)
+#
+#            # gap
+#            sol_tmp = data.y[:2*pb.nv()].reshape(pb.nv(), 2)
+#            opt_val = sol_tmp[:,1].sum().item()
+#            if opt_val == 0:
+#                continue
+#            grd_val = sol.sum()
+#            gap = (opt_val - grd_val) / opt_val
+#
+#            gaps.append(gap)
+#            bar.suffix = f" {np.mean(gaps)}"
+#            bar.next()
+#        bar.finish()
+#    training_description["test_gap"] = np.mean(gaps)
+#
+#
+#training_description["stop_time"] = time.time()
+#training_description["min_validation_gap"] = es.min_validation_loss
+#training_description["min_validation_gap_epoch"] = es.min_validation_loss_epoch
+#training_description["epochs"] = epoch
+#training_description["status"] = "success"
+#with open(os.path.join(log_dir, "description.json"), "w") as f:
+#    f.write(json.dumps(training_description, sort_keys=True, indent=4))
 

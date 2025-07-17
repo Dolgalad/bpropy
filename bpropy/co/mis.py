@@ -125,6 +125,11 @@ class MIS:
         if scores is None:
             scores = np.array([-self.g.degree[n] for n in range(self.nv())])
         return mis_greedy(self, scores)
+    def rgreedy(self, scores):
+        """Solve the problem geedily
+        """
+        return mis_random_greedy(self, scores)
+
     def check_solution(self, x):
         """Check if solution is feasible
         """
@@ -206,6 +211,26 @@ def mis_greedy(pb, scores):
                 queue.remove(v)
         c += 1
     return sol
+def np_softmax(x):
+    return np.exp(x-np.max(x)) / np.exp(x - np.max(x)).sum()
+def mis_random_greedy(pb, scores):
+    """Greedy solver for MIS problems
+    """
+    queue = list(range(pb.nv()))
+    sol = np.zeros(pb.nv())
+    c = 0
+    while len(queue)>0:
+        u = np.random.choice(queue, p=np_softmax(scores[np.array(queue)]))
+        #u = queue[np.argmax(scores[np.array(queue)])]
+        sol[u] = 1
+        queue.remove(u)
+        for v in pb.g.neighbors(u):
+            if v in queue:
+                sol[v] = 0
+                queue.remove(v)
+        c += 1
+    return sol
+
 
 def solution_feasible(pb, sol):
     """Check if solution `sol` is a valid independent set for `pb`

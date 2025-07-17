@@ -48,19 +48,19 @@ parser.add_argument("-l", "--learning_rate", default=0.0001, type=float)
 parser.add_argument("-a", "--hidden_dim", default=64, type=int)
 parser.add_argument("-E", "--max_epochs", default=10000, type=int)
 parser.add_argument("-p", "--es_patience", default=100, type=int)
-parser.add_argument("-d", "--dropout_p", default=0.25, type=float)
+parser.add_argument("-d", "--dropout_p", default=0.0, type=float)
 parser.add_argument("-m", "--model_name_prefix", default="mis_nmf_full_cover")
 parser.add_argument("-o", "--optimizer", default="torch.optim.RAdam")
-parser.add_argument("-O", "--optimizer_args", default="{\"lr\":0.0001, \"decoupled_weight_decay\": true, \"weight_decay\": 5e-4}")
+parser.add_argument("-O", "--optimizer_args", default="{\"lr\":0.00001, \"decoupled_weight_decay\": false, \"weight_decay\": 5e-4}")
 parser.add_argument("-s", "--seed", default=0, type=int)
 parser.add_argument("-g", "--gap_limit", default=-1, type=float)
 parser.add_argument("-M", "--model_class", default="GCN_MRF_v4")
-parser.add_argument("-A", "--model_args", default="{}")
+parser.add_argument("-A", "--model_args", default="{\"normalize_theta\": false}")
 parser.add_argument("-D", "--dataset_args", default="{}")
 parser.add_argument("-V", "--validation_dataset_args", default='{"unravel_pool":false, "solution_limit":1, "aggregate":false, "gap_limit": 0.0}')
 parser.add_argument("-j", "--description_file", default="", type=str)
 parser.add_argument("--debug", action="store_true")
-parser.add_argument("-c", "--bp_damping", default=0.5, type=float)
+parser.add_argument("-c", "--bp_damping", default=0.0, type=float)
 parser.add_argument("-e", "--bp_max_iter", default=10, type=int)
 
 args = parser.parse_args()
@@ -212,9 +212,9 @@ if not os.path.exists(val_graphs_processed_filename):
     with open(val_graphs_processed_filename, "wb") as f:
         pkl.dump(val_graphs, f)
 
-train_dataset = MRFDataset(train_graphs_processed_filename)
+train_dataset = MRFDataset(train_graphs_processed_filename, limit=100)
 train_loader = MRFDataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-val_dataset = MRFDataset(val_graphs_processed_filename)
+val_dataset = MRFDataset(val_graphs_processed_filename, limit=10)
 val_loader = MRFDataLoader(val_dataset, batch_size=1, shuffle=False)
 
 
@@ -230,6 +230,7 @@ print("Using device ", device)
 model = eval(args.model_class)(10, factor_sizes=list(range(1,10)), **model_args).to(device)
 
 optimizer = eval(args.optimizer)(model.parameters(), **optimizer_args)
+optimizer_bethe = eval(args.optimizer)(model.parameters(), **optimizer_args)
 
 training_description["start_time"] = time.time()
 training_description["status"] = "running"
@@ -265,19 +266,14 @@ def Z_bethe(pred, theta, data):
     # variable marginals
     nV = (data.bipartite==0).sum()
     nC = (data.bipartite==1).sum()
-    var_marginals = pred[:2*nV].reshape(nV,2)
+    #var_marginals = pred[:2*nV].reshape(nV,2)
+    var_marginals = torch.nn.functional.softmax(pred.mu_v.reshape(nV,2), dim=1)
+    mu = pred.mu
 
     Za1 = (var_marginals * (var_marginals+1e-8).log()).sum(dim=1)
     Za = ((data.neighbors[:nV]-1) * Za1).sum()
     #Zb = (pred[2*nV:] * (theta[2*nV:] + (pred[2*nV:]+1e-8).log())).sum()
-    Zb = (pred[2*nV:] * (theta[2*nV:] + (pred[2*nV:]+1e-8).log())).sum()
-
-    #print("A ", Za, Zb)
-    #print("B ", (theta[2*nV:] + (pred[2*nV:]+1e-8).log()))
-    #print("C ",theta[2*nV:].min(), theta[2*nV:].max())
-    #print("D ",(pred[2*nV:]+1e-8).log().min(), (pred[2*nV:]+1e-8).log().max())
-    #print("E ",pred[2*nV:].min(), pred[2*nV:].max())
-
+    Zb = (mu * (-theta + (mu+1e-8).log())).sum()
 
     Z = Za - Zb
     return Z
@@ -317,11 +313,17 @@ for epoch in range(args.max_epochs):
         data = data.to(device)
         data.lbp_edges = data.lbp_edges.to(device)
 
-        if cc == 0:
-            optimizer.zero_grad()
-
+        optimizer_bethe.zero_grad()
         out,theta = model(data)
-        if torch.any(torch.isnan(out)) or torch.any(torch.isinf(out)):
+        loss_bethe = -Z_bethe(out, theta.detach(), data)
+        loss_bethe.backward()
+        optimizer_bethe.step()
+
+
+        #print()
+        #print("theta : ", theta.min().item(), theta.max().item())
+        #print("mu    : ", out.min().item(), out.max().item())
+        if torch.any(torch.isnan(out.mu)) or torch.any(torch.isinf(out.mu)):
             print("Encountered bad value in output")
             training_description["status"] = "failed"
             break
@@ -331,10 +333,13 @@ for epoch in range(args.max_epochs):
         nC = int((data.bipartite==1).sum().item())
         factor_labels = data.y[:2 * nV].reshape(-1, 2).argmax(dim=1)
 
-        #loss = F.nll_loss((out.reshape(nV,2)+1e-8).log(), factor_labels) + 0.0001 * torch.linalg.norm(theta)
-        loss = (Z_bethe(out, theta, data) - torch.dot(theta, data.y_ss))/args.batch_size + 0.0001 * torch.linalg.norm(theta)
-        #print(data)
-        #loss = factor_graph_nll_loss(data, out) + 0.0001 * torch.linalg.norm(theta)
+        optimizer.zero_grad()
+        out,theta = model(data)
+        out.mu = out.mu.detach()
+        out.mu_v = out.mu_v.detach()
+        loss = (Z_bethe(out, theta, data) - torch.dot(theta, data.y_ss))/args.batch_size # + 0.0001 * torch.linalg.norm(theta)
+
+        print(torch.nn.functional.nll_loss(out.mu_v, factor_labels).item())
 
 
         if torch.isnan(loss) or torch.isinf(loss):
@@ -365,12 +370,15 @@ for epoch in range(args.max_epochs):
 
             out,theta = model(data)
 
-            if torch.any(torch.isnan(out)) or torch.any(torch.isinf(out)):
+            if torch.any(torch.isnan(out.mu)) or torch.any(torch.isinf(out.mu)):
                 print("Encountered bad value in output")
                 training_description["status"] = "failed"
                 break
             #unary_marginals_1 = destack_unary_marginals(out, data).reshape(pb.nv(),2)
-            unary_marginals = out[:2*pb.nv()].reshape(pb.nv(), 2)
+            #unary_marginals = out.mu[:2*pb.nv()].reshape(pb.nv(), 2)
+            unary_marginals = out.mu_v.reshape(pb.nv(), 2)
+            #print(torch.stack((unary_marginals[:,1],unary_marginals_1[:,1])))
+
             node_scores = unary_marginals[:,1].cpu().numpy()
             #node_scores = unary_marginals_1[:,1].cpu().numpy()
 
@@ -388,7 +396,7 @@ for epoch in range(args.max_epochs):
             factor_labels = data.y[:2 * pb.nv()].reshape(-1, 2).argmax(dim=1)
             #loss = F.nll_loss((out.reshape(pb.nv(),2)+1e-8).log(), factor_labels) + 0.0001 * torch.linalg.norm(theta)
             #loss = -Z_bethe(out, theta, data) + 0.0001 * torch.linalg.norm(theta)
-            loss = Z_bethe(out, theta, data) - torch.dot(theta, data.y_ss) + 0.0001 * torch.linalg.norm(theta)
+            loss = Z_bethe(out, theta, data) - torch.dot(theta, data.y_ss) #+ 0.0001 * torch.linalg.norm(theta)
 
 
             #no_red_loss = F.binary_cross_entropy_with_logits(out, data.y, reduction="none")

@@ -6,7 +6,7 @@ from torch_geometric.data import Data, Dataset, batch
 from torch_geometric.loader.dataloader import Collater
 
 class MRFDataset(Dataset):
-    def __init__(self, root, transform=None, pre_transform=None, pre_filter=None, in_memory=True):
+    def __init__(self, root, transform=None, pre_transform=None, pre_filter=None, in_memory=True, limit=None):
         self.in_memory = in_memory
         super().__init__(root, transform, pre_transform, pre_filter)
         if os.path.exists(os.path.join(root, "processed")):
@@ -17,6 +17,8 @@ class MRFDataset(Dataset):
         if self.in_memory:
             with open(root, "rb") as f:
                 self.data = pkl.load(f)
+                if limit is not None:
+                    self.data = self.data[:limit]
 
 
     @property

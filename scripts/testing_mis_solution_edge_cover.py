@@ -37,12 +37,13 @@ import pickle as pkl
 
 from early_stopper import EarlyStopper
 
-parser = argparse.ArgumentParser(prog="testing_mis_solution_full_cover.py",
-                                 description="Testing MIS solution with Nair et. al. approach + Naive Mean Field + Tree Cover")
+parser = argparse.ArgumentParser(prog="testing_mis_solution_edge_cover.py",
+                                 description="Testing MIS solution with Nair et. al. approach + Naive Mean Field + Edge Cover")
 parser.add_argument("model_path")
 parser.add_argument("test_dataset_path")
 parser.add_argument("-M", "--model_class", default="GCN_MRF_v4")
 parser.add_argument("--seed", default=0, type=int)
+parser.add_argument("--zero_features", action="store_true")
 
 args = parser.parse_args()
 
@@ -125,7 +126,10 @@ def create_simplified_factor_graph(data):
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print("Using device ", device)
 #model = GCN(9, args.hidden_dim).to(device)
-model = eval(args.model_class)(10, factor_sizes=list(range(1,10)), inference="naive_mean_field", **model_args).to(device)
+
+print("Testing model")
+print(json.dumps(model_args, indent=4, sort_keys=True))
+model = eval(args.model_class)(10, factor_sizes=list(range(1,10)), **model_args).to(device)
 
 
 checkpoint_path = os.path.join(args.model_path, "checkpoints", "checkpoint.pt")
@@ -147,14 +151,19 @@ if os.path.exists(os.path.join(args.model_path, "checkpoints", "checkpoint.pt"))
     model = model.to(device)
     model.eval()
     
-    greedy_gaps = []
-    is_gaps = []
+    greedy_gaps, greedy_time = [], []
+    is_gaps, is_time = [], []
+    bce_values, nll_values = [], []
     bar = Bar("Testing: ", max=test_dataset.len())
     with torch.no_grad():
         for (data,fg_data,fg_map) in test_loader:
+            t0 = time.time()
             pb = data_to_mis(data, batch=True)
 
             data = data.to(device)
+            if args.zero_features:
+                data.x = torch.zeros_like(data.x)
+
             fg_data = fg_data.to(device)
             fg_data.nmf_edges = fg_data.nmf_edges.to(device)
             fg_map = torch.squeeze(fg_map,0).to(device)
@@ -163,12 +172,18 @@ if os.path.exists(os.path.join(args.model_path, "checkpoints", "checkpoint.pt"))
 
             unary_marginals = out[:2*pb.nv()].reshape(pb.nv(), 2)
             node_scores = unary_marginals[:,1].cpu().numpy()
+            t_prep = time.time() - t0
 
             # solve greedy
+            t_grd = time.time()
             sol = mis_greedy(pb, node_scores)
+            t_grd = time.time() - t_grd
 
             # solve is
+            t_is = time.time()
             is_sol = mis_importance_sampling_nmf(pb, theta, edges=fg_data.nmf_edges)
+            t_is = time.time() - t_is
+
 
             # gap
             sol_tmp = data.y[:2*pb.nv()].reshape(pb.nv(), 2)
@@ -180,11 +195,23 @@ if os.path.exists(os.path.join(args.model_path, "checkpoints", "checkpoint.pt"))
 
             is_gap = (opt_val - is_sol.sum()) / opt_val
 
+            # loss value, NLL and BCE unary marginals
+            nll_values.append(torch.nn.functional.nll_loss(unary_marginals.log(), sol_tmp[:,1].to(torch.long)).item())
+            bce_values.append(torch.nn.functional.binary_cross_entropy(unary_marginals[:,1], sol_tmp[:,1].to(torch.float)).item())
+
+
             greedy_gaps.append(gap)
+            greedy_time.append(t_grd)
             is_gaps.append(is_gap)
+            is_time.append(t_is)
             bar.suffix = f" {np.mean(greedy_gaps)} {np.mean(is_gaps)}"
             bar.next()
         bar.finish()
+
+    print("Test BCE   mean/std: ", np.mean(bce_values), np.std(bce_values))
+    print("Test NLL   mean/std: ", np.mean(nll_values), np.std(nll_values))
     print("Greedy gap mean/std: ", np.mean(greedy_gaps), np.std(greedy_gaps))
+    print("Greedy t   mean/std: ", np.mean(greedy_time), np.std(greedy_time))
     print("IS gap mean/std    : ", np.mean(is_gaps), np.std(is_gaps))
+    print("IS t   mean/std    : ", np.mean(is_time), np.std(is_time))
 

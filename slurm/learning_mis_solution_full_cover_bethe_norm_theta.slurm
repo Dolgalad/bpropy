@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+#SBATCH --job-name=learning_mis_solution_full_cover_bethe_norm_theta
+#SBATCH --gres=gpu:1
+#SBATCH --qos=qos_gpu-t4
+#SBATCH --cpus-per-task=5
+#SBATCH --output=./learning_mis_solution_full_cover_bethe_norm_theta.out
+#SBATCH --error=./learning_mis_solution_full_cover_bethe_norm_theta.err
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+
+export PYTHONUNBUFFERED=TRUE
+cd scripts
+srun python learning_mis_solution_lbp_full_cover.py /data1/schulz/datasets_archive/mis_er_n100-100_p0.15_tl1000.0_pooltl1000.0_inmem_mrf_CP_train.pkl /data1/schulz/datasets_archive/mis_er_n100-100_p0.15_tl1000.0_pooltl1000.0_inmem_mrf_CP_validation.pkl /data1/schulz/datasets_archive/mis_er_n100-100_p0.15_tl1000.0_pooltl1000.0_inmem_mrf_CP_test.pkl /data1/schulz/logs/mis_nmf_full_cover_cp_bethe_norm_theta -b 100 --model_args '{"inference": "loopy_belief_propagation", "normalize_theta": true}'

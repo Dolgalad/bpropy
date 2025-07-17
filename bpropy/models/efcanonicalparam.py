@@ -24,4 +24,3 @@ class EFCanonicalParam(Module):
 
         return y
 
-

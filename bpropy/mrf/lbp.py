@@ -6,10 +6,11 @@ import time
 import torch_scatter
 
 class BPSolution:
-    def __init__(self, mu=None, u=None, n_iter=None):
+    def __init__(self, mu=None, u=None, n_iter=None, mu_v=None):
         self.mu = mu
         self.u = u
         self.n_iter = None
+        self.mu_v = mu_v
 
 
 def loopy_belief_propagation(theta, v2f, edges, max_iter=100, tol=1e-6, damping=0.0):
@@ -21,6 +22,9 @@ def loopy_belief_propagation(theta, v2f, edges, max_iter=100, tol=1e-6, damping=
     m_idx = torch.arange(edges.m_stride.size(0), device=theta.device).repeat_interleave(edges.m_stride)
     mu = torch.zeros(int(edges.n_ss.sum().item()), device=dev)
     
+    nv = edges.n_vars.sum() #number_of_variables(g)
+    vmar = torch.zeros(2 * nv, device=dev)
+   
     for T in range(max_iter):
         t0 = time.time()
         
@@ -47,10 +51,12 @@ def loopy_belief_propagation(theta, v2f, edges, max_iter=100, tol=1e-6, damping=
             break
         mu = (1 - damping) * mup + damping * mu
 
+        # marginals
+        vmar = torch.zeros_like(vmar).scatter_add_(0, edges.vm_edges[:,0], r[edges.vm_edges[:,1]])
+
         if u < tol:
             break
-    return BPSolution(mu, u, T)
-    return mu
+    return BPSolution(mu, u, T, mu_v=vmar)
 
 def loopy_belief_propagation_bak(theta, v2f, g, f2v_edges, f2v_subsum_idx, r_edges, q_edges, m_edges, max_iter=100, tol=1e-6, damping=0.0):
     # strides

@@ -95,7 +95,10 @@ def create_simplified_factor_graph(data):
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print("Using device ", device)
 #model = GCN(9, args.hidden_dim).to(device)
-model = eval(args.model_class)(10, factor_sizes=list(range(1,10)), inference="naive_mean_field", **model_args).to(device)
+if "inference" not in list(model_args.keys()):
+    model_args["inference"] = "loopy_belief_propagation"
+print(model_args)
+model = eval(args.model_class)(10, factor_sizes=list(range(1,10)), **model_args).to(device)
 
 
 checkpoint_path = os.path.join(args.model_path, "checkpoints", "checkpoint.pt")

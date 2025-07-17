@@ -60,6 +60,7 @@ parser.add_argument("-j", "--description_file", default="", type=str)
 parser.add_argument("--debug", action="store_true")
 parser.add_argument("-c", "--bp_damping", default=0.5, type=float)
 parser.add_argument("-e", "--bp_max_iter", default=10, type=int)
+parser.add_argument("--zero_features", action="store_true")
 
 args = parser.parse_args()
 
@@ -259,7 +260,7 @@ print(json.dumps(training_description, sort_keys=True, indent=4))
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print("Using device ", device)
 #model = GCN(9, args.hidden_dim).to(device)
-model = eval(args.model_class)(10, factor_sizes=list(range(1,10)), inference="naive_mean_field", **model_args).to(device)
+model = eval(args.model_class)(10, factor_sizes=list(range(1,10)), **model_args).to(device)
 
 optimizer = eval(args.optimizer)(model.parameters(), **optimizer_args)
 
@@ -284,6 +285,8 @@ for epoch in range(args.max_epochs):
     cc = 0 # simulate batching
     for data, fg_data, fg_map in train_loader:
         data = data.to(device)
+        if args.zero_features:
+            data.x = torch.zeros_like(data.x)
         fg_data = fg_data.to(device)
         fg_data.nmf_edges = fg_data.nmf_edges.to(device)
         fg_map = torch.squeeze(fg_map,0).to(device)
@@ -334,6 +337,9 @@ for epoch in range(args.max_epochs):
             pb = data_to_mis(data)
 
             data = data.to(device)
+            if args.zero_features:
+                data.x = torch.zeros_like(data.x)
+
             fg_data = fg_data.to(device)
             fg_data.nmf_edges = fg_data.nmf_edges.to(device)
             fg_map = torch.squeeze(fg_map,0).to(device)
@@ -447,6 +453,9 @@ if os.path.exists(os.path.join(log_dir, "checkpoints", "checkpoint.pt")):
             pb = data_to_mis(data)
 
             data = data.to(device)
+            if args.zero_features:
+                data.x = torch.zeros_like(data.x)
+
             fg_data = fg_data.to(device)
             fg_data.nmf_edges = fg_data.nmf_edges.to(device)
             fg_map = torch.squeeze(fg_map,0).to(device)
