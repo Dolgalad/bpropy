@@ -19,19 +19,14 @@ from bpropy.datasets.scp_features import get_features
 def data_to_scp(data, batch=True):
     nV = int((data.bipartite==0).sum().item())
     nC = int((data.bipartite==1).sum().item())
-    adj_m = np.zeros((nC,nV))
-    F = []
+    adj_m = np.zeros((nC,nV)) 
+    F = []  
     for i,n in enumerate(range(data.bipartite.shape[0])):
         if data.bipartite[n]==1:
             #F.append(data.edge_index[1, data.edge_index[0,:]==n].tolist())
             adj_m[i-nV,data.edge_index[1, data.edge_index[0,:]==n].numpy()] = 1
-    #print(adj_m.sum(axis=0))
-    #print(adj_m.sum(axis=1))
-    #print(F)
-    #print(adjacency_matrix_to_sets(adj_m))
 
     return SCP(list(range(nC)), adjacency_matrix_to_sets(adj_m))
-
 
 def scp_to_data(pb, with_lbp_edges=False, with_nmf_edges=False, y=None):
     """Create a torch_geometric.data.Data object from MIS problem data

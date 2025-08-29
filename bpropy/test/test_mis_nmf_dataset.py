@@ -64,6 +64,7 @@ class TestMISNMFDataset(unittest.TestCase):
 
         for i in range(self.n):
             d = dataset.get(i)
+
             self.assertTrue(torch.all(d.x == self.on_disk_data[i].x))
             self.assertTrue(torch.all(d.edge_index == self.on_disk_data[i].edge_index))
             self.assertTrue(torch.all(d.e == self.on_disk_data[i].e))
