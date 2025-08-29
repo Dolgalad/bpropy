@@ -496,7 +496,8 @@ def make_lbp_edges(fg):
 
 
         for v in range(2**factor_size):
-            vals = np.unpackbits(np.array([v],dtype=np.uint8), count=factor_size, bitorder="little")
+            vals = np.array([(v >> k) & 1 for k in range(factor_size)], dtype=np.uint8)
+            #vals = np.unpackbits(np.array([v],dtype=np.uint8), count=factor_size, bitorder="little")
             for i_n in range(factor_size):
                 m_edges_vec[m_edges_c] = [factor_value_offsets[fmap[F]]+v,factor_ss_value_offsets[fmap[F]]+2*i_n+vals[i_n]]
                 m_edges_c += 1
@@ -534,7 +535,8 @@ def f2v_index_map(fg):
 
         nN = len(neighbors)
         for vals in range(2**nN):
-            yF = np.unpackbits(np.array([vals],dtype=np.uint8), count=nN, bitorder="little")
+            yF = np.array([(vals >> k) & 1 for k in range(nN)], dtype=np.uint8)
+            #yF = np.unpackbits(np.array([vals],dtype=np.uint8), count=nN, bitorder="little")
             ss[F,vals] = e
             e += 1
             for i in neighbors:
@@ -560,7 +562,8 @@ def f2v_subsum_indexes(fg, f2v_idx, ss_idx):
         neighbors = fg.factor_variables(F)
         nN = len(neighbors)
         for vals in range(2**nN):
-            yF = np.unpackbits(np.array([vals],dtype=np.uint8), count=nN, bitorder="little")
+            #yF = np.unpackbits(np.array([vals],dtype=np.uint8), count=nN, bitorder="little")
+            yF = np.array([(vals >> k) & 1 for k in range(nN)], dtype=np.uint8)
             for c_i,i in enumerate(neighbors):
                 iidx = neighbors.index(i)
                 for c_v,v in enumerate([0,1]):
@@ -594,7 +597,8 @@ def f2v_subsum_indexes2(g):
         nN = len(neighbors)
         #for c_yF,yF in enumerate(itertools.product(*[[0,1] for _ in range(nN)])):
         for vals in range(2**nN):
-            yF = np.unpackbits(np.array([vals],dtype=np.uint8), count=nN, bitorder="little")
+            yF = np.array([(vals >> k) & 1 for k in range(nN)], dtype=np.uint8)
+            #yF = np.unpackbits(np.array([vals],dtype=np.uint8), count=nN, bitorder="little")
 
             for c_i,i in enumerate(neighbors):
                 iidx = neighbors.index(i)
@@ -666,7 +670,10 @@ def marginal_indexes(fg, f2v_idx, ss_idx):
         neighbors = fg.factor_variables(F)
         nN = len(neighbors)
         for vals in range(2**nN):
-            yF = np.unpackbits(np.array([vals],dtype=np.uint8), count=nN, bitorder="little")
+            yF = np.array([(vals >> k) & 1 for k in range(nN)], dtype=np.uint8)
+
+
+            #yF = np.unpackbits(np.array([vals],dtype=np.uint8), count=nN, bitorder="little")
             for (j,yFj) in zip(neighbors, yF):
                 edges.append([ss_idx[F,vals], f2v_idx[F,j,yFj]])
     return np.array(edges)
@@ -682,7 +689,8 @@ def marginal_indexes2(fg):
         neighbors = list(g.neighbors(F))
         nN = len(neighbors)
         for vals in range(2**nN):
-            yF = np.unpackbits(np.array([vals],dtype=np.uint8), count=nN, bitorder="little")
+            yF = np.array([(vals >> k) & 1 for k in range(nN)], dtype=np.uint8)
+            #yF = np.unpackbits(np.array([vals],dtype=np.uint8), count=nN, bitorder="little")
             for c_i,(j,yFj) in enumerate(zip(neighbors, yF)):
                 dst[c] =factor_cumsum[c_F]+2*c_i+yFj
                 c+=1

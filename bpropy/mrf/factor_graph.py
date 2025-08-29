@@ -88,13 +88,24 @@ class FactorGraph(Graph):
         """Return sufficient statistics corresponding to assignment xF
         """
         nF = self.factor_size(F)
+        idx = int(sum((int(b) & 1) << k for k,b in enumerate(xF)))
+        ss = np.zeros(1 << nF, dtype=np.uint32)
+        ss[idx] = 1
+        return ss
+
         ss = np.zeros(2**nF, dtype=np.uint32)
         ss[np.packbits(xF, bitorder="little")] = 1
         return ss
     def factor_assignment(self, F, ssF):
         """Returns variable assignments corresponding to the values of sufficient statistics of F
         """
+        
+
         nF = self.factor_size(F)
+        idx = int(np.argmax(ssF))
+        bits = np.array([(idx >> k) & 1 for k in range(nF)], dtype=np.uint8)
+        return bits
+
         return np.unpackbits(np.argwhere(ssF).astype(np.uint8), count=nF, bitorder="little")
     def ne(self):
         """Return number of edges
