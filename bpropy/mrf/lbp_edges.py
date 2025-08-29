@@ -23,6 +23,14 @@ class LBPEdges:
         self.m_stride = None
         if not fg is None:
             self.fill(fg)
+            self.sort_edges()
+
+    def sort_edges(self):
+        self.f2v_edges = lexsort(self.f2v_edges)
+        self.r_edges = lexsort(self.r_edges)
+        self.q_edges = lexsort(self.q_edges)
+        self.m_edges = lexsort(self.m_edges)
+        self.vm_edges = lexsort(self.vm_edges)
 
 
 
