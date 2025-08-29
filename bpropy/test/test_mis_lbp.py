@@ -69,6 +69,28 @@ class TestMISLBP(unittest.TestCase):
         mu = max_sum_loopy_belief_propagation(theta, v2f, edges, max_iter=10, tol=1e-6, damping=0.).mu
         self.assertTrue(mu.shape[0] == 2*edges.n_vars.sum())
 
+
+    def test_stack_two(self):
+        pb_1 = random_mis(10)
+        fg_1 = MISFactorGraph(pb_1)
+        edges_1 = LBPEdges(fg_1)
+
+        pb_2 = random_mis(22)
+        fg_2 = MISFactorGraph(pb_2)
+        edges_2 = LBPEdges(fg_2)
+
+        # stack edges
+        V2F_total = edges_1.f2v_edges.shape[0] + edges_2.f2v_edges.shape[0]
+        SS_total = edges_1.n_ss.sum().item() + edges_2.n_ss.sum().item()
+        LBPEdges.stack(edges_1, edges_2)
+
+        self.assertTrue(edges_1.r_edges[:,0].max().item() < V2F_total)
+        self.assertTrue(edges_1.q_edges.max().item() < V2F_total)
+
+        self.assertTrue(edges_1.m_edges[:,0].max().item() < SS_total)
+        self.assertTrue(edges_1.f2v_edges[:,1].max().item() < (SS_total + V2F_total))
+
+
     def test_stack_lbpedges(self):
         max_iter = 10
         batch_size = 4

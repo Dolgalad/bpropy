@@ -147,16 +147,27 @@ class LBPEdges:
 
         aa = ss_offsets[idx].item()
         bb = (ss_offsets[idx]+self.n_ss[idx]).item()
-        #cc = (self.n_ss.sum()+ss_offsets[idx]).item()
-        #dd = (self.n_ss.sum()+ss_offsets[idx]+self.n_ss[idx]).item()
-        cc = (self.n_ss.sum()+f2v_msg_offsets[idx]+2*self.n_vars[idx]).item() # TODO: find out why I had to add 2*self.n_vars[idx]
-        dd = (self.n_ss.sum()+f2v_msg_offsets[idx]+self.n_f2v_msg[idx]).item()
+
+        #cc = (self.n_ss.sum()+f2v_msg_offsets[idx]+2*self.n_vars[idx]).item() # TODO: find out why I had to add 2*self.n_vars[idx]
+        #dd = (self.n_ss.sum()+f2v_msg_offsets[idx]+self.n_f2v_msg[idx]).item()
+
+        # fix
+        cc = (self.n_ss.sum() + f2v_msg_offsets[idx]).item()
+        dd = (self.n_ss.sum() + f2v_msg_offsets[idx] + self.n_f2v_msg[idx]).item()
 
         idx_less = (aa <= self.f2v_edges[:,1]) * (self.f2v_edges[:,1] < bb)
         idx_more = (cc <= self.f2v_edges[:,1]) * (self.f2v_edges[:,1] < dd)
 
         less_offset = torch.tensor([f2v_ss_offsets[idx], ss_offsets[idx]], device=self.device)
-        more_offset = torch.tensor([f2v_ss_offsets[idx], self.n_ss.sum()+f2v_msg_offsets[idx]-self.n_ss[idx]], device=self.device)
+        #more_offset = torch.tensor([f2v_ss_offsets[idx], self.n_ss.sum()+f2v_msg_offsets[idx]-self.n_ss[idx]], device=self.device)
+        # fix
+        more_offset = torch.tensor([f2v_ss_offsets[idx], self.n_ss.sum()+f2v_msg_offsets[idx]], device=self.device)
+
+        less_offset = torch.tensor([f2v_ss_offsets[idx], ss_offsets[idx]], device=self.device)
+        more_offset = torch.tensor(
+            [f2v_ss_offsets[idx], self.n_ss.sum() + f2v_msg_offsets[idx] - self.n_ss[idx]],
+            device=self.device
+        )
 
         new_f2v_edges = self.f2v_edges[torch.logical_or(idx_less, idx_more)].clone()
         new_idx_less = (aa <= new_f2v_edges[:,1]) * (new_f2v_edges[:,1] < bb)
@@ -353,7 +364,8 @@ class LBPEdges:
             idx_more = (tmp_f2v_edges[:,1] >= n_ss)
 
             tmp_f2v_edges[idx_less,:] = tmp_f2v_edges[idx_less,:] + torch.tensor([n_f2v_subsum_offset, n_ss_offset])
-            tmp_f2v_edges[idx_more,:] = tmp_f2v_edges[idx_more,:] + torch.tensor([n_f2v_subsum_offset, n_ss_tot+n_f2v_msg_offset-n_ss])
+            #tmp_f2v_edges[idx_more,:] = tmp_f2v_edges[idx_more,:] + torch.tensor([n_f2v_subsum_offset, n_ss_tot+n_f2v_msg_offset-n_ss])
+            tmp_f2v_edges[idx_more,:] = tmp_f2v_edges[idx_more,:] + torch.tensor([n_f2v_subsum_offset, n_ss_tot + n_f2v_msg_offset-n_ss])
 
             n_ss_offset += n_ss
             n_f2v_msg_offset += num_f2v_messages_1
@@ -387,8 +399,13 @@ class LBPEdges:
             ne.n_f2v_ss[n_f2v_ss_pos:n_f2v_ss_pos+e.n_f2v_ss.shape[0]] = e.n_f2v_ss
             n_f2v_ss_pos += e.n_f2v_ss.shape[0]
 
-            ne.n_f2v_msg[n_f2v_msg_pos:n_f2v_msg_pos+ne.n_f2v_msg.shape[0]] = e.n_f2v_msg
+            #ne.n_f2v_msg[n_f2v_msg_pos:n_f2v_msg_pos+ne.n_f2v_msg.shape[0]] = e.n_f2v_msg
+            #n_f2v_msg_pos += e.n_f2v_msg.shape[0]
+
+            # fix
+            ne.n_f2v_msg[n_f2v_msg_pos : n_f2v_msg_pos + e.n_f2v_msg.shape[0]] = e.n_f2v_msg
             n_f2v_msg_pos += e.n_f2v_msg.shape[0]
+
         return ne
 
     

@@ -9,7 +9,7 @@ class BPSolution:
     def __init__(self, mu=None, u=None, n_iter=None, mu_v=None):
         self.mu = mu
         self.u = u
-        self.n_iter = None
+        self.n_iter = n_iter
         self.mu_v = mu_v
 
 
@@ -23,25 +23,36 @@ def loopy_belief_propagation(theta, v2f, edges, max_iter=100, tol=1e-6, damping=
     mu = torch.zeros(int(edges.n_ss.sum().item()), device=dev)
     
     nv = edges.n_vars.sum() #number_of_variables(g)
-    vmar = torch.zeros(2 * nv, device=dev)
+    vmar = torch.zeros(2 * nv, dtype=theta.dtype, device=dev)
+
+    stack = torch.empty(theta.shape[0] + v2f.shape[0], dtype=theta.dtype, device=theta.device)
+    v2f_subsum = torch.empty(edges.n_f2v_ss.sum(), dtype=theta.dtype, device=theta.device)
+    qbar = torch.empty_like(v2f)
+    mufbar = torch.empty_like(theta)
    
     for T in range(max_iter):
         t0 = time.time()
         
-        stack = torch.concatenate((theta,v2f), 0)
+        #stack = torch.concatenate((theta,v2f), 0)
+        stack[:theta.shape[0]].copy_(theta)
+        stack[theta.shape[0]:].copy_(v2f)
         # subsum vect
-        v2f_subsum = torch.zeros(edges.n_f2v_ss.sum(), dtype=theta.dtype, device=theta.device)
+        #v2f_subsum = torch.zeros(edges.n_f2v_ss.sum(), dtype=theta.dtype, device=theta.device)
+        v2f_subsum.zero_()
         v2f_subsum.scatter_add_(0, edges.f2v_edges[:,0], stack[edges.f2v_edges[:,1]])
         
         r = torch_scatter.scatter_logsumexp(v2f_subsum[edges.r_edges[:,1]], edges.r_edges[:,0])
         
         # variable to factor messages
-        qbar = torch.zeros_like(v2f).scatter_add_(0, edges.q_edges[:,0], r[edges.q_edges[:,1]])
+        qbar.zero_()
+        qbar.scatter_add_(0, edges.q_edges[:,0], r[edges.q_edges[:,1]])
+        #qbar = torch.zeros_like(v2f).scatter_add_(0, edges.q_edges[:,0], r[edges.q_edges[:,1]])
         delta = torch_scatter.scatter_logsumexp(qbar, q_idx).repeat_interleave(2)
         v2f = qbar - delta
         
         # marginals
-        mufbar = theta.clone().scatter_add_(0, edges.m_edges[:,0], v2f[edges.m_edges[:,1]])
+        mufbar.copy_(theta).scatter_add_(0, edges.m_edges[:,0], v2f[edges.m_edges[:,1]])
+        #mufbar = theta.clone().scatter_add_(0, edges.m_edges[:,0], v2f[edges.m_edges[:,1]])
         z = torch_scatter.scatter_logsumexp(mufbar, m_idx).repeat_interleave(edges.m_stride, dim=0)
     
         mup = (mufbar - z).exp()
@@ -52,7 +63,9 @@ def loopy_belief_propagation(theta, v2f, edges, max_iter=100, tol=1e-6, damping=
         mu = (1 - damping) * mup + damping * mu
 
         # marginals
-        vmar = torch.zeros_like(vmar).scatter_add_(0, edges.vm_edges[:,0], r[edges.vm_edges[:,1]])
+        vmar.zero_().scatter_add_(0, edges.vm_edges[:,0], r[edges.vm_edges[:,1]])
+
+        #vmar = torch.zeros_like(vmar).scatter_add_(0, edges.vm_edges[:,0], r[edges.vm_edges[:,1]])
 
         if u < tol:
             break
@@ -177,10 +190,11 @@ def max_sum_loopy_belief_propagation(theta, v2f, edges, max_iter=100, tol=1e-6, 
 
         # variable to factor messages
         qbar = torch.zeros_like(v2f).scatter_add_(0, edges.q_edges[:,0], r[edges.q_edges[:,1]])
-        delta = torch.repeat_interleave(
-                    torch.zeros(int(q_n), device=dev).scatter_add_(0, q_idx, qbar) / 2,
-                    2
-                )
+        #delta = torch.repeat_interleave(
+        #            torch.zeros(int(q_n), device=dev).scatter_add_(0, q_idx, qbar) / 2,
+        #            2
+        #        )
+        delta = qbar.reshape(-1,2).amax(dim=1).repeat_interleave(2)
         v2f = qbar - delta
         
         # marginals
