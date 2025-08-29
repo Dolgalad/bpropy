@@ -84,13 +84,13 @@ class SCP:
             # compute improvement ratio for each set
             if scores is None:
                 improvement_ratios = [self.w[i] / (np.logical_not(covered) & self.adj_vec(self.F[i])).sum() for i in candidate_sets]
-                idx = np.argmin(improvement_ratios)
+                idx = np.nanargmin(improvement_ratios)
             else:
-                #improvement_ratios = [scores[i] / (np.logical_not(covered) & self.adj_vec(self.F[i])).sum() for i in candidate_sets]
-                #idx = np.argmin(improvement_ratios)
+                improvement_ratios = [-scores[i] / (np.logical_not(covered) & self.adj_vec(self.F[i])).sum() for i in candidate_sets]
+                idx = np.nanargmin(improvement_ratios)
 
-                improvement_ratios = [scores[i] for i in candidate_sets]
-                idx = np.argmax(improvement_ratios)
+                #improvement_ratios = [scores[i] for i in candidate_sets]
+                #idx = np.argmax(improvement_ratios)
 
             x[candidate_sets[idx]] = 1
             covered = covered | self.adj_vec(self.F[candidate_sets[idx]])
