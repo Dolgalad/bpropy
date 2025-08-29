@@ -46,8 +46,8 @@ def mis_to_data(pb, feature_category="EB", with_lbp_edges=False, with_nmf_edges=
                 neighbors=neighbors,
                 )
     if not feature_category is None:
-        data.x=torch.from_numpy(x).to(dtype=torch.float32),
-        data.e=torch.from_numpy(efeat).to(dtype=torch.float32),
+        data.x=torch.from_numpy(x).to(dtype=torch.float32)
+        data.e=torch.from_numpy(efeat).to(dtype=torch.float32)
 
     if with_lbp_edges or with_nmf_edges:
         fg = MISFactorGraph(pb)

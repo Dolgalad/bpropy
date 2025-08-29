@@ -56,18 +56,19 @@ class TestMISMRFModels(unittest.TestCase):
                 pb = data_to_mis(d, batch=True)
                 fg = MISFactorGraph(pb)
                 self.assertTrue(fg.nss() == d.lbp_edges.n_ss.sum())
-                x = self.model(d.to(self.device))
+                lpb_mu, x = self.model(d.to(self.device))
                 self.assertTrue(x.shape[0] == d.lbp_edges.n_ss.sum())
             for d in dataloader_bs2:
                 pb = data_to_mis(d, batch=True)
                 fg = MISFactorGraph(pb)
                 self.assertTrue(fg.nss() == d.lbp_edges.n_ss.sum())
-                x = self.model(d.to(self.device))
+                lbp_mu, x = self.model(d.to(self.device))
                 self.assertTrue(x.shape[0] == d.lbp_edges.n_ss.sum())
 
-                y = torch.concatenate([self.model(d.get_example(i).to(self.device)) for i in range(d.num_graphs)], dim=0)
+                y = torch.concatenate([self.model(d.get_example(i).to(self.device))[1] for i in range(d.num_graphs)], dim=0)
                 self.assertTrue(x.shape == y.shape)
                 self.assertTrue(torch.all(torch.isclose(x, y, rtol=1e-5, atol=1e-5)))
+
     def test_cc_mis_mrf_model_GCN_MRF_v4(self):
         dataloader = MRFDataLoader(self.cc_dataset, batch_size=1, shuffle=False)
         dataloader_bs2 = MRFDataLoader(self.cc_dataset, batch_size=2, shuffle=False)
@@ -78,16 +79,16 @@ class TestMISMRFModels(unittest.TestCase):
                 pb = data_to_mis(d, batch=True)
                 fg = MISFactorGraph(pb)
                 self.assertTrue(fg.nss() == d.lbp_edges.n_ss.sum())
-                x = self.model(d.to(self.device))
+                lbp_mu, x = self.model(d.to(self.device))
                 self.assertTrue(x.shape[0] == d.lbp_edges.n_ss.sum())
             for d in dataloader_bs2:
                 pb = data_to_mis(d, batch=True)
                 fg = MISFactorGraph(pb)
                 self.assertTrue(fg.nss() == d.lbp_edges.n_ss.sum())
-                x = self.model(d.to(self.device))
+                lbp_mu, x = self.model(d.to(self.device))
                 self.assertTrue(x.shape[0] == d.lbp_edges.n_ss.sum())
 
-                y = torch.concatenate([self.model(d.get_example(i).to(self.device)) for i in range(d.num_graphs)], dim=0)
+                y = torch.concatenate([self.model(d.get_example(i).to(self.device))[1] for i in range(d.num_graphs)], dim=0)
                 self.assertTrue(x.shape == y.shape)
                 self.assertTrue(torch.all(torch.isclose(x, y, rtol=1e-5, atol=1e-5)))
 
@@ -101,16 +102,16 @@ class TestMISMRFModels(unittest.TestCase):
                 pb = data_to_mis(d, batch=True)
                 fg = MISFactorGraph(pb)
                 self.assertTrue(fg.nss() == d.lbp_edges.n_ss.sum())
-                x = self.model(d.to(self.device))
+                lbp_mu, x = self.model(d.to(self.device))
                 self.assertTrue(x.shape[0] == d.lbp_edges.n_ss.sum())
             for d in dataloader_bs2:
                 pb = data_to_mis(d, batch=True)
                 fg = MISFactorGraph(pb)
                 self.assertTrue(fg.nss() == d.lbp_edges.n_ss.sum())
-                x = self.model(d.to(self.device))
+                lpb_mu, x = self.model(d.to(self.device))
                 self.assertTrue(x.shape[0] == d.lbp_edges.n_ss.sum())
 
-                y = torch.concatenate([self.model(d.get_example(i).to(self.device)) for i in range(d.num_graphs)], dim=0)
+                y = torch.concatenate([self.model(d.get_example(i).to(self.device))[1] for i in range(d.num_graphs)], dim=0)
                 self.assertTrue(x.shape == y.shape)
                 self.assertTrue(torch.all(torch.isclose(x, y, rtol=1e-5, atol=1e-5)))
 
@@ -124,16 +125,16 @@ class TestMISMRFModels(unittest.TestCase):
                 pb = data_to_mis(d, batch=True)
                 fg = MISFactorGraph(pb)
                 self.assertTrue(fg.nss() == d.lbp_edges.n_ss.sum())
-                x = self.model(d.to(self.device))
+                lbp_mu, x = self.model(d.to(self.device))
                 self.assertTrue(x.shape[0] == d.lbp_edges.n_ss.sum())
             for d in dataloader_bs2:
                 pb = data_to_mis(d, batch=True)
                 fg = MISFactorGraph(pb)
                 self.assertTrue(fg.nss() == d.lbp_edges.n_ss.sum())
-                x = self.model(d.to(self.device))
+                lbp_mu, x = self.model(d.to(self.device))
                 self.assertTrue(x.shape[0] == d.lbp_edges.n_ss.sum())
 
-                y = torch.concatenate([self.model(d.get_example(i).to(self.device)) for i in range(d.num_graphs)], dim=0)
+                y = torch.concatenate([self.model(d.get_example(i).to(self.device))[1] for i in range(d.num_graphs)], dim=0)
                 self.assertTrue(x.shape == y.shape)
                 self.assertTrue(torch.all(torch.isclose(x, y, rtol=1e-5, atol=1e-5)))
 
@@ -147,16 +148,16 @@ class TestMISMRFModels(unittest.TestCase):
                 pb = data_to_mis(d, batch=True)
                 fg = MISFactorGraph(pb)
                 self.assertTrue(fg.nss() == d.lbp_edges.n_ss.sum())
-                x = self.model(d.to(self.device))
+                lbp_mu, x = self.model(d.to(self.device))
                 self.assertTrue(x.shape[0] == d.lbp_edges.n_ss.sum())
             for d in dataloader_bs2:
                 pb = data_to_mis(d, batch=True)
                 fg = MISFactorGraph(pb)
                 self.assertTrue(fg.nss() == d.lbp_edges.n_ss.sum())
-                x = self.model(d.to(self.device))
+                lbp_mu, x = self.model(d.to(self.device))
                 self.assertTrue(x.shape[0] == d.lbp_edges.n_ss.sum())
 
-                y = torch.concatenate([self.model(d.get_example(i).to(self.device)) for i in range(d.num_graphs)], dim=0)
+                y = torch.concatenate([self.model(d.get_example(i).to(self.device))[1] for i in range(d.num_graphs)], dim=0)
                 self.assertTrue(x.shape == y.shape)
                 self.assertTrue(torch.all(torch.isclose(x, y, rtol=1e-5, atol=1e-5)))
 
