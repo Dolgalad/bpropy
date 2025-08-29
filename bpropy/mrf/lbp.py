@@ -14,6 +14,9 @@ class BPSolution:
 
 
 def loopy_belief_propagation(theta, v2f, edges, max_iter=100, tol=1e-6, damping=0.0):
+
+
+
     # strides
     dev = theta.device
     q_stride = torch.full((int(v2f.shape[0]/2),), 2, device=dev)
@@ -29,9 +32,100 @@ def loopy_belief_propagation(theta, v2f, edges, max_iter=100, tol=1e-6, damping=
     v2f_subsum = torch.empty(edges.n_f2v_ss.sum(), dtype=theta.dtype, device=theta.device)
     qbar = torch.empty_like(v2f)
     mufbar = torch.empty_like(theta)
+
+    # if cuda is available
+    cuda_graph_captured = False
+    if torch.cuda.is_available():
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+
    
     for T in range(max_iter):
         t0 = time.time()
+
+        if torch.cuda.is_available() and not cuda_graph_captured:
+            with torch.cuda.stream(s):
+                #stack = torch.concatenate((theta,v2f), 0)
+                stack[:theta.shape[0]].copy_(theta)
+                stack[theta.shape[0]:].copy_(v2f)
+                # subsum vect
+                #v2f_subsum = torch.zeros(edges.n_f2v_ss.sum(), dtype=theta.dtype, device=theta.device)
+                v2f_subsum.zero_()
+                v2f_subsum.scatter_add_(0, edges.f2v_edges[:,0], stack[edges.f2v_edges[:,1]])
+                
+                r = torch_scatter.scatter_logsumexp(v2f_subsum[edges.r_edges[:,1]], edges.r_edges[:,0])
+                
+                # variable to factor messages
+                qbar.zero_()
+                qbar.scatter_add_(0, edges.q_edges[:,0], r[edges.q_edges[:,1]])
+                #qbar = torch.zeros_like(v2f).scatter_add_(0, edges.q_edges[:,0], r[edges.q_edges[:,1]])
+                delta = torch_scatter.scatter_logsumexp(qbar, q_idx).repeat_interleave(2)
+                new_v2f = qbar - delta
+        
+                # damping on messages
+                v2f = (1-damping)*new_v2f + damping*v2f
+                
+                # marginals
+                mufbar.copy_(theta).scatter_add_(0, edges.m_edges[:,0], v2f[edges.m_edges[:,1]])
+                #mufbar = theta.clone().scatter_add_(0, edges.m_edges[:,0], v2f[edges.m_edges[:,1]])
+                z = torch_scatter.scatter_logsumexp(mufbar, m_idx).repeat_interleave(edges.m_stride, dim=0)
+            
+                mup = (mufbar - z).exp()
+        
+                u = (mup - mu).abs().max()
+                if torch.any(torch.isinf(mup)) or torch.any(torch.isnan(mup)):
+                    break
+        
+                mu = mup
+                #mu = (1 - damping) * mup + damping * mu
+        
+                # marginals
+                vmar.zero_().scatter_add_(0, edges.vm_edges[:,0], r[edges.vm_edges[:,1]])
+            torch.cuda.current_stream().wait_stream(s)
+            # capture
+            g = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(g):
+                #stack = torch.concatenate((theta,v2f), 0)
+                stack[:theta.shape[0]].copy_(theta)
+                stack[theta.shape[0]:].copy_(v2f)
+                # subsum vect
+                #v2f_subsum = torch.zeros(edges.n_f2v_ss.sum(), dtype=theta.dtype, device=theta.device)
+                v2f_subsum.zero_()
+                v2f_subsum.scatter_add_(0, edges.f2v_edges[:,0], stack[edges.f2v_edges[:,1]])
+                
+                r = torch_scatter.scatter_logsumexp(v2f_subsum[edges.r_edges[:,1]], edges.r_edges[:,0])
+                
+                # variable to factor messages
+                qbar.zero_()
+                qbar.scatter_add_(0, edges.q_edges[:,0], r[edges.q_edges[:,1]])
+                #qbar = torch.zeros_like(v2f).scatter_add_(0, edges.q_edges[:,0], r[edges.q_edges[:,1]])
+                delta = torch_scatter.scatter_logsumexp(qbar, q_idx).repeat_interleave(2)
+                new_v2f = qbar - delta
+        
+                # damping on messages
+                v2f = (1-damping)*new_v2f + damping*v2f
+                
+                # marginals
+                mufbar.copy_(theta).scatter_add_(0, edges.m_edges[:,0], v2f[edges.m_edges[:,1]])
+                #mufbar = theta.clone().scatter_add_(0, edges.m_edges[:,0], v2f[edges.m_edges[:,1]])
+                z = torch_scatter.scatter_logsumexp(mufbar, m_idx).repeat_interleave(edges.m_stride, dim=0)
+            
+                mup = (mufbar - z).exp()
+        
+                u = (mup - mu).abs().max()
+                if torch.any(torch.isinf(mup)) or torch.any(torch.isnan(mup)):
+                    break
+        
+                mu = mup
+                #mu = (1 - damping) * mup + damping * mu
+        
+                # marginals
+                vmar.zero_().scatter_add_(0, edges.vm_edges[:,0], r[edges.vm_edges[:,1]])
+            cuda_graph_captured = True
+        if cuda_graph_captured:
+            g.replay()
+
+
         
         #stack = torch.concatenate((theta,v2f), 0)
         stack[:theta.shape[0]].copy_(theta)
@@ -48,7 +142,10 @@ def loopy_belief_propagation(theta, v2f, edges, max_iter=100, tol=1e-6, damping=
         qbar.scatter_add_(0, edges.q_edges[:,0], r[edges.q_edges[:,1]])
         #qbar = torch.zeros_like(v2f).scatter_add_(0, edges.q_edges[:,0], r[edges.q_edges[:,1]])
         delta = torch_scatter.scatter_logsumexp(qbar, q_idx).repeat_interleave(2)
-        v2f = qbar - delta
+        new_v2f = qbar - delta
+
+        # damping on messages
+        v2f = (1-damping)*new_v2f + damping*v2f
         
         # marginals
         mufbar.copy_(theta).scatter_add_(0, edges.m_edges[:,0], v2f[edges.m_edges[:,1]])
@@ -60,7 +157,9 @@ def loopy_belief_propagation(theta, v2f, edges, max_iter=100, tol=1e-6, damping=
         u = (mup - mu).abs().max()
         if torch.any(torch.isinf(mup)) or torch.any(torch.isnan(mup)):
             break
-        mu = (1 - damping) * mup + damping * mu
+
+        mu = mup
+        #mu = (1 - damping) * mup + damping * mu
 
         # marginals
         vmar.zero_().scatter_add_(0, edges.vm_edges[:,0], r[edges.vm_edges[:,1]])
