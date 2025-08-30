@@ -2,11 +2,13 @@
 MIS solving routines
 """
 
+
 import networkx as nx
 import numpy as np
 import itertools
 from scipy.optimize import milp, LinearConstraint, Bounds
 import matplotlib.pyplot as plt
+from typing import Dict, Any, List
 
 import importlib.util
 docplex_spec = importlib.util.find_spec("docplex")
@@ -16,15 +18,22 @@ if docplex_spec is not None:
 import mip
 from mip import xsum, maximize, BINARY
 
+from bpropy.co.base_lp import LPProblem
+
 from bpropy.utils.graph_utils import ordered_edges
 from bpropy.clique_cover import is_edge_cover, clique_cover
 from bpropy.utils.set_sort import lenlex_sort
 
-from bpropy.vc_graph import VCGraph
+from bpropy.graphs.vc_graph import VCGraph
 from bpropy.co.mis_solution import MISSolution
 
-class MIS:
+from bpropy.io.serde import SerializableLPMixin
+
+
+class MIS(LPProblem, SerializableLPMixin):
     def __init__(self, g, weights=None, cliques=None, num_graphs=1, graph_sizes=None):
+        super(LPProblem).__init__()
+        super(SerializableLPMixin).__init__()
         self.g = g
         if weights is None:
             self.w = np.ones(nx.number_of_nodes(g))
@@ -34,6 +43,8 @@ class MIS:
             self.C = np.array([np.array(e) for e in ordered_edges(self.g)], dtype=object)
         else:
             self.C = np.array([np.array(c) for c in lenlex_sort(cliques)], dtype=object)
+        self.C = [sorted(dict.fromkeys(map(int, c))) for c in self.C]
+
         if not is_edge_cover(self.C, self.g):
             raise Exception("MIS: cliques do not cover all edges of graph")
         # batch information
@@ -43,6 +54,11 @@ class MIS:
         else:
             self.graph_sizes = graph_sizes
         self.clique_indicator = self.get_clique_indicators()
+    def weights(self):
+        return self.w
+    def edges(self):
+        for e in ordered_edges(self.g):
+            yield e
     def set_cliques(self, cliques, sort=False):
         if sort:
             self.C = np.array([np.array(c) for c in lenlex_sort(cliques)], dtype=object)
@@ -57,10 +73,8 @@ class MIS:
         var_offsets = np.flip(var_offsets)
         ind = np.zeros(len(self.C), dtype=int)
         for i,c in enumerate(self.C):
-            ind[i] = self.num_graphs - 1 - np.argmax(var_offsets <= c.min())
+            ind[i] = self.num_graphs - 1 - np.argmax(var_offsets <= min(c))
         return ind
-
-
 
 
     def nv(self):
@@ -73,6 +87,23 @@ class MIS:
         return nx.number_of_edges(self.g)
     def nc(self):
         return len(self.C)
+
+    def linear_constraints_matrix(self):
+        # Rows = cliques, columns = vertices
+        nv = self.nv()
+        rows = []
+        for C in self.C:
+            row = np.zeros(nv, dtype=float)
+            row[np.array(C, dtype=int)] = 1.0
+            rows.append(row)
+        A = np.vstack(rows) if rows else np.zeros((0, nv), dtype=float)
+        lb = np.full(A.shape[0], -np.inf, dtype=float)
+        ub = np.ones(A.shape[0], dtype=float)
+        return A, lb, ub
+    
+    def variable_bounds(self):
+        nv = self.nv()
+        return np.zeros(nv), np.ones(nv)
     def constraints(self, cliques=None):
         """Get list of scipy.LinearConstraint objects. If provided `cliques` should be a list of cliques covering all edges of the graph.
         """
@@ -132,10 +163,11 @@ class MIS:
         """
         return mis_random_greedy(self, scores)
 
-    def check_solution(self, x):
-        """Check if solution is feasible
-        """
-        return solution_feasible(self, x)
+    #def check_solution(self, x):
+    #    """Check if solution is feasible
+    #    """
+    #    return solution_feasible(self, x)
+
     def get_problem(self, idx):
         """Get `idx`-th problem
         """
@@ -151,7 +183,7 @@ class MIS:
         #for c in self.C:
         #    if np.all([u>=offset[idx] and u<offset[idx]+nV for u in c]):
         #        C.append([u-offset[idx] for u in c])
-        C = self.C[self.clique_indicator == idx] - offset[idx]
+        C = np.array([np.array(c) for c in self.C],dtype=object)[self.clique_indicator == idx] - offset[idx]
         return MIS(g, cliques=C)
     @staticmethod
     def from_vcgraph(vcg):
@@ -170,6 +202,126 @@ class MIS:
     @staticmethod
     def batch(pbs):
         return mis_batch(pbs)
+
+    def _to_serializable(self, use_npz: bool, arrays: Dict[str, np.ndarray]) -> Dict[str, Any]:
+        # edges as list-of-pairs
+        edges = [[int(u), int(v)] for (u, v) in self.edges()]  # write your own edges() or store it
+        payload: Dict[str, Any] = {
+            "nv": self.nv(),
+            "weights": {"source": "inline", "key": "w"},
+            "mis": {
+                "edges": edges
+            }
+        }
+        # weights
+        w = np.asarray(self.w, dtype=float).reshape(-1)
+        if use_npz and w.nbytes > 20000:
+            arrays["w"] = w
+            payload["weights"] = {"source": "npz", "key": "w"}
+        else:
+            payload["_arrays"] = {"w": w.tolist()}  # small inline
+        # optional cliques if you have them
+        if hasattr(self, "C") and len(self.C)>0:
+            #payload["mis"]["cliques"] = [list(map(int, c)) for c in self.C]
+            payload["mis"]["cliques"] = [sorted(dict.fromkeys(map(int, c))) for c in self.C]
+
+        return payload
+
+    @classmethod
+    def _from_serializable(cls, man: Dict[str, Any], arrays: Dict[str, np.ndarray]):
+        nv = int(man["nv"])
+        # weights
+        wsrc = man["weights"]
+        if wsrc["source"] == "npz":
+            w = arrays[wsrc["key"]]
+        else:
+            w = np.array(man.get("_arrays", {}).get(wsrc["key"]), dtype=float)
+        # graph
+        edges = man["mis"]["edges"]
+        # optional cliques
+        C = man["mis"].get("cliques", None)
+        # construct MIS as your class expects (edges/cliques/weights)
+        pb = cls.from_edges(nv=nv, edges=edges, weights=w)   # implement a helper constructor
+        if C:
+            pb.C = [list(map(int, c)) for c in C]            # if you keep cliques
+        return pb
+    @classmethod
+    def from_edges(
+        cls,
+        nv: int,
+        edges,
+        weights=None,
+        *,
+        ensure_simple: bool = True,
+        sort_edges: bool = True,
+        validate: bool = True,
+    ):
+        """
+        Construct an MIS instance from a number of vertices and an edge iterable.
+    
+        Parameters
+        ----------
+        nv : int
+            Number of vertices (nodes are 0..nv-1).
+        edges : Iterable[Tuple[int,int]]
+            Undirected edges. Can contain duplicates or (u,v)/(v,u) pairs.
+        weights : array-like or None
+            Node weights. If None, defaults to ones(nv).
+        ensure_simple : bool
+            If True, drop self-loops and parallel edges.
+        sort_edges : bool
+            If True, store edges as (min(u,v), max(u,v)) before deduplication.
+        validate : bool
+            If True, perform sanity checks on shapes/ranges.
+    
+        Returns
+        -------
+        MIS
+            A new MIS instance with g, w set; cliques default to edges (your ctor).
+        """
+        import numpy as np
+        import networkx as nx
+    
+        if validate:
+            if not isinstance(nv, int) or nv < 0:
+                raise ValueError(f"nv must be a nonnegative int, got {nv}")
+    
+        # --- sanitize & deduplicate edges ---
+        E = []
+        for e in edges:
+            if e is None or len(e) != 2:
+                raise ValueError(f"Invalid edge {e!r}; expected a 2-tuple")
+            u, v = int(e[0]), int(e[1])
+            if ensure_simple and u == v:
+                continue  # drop self-loop
+            if sort_edges:
+                if u > v:
+                    u, v = v, u
+            if validate and (u < 0 or v < 0 or u >= nv or v >= nv):
+                raise ValueError(f"Edge {(u,v)} out of range for nv={nv}")
+            E.append((u, v))
+    
+        if ensure_simple:
+            # remove parallel edges / duplicates
+            E = list({(u, v) for (u, v) in E})
+    
+        # --- graph with 0..nv-1 nodes and sanitized edges ---
+        g = nx.Graph()
+        g.add_nodes_from(range(nv))
+        g.add_edges_from(E)
+    
+        # --- weights ---
+        if weights is None:
+            w = np.ones(nv, dtype=float)
+        else:
+            w = np.asarray(weights, dtype=float).reshape(-1)
+            if validate and w.size != nv:
+                raise ValueError(f"weights length {w.size} != nv {nv}")
+    
+        # Construct MIS. Your __init__ will populate cliques as ordered edges if not given,
+        # and will verify they edge-cover the graph.
+        return cls(g, weights=w)
+
 
 def mis_equal(pb1, pb2):
     """Check if two MIS problems are defined on the same graph

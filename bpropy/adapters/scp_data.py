@@ -70,6 +70,10 @@ def scp_to_data(pb, with_lbp_edges=False, with_nmf_edges=False, y=None):
             data.y = y
             data.y_ss = torch.from_numpy(x2ss(y.to(torch.long).numpy(), fg)).to(torch.float)
 
+    # in adapters (mis_to_data / scp_to_data) right before return
+    data.problem_type_name = "SCP"
+    data.problem_type_code = torch.tensor([1])  # 0=MIS, 1=SCP (tensor so PyG batches it)
+
     return data
 
 def get_vc_edge_index(g, direction="v2c"):

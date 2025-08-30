@@ -2,7 +2,7 @@ import unittest
 import networkx as nx
 import numpy as np
 
-from bpropy.vc_graph import VCGraph
+from bpropy.graphs.vc_graph import VCGraph
 from bpropy.co.mis import MIS, random_mis
 from bpropy.clique_cover import clique_cover
 

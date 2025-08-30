@@ -4,6 +4,7 @@ import numpy as np
 class VCGraph(nx.Graph):
     def __init__(self, pb, cliques=None):
         super().__init__()
+        self.graph["problem_type"] = pb.__class__.__name__  # "MIS" | "SCP" | ...
         _,self.features = variable_constraint_graph(pb, cliques=cliques, g=self)
     def iter_variables(self):
         """Iterate over variable nodes, always iterates in increasing label value
@@ -46,12 +47,13 @@ class VCGraph(nx.Graph):
 def variable_constraint_graph(pb, cliques=None, g=None):
     """Create variable-constraint bipartite graph from LP formulation 
     """
+    W = pb.weights()
     if g is None:
         g = nx.Graph()
     features = []
     for i in range(pb.nv()):
-        g.add_node(i, bipartite=0, x=[pb.w[i]])
-        features.append(pb.w[i])
+        g.add_node(i, bipartite=0, x=[W[i]])
+        features.append(W[i])
     ci,ce = 0,0
     constraints = pb.constraints(cliques=cliques)
     for cj,c in enumerate(constraints):

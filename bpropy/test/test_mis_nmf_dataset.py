@@ -11,7 +11,7 @@ import shutil
 from torch_geometric.data.batch import Batch
 
 from bpropy.co.mis import MIS, random_mis
-from bpropy.datasets.mis_data import mis_to_data
+from bpropy.adapters.mis_data import mis_to_data
 from bpropy.mrf.lbp_edges import lexsort
 from bpropy.mrf.nmf_edges import NMFEdges
 from bpropy.datasets.mrf_dataset import MRFDataset

@@ -6,7 +6,7 @@ from torch_geometric.data import Data, HeteroData
 
 from bpropy.utils.graph_utils import get_edge_index
 
-from bpropy.vc_graph import VCGraph
+from bpropy.graphs.vc_graph import VCGraph
 from bpropy.co.mis import MIS, mis_batch
 
 from bpropy.mrf.mis_factor_graph import MISFactorGraph
@@ -58,6 +58,10 @@ def mis_to_data(pb, feature_category="EB", with_lbp_edges=False, with_nmf_edges=
         if not y is None:
             data.y = y
             data.y_ss = torch.from_numpy(x2ss(y.to(torch.long).numpy(), fg)).to(torch.float)
+
+    # in adapters (mis_to_data / scp_to_data) right before return
+    data.problem_type_name = "MIS"
+    data.problem_type_code = torch.tensor([0])  # 0=MIS, 1=SCP (tensor so PyG batches it)
 
     return data
 

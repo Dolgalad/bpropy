@@ -5,7 +5,7 @@ import atexit
 import numpy as np
 
 from bpropy.test.test_mis_mrf_dataset import random_mis, create_in_memory_dataset
-from bpropy.datasets.mis_data import data_to_mis
+from bpropy.adapters.mis_data import data_to_mis
 from bpropy.mrf.mis_factor_graph import MISFactorGraph
 from bpropy.datasets.mrf_dataset import MRFDataset
 from bpropy.datasets.mrf_dataloader import MRFDataLoader
