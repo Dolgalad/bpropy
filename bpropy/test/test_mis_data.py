@@ -82,11 +82,15 @@ class TestMISData(unittest.TestCase):
             data = mis_to_data(pb)
             data = data.to(device)
             for k,v in data.to_dict().items():
+                if isinstance(v, str):
+                    continue
                 self.assertTrue(v.is_cuda)
 
             data = mis_to_data(pb, with_lbp_edges=True)
             data = data.to(device)
             for k,v in data.to_dict().items():
+                if isinstance(v, str):
+                    continue
                 self.assertTrue(v.is_cuda)
 
 
