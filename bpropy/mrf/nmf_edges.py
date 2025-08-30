@@ -215,7 +215,7 @@ class NMFEdges:
 
 
 
-def naive_mean_field_edges(fg):
+def naive_mean_field_edges_old(fg):
     nV = fg.nv()
     nF = fg.nf()
 
@@ -246,3 +246,46 @@ def naive_mean_field_edges(fg):
 
     return a,b,d
 
+def naive_mean_field_edges(fg):
+    pmprod_edges = []
+    pmprodsum_edges = []
+    d = 0  # running index over product-summand “slots” (size = sum_F 2^{nF} * nF)
+
+    for F in fg.iter_factors():
+        neighbors = list(fg.factor_variables(F))
+        nN = len(neighbors)
+
+        # enumerate all assignments to factor variables; bits: y_k = ((vals >> k) & 1)
+        # use shifts to support nN > 8
+        for vals in range(1 << nN):
+            yF = ((vals >> np.arange(nN, dtype=np.int64)) & 1).astype(np.int32)
+
+            # for each “center” variable u in this factor (one slot per (F, vals, u))
+            for u_idx, u in enumerate(neighbors):
+                u_val = int(yF[u_idx])
+
+                # multiply contributions from all other variables v != u into slot d
+                for v_idx, v in enumerate(neighbors):
+                    if v_idx == u_idx:
+                        continue
+                    v_val = int(yF[v_idx])
+                    pmprod_edges.append([d, 2*v + v_val])
+
+                # sum this slot exactly once into the destination state of u
+                pmprodsum_edges.append([2*u + u_val, d])
+
+                d += 1
+
+    pmprod_edges = torch.tensor(pmprod_edges, dtype=torch.long)
+    pmprodsum_edges = torch.tensor(pmprodsum_edges, dtype=torch.long)
+
+    # expected counts per factor
+    exp_slots = sum( (1 << fg.factor_size(F)) * fg.factor_size(F) for F in fg.iter_factors() )
+    exp_pmprod = sum( (1 << fg.factor_size(F)) * fg.factor_size(F) * max(fg.factor_size(F)-1, 0) for F in fg.iter_factors() )
+    exp_pmprodsum = exp_slots
+    
+    assert d == exp_slots
+    assert pmprod_edges.shape[0] == exp_pmprod
+    assert pmprodsum_edges.shape[0] == exp_pmprodsum
+
+    return pmprod_edges, pmprodsum_edges, d

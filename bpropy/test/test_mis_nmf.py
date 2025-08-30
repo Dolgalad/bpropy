@@ -29,7 +29,7 @@ class TestMISNMF(unittest.TestCase):
         
         offset = 0
         for v in fg.iter_variables():
-            self.assertTrue(mu[offset:offset+2].sum() == 1)
+            self.assertTrue(torch.isclose(mu[offset:offset+2].sum(), torch.tensor(1,dtype=torch.float32)))
             offset += 2
     def test_large_mis_nmf(self):
         pb = random_mis(100)

@@ -16,6 +16,32 @@ class NMFSolution:
 
 def naive_mean_field(theta, edges, max_iter=1000, tol=1e-6):
     dev = theta.device
+    nV = int(edges.n_vars.sum().item())
+    mu = torch.full((2*nV,), 0.5, dtype=torch.float, device=dev)  # neutral start
+
+    # repeat θ so that each factor-assignment is used once per center variable u
+    th = torch.repeat_interleave(theta, edges.theta_rep)
+
+    for it in range(max_iter):
+        # product over neighbors per slot d
+        prod = torch_scatter.scatter_mul(mu[edges.pmprod_edges[:, 1]], edges.pmprod_edges[:, 0])
+
+        # weight by θ and sum into variable-states
+        x1 = th * prod
+        y1 = torch_scatter.scatter_add(x1[edges.pmprodsum_edges[:, 1]], edges.pmprodsum_edges[:, 0])
+
+        # normalize per variable
+        mup = torch.flatten(torch.nn.functional.softmax(y1.reshape(nV, 2), dim=1))
+
+        delta = (mup - mu).abs().max()
+        mu = mup
+        if delta < tol:
+            return NMFSolution(mu, delta, it + 1)
+
+    return NMFSolution(mu, (mup - mu).abs().max(), max_iter)
+
+def naive_mean_field_old(theta, edges, max_iter=1000, tol=1e-6):
+    dev = theta.device
     nV = edges.n_vars.sum()
     mu = torch.zeros(2*nV, dtype=torch.float, device=dev)
 
