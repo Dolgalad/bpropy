@@ -6,7 +6,7 @@ import numpy as np
 from bpropy.co.mis import MIS
 from bpropy.mrf.mis_factor_graph import MISFactorGraph
 from bpropy.mrf.lbp_edges import LBPEdges
-from bpropy.mrf.lbp import loopy_belief_propagation, max_sum_loopy_belief_propagation
+from bpropy.mrf.lbp import loopy_belief_propagation, max_sum_loopy_belief_propagation, loopy_belief_propagation_with_graph
 from bpropy.mrf.sufficient_statistics import x2ss
 
 from bpropy.test.test_mis import random_mis, simple_mis, very_simple_mis
@@ -33,7 +33,9 @@ class TestMISLBP(unittest.TestCase):
         #theta = torch.randn(edges.n_ss)
         theta = torch.from_numpy(x2ss(x.astype(bool), fg)).to(torch.float)
         v2f = torch.zeros_like(theta)
+        t0 = time.time()
         mu = loopy_belief_propagation(theta, v2f, edges, max_iter=10, tol=1e-6, damping=0.).mu
+        t0 = time.time() - t0
 
         self.assertTrue(mu.shape[0] == edges.n_ss)
         
@@ -42,6 +44,14 @@ class TestMISLBP(unittest.TestCase):
             nF = fg.factor_size(F)
             self.assertTrue(mu[offset:offset+2**nF].sum() == 1)
             offset += 2**nF
+
+        v2f = torch.zeros_like(theta)
+        t1 = time.time()
+        mu_g = loopy_belief_propagation_with_graph(theta, v2f, edges, max_iter=10, tol=1e-6, damping=0.).mu
+        t1 = time.time() - t1
+
+        self.assertTrue(torch.all(mu == mu_g))
+
     def test_large_mis_lbp(self):
         pb = random_mis(100)
         x = pb.greedy()
@@ -55,7 +65,9 @@ class TestMISLBP(unittest.TestCase):
         #theta = torch.randn(edges.n_ss)
         theta = torch.from_numpy(x2ss(x.astype(bool), fg)).to(torch.float)
         v2f = torch.zeros_like(theta)
-        mu = loopy_belief_propagation(theta, v2f, edges, max_iter=10, tol=1e-6, damping=0.).mu
+        t0 = time.time()
+        mu = loopy_belief_propagation(theta, v2f, edges, max_iter=100, tol=1e-6, damping=0.).mu
+        t0 = time.time() - t0
 
         self.assertTrue(mu.shape[0] == edges.n_ss)
         
@@ -66,8 +78,16 @@ class TestMISLBP(unittest.TestCase):
             offset += 2**nF
 
         # max sum lbp
-        mu = max_sum_loopy_belief_propagation(theta, v2f, edges, max_iter=10, tol=1e-6, damping=0.).mu
-        self.assertTrue(mu.shape[0] == 2*edges.n_vars.sum())
+        mu_ms = max_sum_loopy_belief_propagation(theta, v2f, edges, max_iter=10, tol=1e-6, damping=0.).mu
+        self.assertTrue(mu_ms.shape[0] == 2*edges.n_vars.sum())
+
+
+        v2f = torch.zeros_like(theta)
+        t1 = time.time()
+        mu_g = loopy_belief_propagation_with_graph(theta, v2f, edges, max_iter=100, tol=1e-6, damping=0.).mu
+        t1 = time.time() - t1
+        
+        self.assertTrue(torch.all(mu == mu_g))
 
 
     def test_stack_two(self):
