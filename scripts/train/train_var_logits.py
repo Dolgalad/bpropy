@@ -96,6 +96,7 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     run_name = f"{args.model_class}_{'hetero' if args.hetero else 'homo'}_{int(time.time())}"
     log_dir = os.path.join(args.log_dir, run_name)
+    print("Log dir : ", log_dir)
     os.makedirs(os.path.join(log_dir, "checkpoints"), exist_ok=True)
     writer = SummaryWriter(log_dir)
 
@@ -201,6 +202,7 @@ def main():
                 # gap
                 gap = ( grd_sol.sum() - y.sum().item()) / y.sum().item()
                 va_opts.append(gap)
+                #print("logits 0: ", logits[y==0].mean(), " logits 1: ", logits[y==1].mean())
             bar.finish()
         va = float(np.mean(va_losses)) if va_losses else 0.0
         gap = float(np.mean(va_opts)) if va_opts else 0.0

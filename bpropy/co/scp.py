@@ -87,7 +87,10 @@ class SCP(LPProblem, SerializableLPMixin):
     def adj_matrix(self):
         return np.stack([self.adj_vec(f) for f in self.F], axis=1).astype(int)
 
+    def sigmoid(self, x):
+        return 1 / (1 + np.exp(-x))
     def greedy(self, scores=None):
+        #print("###########################################")
         covered = np.zeros(self.ne(), dtype=bool)
         x = np.zeros(self.nv(), dtype=bool)
         while not np.all(covered):
@@ -99,8 +102,18 @@ class SCP(LPProblem, SerializableLPMixin):
             else:
                 def ratio(i):
                     gain = (np.logical_not(covered) & self.adj_vec(self.F[i])).sum()
-                    return np.inf if gain == 0 else (-scores[i] / gain)
+                    #return np.inf if gain == 0 else (-scores[i] / gain)
+                    return np.inf if gain == 0 else ((1 - self.sigmoid(scores[i])) / gain)
+
+            #print("remaining candidates : ", len(cand))
+            #print("candidates: ", cand)
+            #print("scores    : ", [scores[c] for c in cand])
+
             idx = min(cand, key=ratio)
+            #print("new : ", idx)
+            #print("\t", self.adj_vec(self.F[idx]).sum())
+            #print("\t", ratio(idx))
+
             x[idx] = 1
             covered |= self.adj_vec(self.F[idx])
         return x
