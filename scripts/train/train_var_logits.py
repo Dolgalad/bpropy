@@ -220,7 +220,7 @@ def main():
             best_epoch = epoch
             best_ckpt_path = os.path.join(log_dir, "checkpoints", "best.pt")
             save_checkpoint(
-                best_ckpt_path, epoch, model, optimizer,
+                best_ckpt_path, epoch, model, opt,
                 extra={"best_opt": best_opt, "best_epoch": best_epoch}
             )
 
