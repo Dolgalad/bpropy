@@ -1,11 +1,14 @@
 #!/bin/bash
-#SBATCH --job-name=scp-50-50-5-gen
+#SBATCH --job-name=scp_n50_m50_k5_gen
 ##SBATCH --partition=<your-partition>
 ##SBATCH --nodes=1
 ##SBATCH --ntasks=1
 ##SBATCH --cpus-per-task=1
 #SBATCH --time=02:00:00
 #SBATCH --array=0-99     # 100 shards
+#SBATCH --output=slurm_outputs/scp_n50_m50_k5_gen-%a.out
+#SBATCH --error=slurm_outputs/scp_n50_m50_k5_gen-%a.err
+
 
 set -euo pipefail
 
@@ -41,7 +44,8 @@ python -u scp_dataset_generator.py \
   --seed "${BASE_SEED}" \
   --index-offset "${OFFSET}" \
   --balanced \
-  --solve none \
+  --solve cbc \
+  --splits 80 10 10
   --threshold-bytes 8000 \
   --prefix "shard${SLURM_ARRAY_TASK_ID}_"
 
