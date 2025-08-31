@@ -1,22 +1,27 @@
 #!/bin/bash
-#SBATCH --job-name=scp_n50_m50_k5_gen
+#SBATCH --job-name=mis_n100_p0.15_gen
 ##SBATCH --partition=<your-partition>
-##SBATCH --nodes=1
-##SBATCH --ntasks=1
-##SBATCH --cpus-per-task=1
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=1
 #SBATCH --time=02:00:00
 #SBATCH --array=0-99     # 100 shards
-#SBATCH --output=slurm_outputs/scp_n50_m50_k5_gen-%a.out
-#SBATCH --error=slurm_outputs/scp_n50_m50_k5_gen-%a.err
+#SBATCH --output=slurm_outputs/data/mis/mis_n100_p0.15_gen-%a.out
+#SBATCH --error=slurm_outputs/data/mis/mis_n100_p0.15_gen-%a.err
+#SBATCH --mem=4G
 
+# Hardening: keep single-threaded libs single-threaded
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
 
 set -euo pipefail
 
 # Parameters
-OUTDIR="datasets/problems/scp/scp_n50_m50_k5"
-N_ITEMS=50
-N_SETS=50
-K=5
+OUTDIR="datasets/problems/mis/mis_n100_p0.15"
+NV=100
+P=0.15
 
 # Reproducibility: same base seed for everyone
 BASE_SEED=2025
@@ -37,15 +42,15 @@ mkdir -p "${OUTDIR}"
 # conda activate bpropy
 
 cd scripts/data
-python -u scp_dataset_generator.py \
+python -u mis_dataset_generator.py \
   "${OUTDIR}" \
-  "${N_ITEMS}" "${N_SETS}" "${K}" \
+  "${NV}" "${NV}" \
   "${PER_SHARD}" \
+  --p "${P}" \
   --seed "${BASE_SEED}" \
   --index-offset "${OFFSET}" \
-  --balanced \
-  --solve cbc \
-  --splits 80 10 10
+  --solve kamis \
+  --splits 80 10 10 \
   --threshold-bytes 8000 \
   --prefix "shard${SLURM_ARRAY_TASK_ID}_"
 
