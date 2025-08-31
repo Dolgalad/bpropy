@@ -36,10 +36,29 @@ def ensure_dirs(base: str, split_counts: Optional[Tuple[int,int,int]]):
         for sub in ("train","val","test"):
             os.makedirs(os.path.join(base, sub), exist_ok=True)
 
+def parse_range_or_int(s: str) -> Tuple[int,int]:
+    """
+    Parse a string as either 'int' or 'low:high'.
+    Returns a pair (low, high), inclusive.
+    """
+    if ":" in s:
+        a, b = s.split(":")
+        return int(a), int(b)
+    else:
+        v = int(s)
+        return v, v
+
+def sample_from_range(rng: np.random.Generator, bounds: Tuple[int,int]) -> int:
+    low, high = bounds
+    return int(rng.integers(low, high+1))
+
 def main():
     ap = argparse.ArgumentParser(description="SCP dataset generation with assignments (reproducible)")
-    ap.add_argument("output_dir"); ap.add_argument("n_items", type=int)
-    ap.add_argument("n_sets", type=int); ap.add_argument("k", type=int); ap.add_argument("N", type=int)
+    ap.add_argument("output_dir")
+    ap.add_argument("n_items", help="int or 'low:high'")
+    ap.add_argument("n_sets", help="int or 'low:high'")
+    ap.add_argument("k", help="int or 'low:high'")
+    ap.add_argument("N", type=int)
 
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--index-offset", type=int, default=0)
@@ -55,6 +74,10 @@ def main():
 
     args = ap.parse_args()
 
+    n_range = parse_range_or_int(args.n_items)
+    m_range = parse_range_or_int(args.n_sets)
+    k_range = parse_range_or_int(args.k)
+
     split_counts = normalize_splits(args.splits, args.N)
     ensure_dirs(args.output_dir, split_counts)
     N_total = args.N
@@ -66,9 +89,16 @@ def main():
         stem = os.path.join(out_dir, f"{args.prefix}{idx_global}")
         inst_seed = (args.seed or 0) + idx_global
 
+        rng = np.random.default_rng(inst_seed)
+
+        # draw actual values for this instance
+        n_i = sample_from_range(rng, n_range)
+        m_i = sample_from_range(rng, m_range)
+        k_i = sample_from_range(rng, k_range)
+
         # 1) instance
         t_gen = time.time()
-        pb = make_instance(args.n_items, args.n_sets, args.k, inst_seed, args.balanced)
+        pb = make_instance(n_i, m_i, k_i, inst_seed, args.balanced)
         t_gen = time.time() - t_gen
 
         # 2) assignments
