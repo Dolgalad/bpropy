@@ -216,7 +216,7 @@ def main():
 
 
         if gap < best_gap:
-            best_opt = opt_gap
+            best_gap = gap
             best_epoch = epoch
             best_ckpt_path = os.path.join(log_dir, "checkpoints", "best.pt")
             save_checkpoint(
