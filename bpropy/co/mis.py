@@ -1,8 +1,8 @@
 """
 MIS solving routines
 """
-
-
+import os
+import tempfile
 import networkx as nx
 import numpy as np
 import itertools
@@ -28,6 +28,8 @@ from bpropy.graphs.vc_graph import VCGraph
 from bpropy.co.mis_solution import MISSolution
 
 from bpropy.io.serde import SerializableLPMixin
+
+from bpropy.co.kamis import write_metis_graph, kamis_solve, load_kamis_solution
 
 
 class MIS(LPProblem, SerializableLPMixin):
@@ -143,6 +145,15 @@ class MIS(LPProblem, SerializableLPMixin):
                     bounds=Bounds(np.zeros(self.nv()), np.ones(self.nv())),
                     options={"disp":disp}
                     ))
+        if solver=="kamis":
+            # write graph in a temporary file in metis format
+            with tempfile.TemporaryDirectory() as d:
+                graph_path = os.path.join(d, "graph.metis")
+                solution_path = os.path.join(d, "solution")
+                write_metis_graph(graph_path, self.g)
+                kamis_solve(graph_path, solution_path, disp=disp)
+                x = load_kamis_solution(solution_path)
+            return MISSolution(x)
         # default is using CBC
         md = mip.Model("mis")
         x = [md.add_var(lb=0.0, ub=1.0, var_type=BINARY) for i in range(self.nv())]

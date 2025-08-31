@@ -3,12 +3,13 @@
 import numpy as np
 
 class MISSolution:
-    def __init__(self, x, duals=None, slacks=None, varbasis_onehot=None, reduced_costs=None):
+    def __init__(self, x, duals=None, slacks=None, varbasis_onehot=None, reduced_costs=None, solve_time=None):
         self.x = x
         self.duals = duals
         self.slacks = slacks
         self.varbasis_onehot = varbasis_onehot
         self.reduced_costs = reduced_costs
+        self.solve_time = solve_time
 
     @staticmethod
     def from_scipy_milp(r):
@@ -76,7 +77,4 @@ class MISSolution:
                 )
 
 
-def load_kamis_solution(path):
-    with open(path, "r") as f:
-        return np.array(list(map(int, filter(None, f.read().split("\n")))))
 
