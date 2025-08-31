@@ -103,3 +103,74 @@ class SerializableLPMixin:
         else:
             raise ValueError(f"Unknown problem_type {pt}")
 
+    def save_assignments(
+        self,
+        stem: str,
+        assignments: Dict[str, np.ndarray],
+        *,
+        threshold_bytes: int = 8000,
+        arrays_key_prefix: str = "assign_",
+    ) -> None:
+        """
+        Save a collection of variable assignments (name -> vector) alongside the problem.
+        Stores vectors inline (JSON) or into the NPZ sidecar depending on threshold_bytes.
+        """
+        man_path = stem + ".json"
+        with open(man_path, "r") as f:
+            manifest = json.load(f)
+
+        # Load existing arrays if sidecar present, so we can append
+        arrays = {}
+        sidecar_path = None
+        if "arrays_file" in manifest:
+            sidecar_path = os.path.join(os.path.dirname(stem), manifest["arrays_file"])
+            arrays.update(dict(np.load(sidecar_path, allow_pickle=False)))
+
+        manifest.setdefault("assignments", {})
+        manifest.setdefault("_arrays", {})  # used only for inline storage
+
+        for name, x in assignments.items():
+            if x is None:
+                continue
+            x = np.asarray(x, dtype=float).reshape(-1)
+            key = f"{arrays_key_prefix}{name}"
+
+            if x.nbytes >= threshold_bytes:
+                arrays[key] = x
+                manifest["assignments"][name] = {"source": "npz", "key": key}
+            else:
+                manifest["_arrays"][key] = x.tolist()
+                manifest["assignments"][name] = {"source": "inline", "key": key}
+
+        # If we have any arrays (pre-existing or newly added), ensure arrays_file is set and write the sidecar
+        if arrays:
+            if "arrays_file" not in manifest:
+                manifest["arrays_file"] = os.path.basename(stem + ".arrays.npz")
+            sidecar_path = os.path.join(os.path.dirname(stem), manifest["arrays_file"])
+            np.savez_compressed(sidecar_path, **arrays)
+
+        with open(man_path, "w") as f:
+            json.dump(manifest, f, indent=2, sort_keys=True)
+
+    @classmethod
+    def load_assignments(cls, stem: str) -> Dict[str, np.ndarray]:
+        """
+        Load all named assignments saved by save_assignments().
+        Returns a dict: name -> np.ndarray
+        """
+        man_path = stem + ".json"
+        with open(man_path, "r") as f:
+            manifest = json.load(f)
+
+        arrays = {}
+        if "arrays_file" in manifest:
+            sidecar_path = os.path.join(os.path.dirname(stem), manifest["arrays_file"])
+            arrays.update(dict(np.load(sidecar_path, allow_pickle=False)))
+
+        out = {}
+        for name, ref in manifest.get("assignments", {}).items():
+            if ref["source"] == "npz":
+                out[name] = np.asarray(arrays[ref["key"]], dtype=float)
+            else:
+                out[name] = np.asarray(manifest["_arrays"][ref["key"]], dtype=float)
+        return out

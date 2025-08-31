@@ -1,0 +1,50 @@
+#!/bin/bash
+#SBATCH --job-name=scp-50-50-5-gen
+##SBATCH --partition=<your-partition>
+##SBATCH --nodes=1
+##SBATCH --ntasks=1
+##SBATCH --cpus-per-task=1
+#SBATCH --time=02:00:00
+#SBATCH --array=0-99     # 100 shards
+
+set -euo pipefail
+
+# Parameters
+OUTDIR="datasets/problems/scp/scp_n50_m50_k5"
+N_ITEMS=50
+N_SETS=50
+K=5
+
+# Reproducibility: same base seed for everyone
+BASE_SEED=2025
+
+# Per-array-shard workload
+SHARD_COUNT=100
+TOTAL=5000           # total instances desired
+PER_SHARD=$(( TOTAL / SHARD_COUNT ))
+
+# Compute offset from SLURM_ARRAY_TASK_ID
+OFFSET=$(( SLURM_ARRAY_TASK_ID * PER_SHARD ))
+
+# Create output dir once (ok if exists)
+mkdir -p "${OUTDIR}"
+
+# Activate your environment if needed
+# source ~/.bashrc
+# conda activate bpropy
+
+cd scripts/data
+python -u scp_dataset_generator.py \
+  "${OUTDIR}" \
+  "${N_ITEMS}" "${N_SETS}" "${K}" \
+  "${PER_SHARD}" \
+  --seed "${BASE_SEED}" \
+  --index-offset "${OFFSET}" \
+  --balanced \
+  --solve none \
+  --threshold-bytes 8000 \
+  --prefix "shard${SLURM_ARRAY_TASK_ID}_"
+
+# Optional: verify count
+echo "Shard ${SLURM_ARRAY_TASK_ID} done."
+
