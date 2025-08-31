@@ -40,7 +40,6 @@ def get_features(pb, solver="cbc", solution=None):
         import time
         t0 = time.time()
         sol = pb.solve(solver=solver, relax_integrality=True)
-        print("solv t ", time.time() - t0)
     else:
         sol = solution
 

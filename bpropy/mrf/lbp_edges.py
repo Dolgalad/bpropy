@@ -112,18 +112,18 @@ class LBPEdges:
         return ne
     def to(self, device, non_blocking=False, *args):
         ne = LBPEdges()
-        ne.n_ss = self.n_ss.to(device)
-        ne.n_vars = self.n_vars.to(device)
-        ne.n_factors = self.n_factors.to(device)
-        ne.n_f2v_ss = self.n_f2v_ss.to(device)
-        ne.n_f2v_msg = self.n_f2v_msg.to(device)
+        ne.n_ss = self.n_ss.to(device, non_blocking=non_blocking)
+        ne.n_vars = self.n_vars.to(device, non_blocking=non_blocking)
+        ne.n_factors = self.n_factors.to(device, non_blocking=non_blocking)
+        ne.n_f2v_ss = self.n_f2v_ss.to(device, non_blocking=non_blocking)
+        ne.n_f2v_msg = self.n_f2v_msg.to(device, non_blocking=non_blocking)
 
-        ne.f2v_edges = self.f2v_edges.to(device)
-        ne.r_edges = self.r_edges.to(device)
-        ne.q_edges = self.q_edges.to(device)
-        ne.m_edges = self.m_edges.to(device)
-        ne.vm_edges = self.vm_edges.to(device)
-        ne.m_stride = self.m_stride.to(device)
+        ne.f2v_edges = self.f2v_edges.to(device, non_blocking=non_blocking)
+        ne.r_edges = self.r_edges.to(device, non_blocking=non_blocking)
+        ne.q_edges = self.q_edges.to(device, non_blocking=non_blocking)
+        ne.m_edges = self.m_edges.to(device, non_blocking=non_blocking)
+        ne.vm_edges = self.vm_edges.to(device, non_blocking=non_blocking)
+        ne.m_stride = self.m_stride.to(device, non_blocking=non_blocking)
         return ne
     def __getitem__(self, idx):
         if self.num_graphs==1:

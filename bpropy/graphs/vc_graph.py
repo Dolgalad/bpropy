@@ -55,7 +55,9 @@ def variable_constraint_graph(pb, cliques=None, g=None):
         g.add_node(i, bipartite=0, x=[W[i]])
         features.append(W[i])
     ci,ce = 0,0
-    constraints = pb.constraints(cliques=cliques)
+    #constraints = pb.constraints(cliques=cliques)
+    constraints = pb.constraints()
+
     for cj,c in enumerate(constraints):
         for i in range(c.A.shape[0]):
             if c.lb[i]==c.ub[i]:

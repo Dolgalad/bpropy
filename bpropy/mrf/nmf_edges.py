@@ -67,15 +67,15 @@ class NMFEdges:
         ne.pmprodsum_edges = self.pmprodsum_edges.clone()
         ne.theta_rep = self.theta_rep.clone()
         return ne
-    def to(self, device):
+    def to(self, device, non_blocking=False, *args):
         ne = NMFEdges()
-        ne.n_ss = self.n_ss.to(device)
-        ne.n_vars = self.n_vars.to(device)
-        ne.n_factors = self.n_factors.to(device)
-        ne.n_prodsum = self.n_prodsum.to(device)
-        ne.pmprod_edges = self.pmprod_edges.to(device)
-        ne.pmprodsum_edges = self.pmprodsum_edges.to(device)
-        ne.theta_rep = self.theta_rep.to(device)
+        ne.n_ss = self.n_ss.to(device, non_blocking=non_blocking)
+        ne.n_vars = self.n_vars.to(device, non_blocking=non_blocking)
+        ne.n_factors = self.n_factors.to(device, non_blocking=non_blocking)
+        ne.n_prodsum = self.n_prodsum.to(device, non_blocking=non_blocking)
+        ne.pmprod_edges = self.pmprod_edges.to(device, non_blocking=non_blocking)
+        ne.pmprodsum_edges = self.pmprodsum_edges.to(device, non_blocking=non_blocking)
+        ne.theta_rep = self.theta_rep.to(device, non_blocking=non_blocking)
         return ne
 
     def __eq__(self, other):
