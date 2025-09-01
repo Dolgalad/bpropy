@@ -77,7 +77,6 @@ class Hetero_GCN_MRF_v4(torch.nn.Module):
             self.mapping = GATConv(hidden_dim, hidden_dim)
     def forward(self, data, fg_data=None, fg_map=None):
         #x, edge_index = data.x, data.edge_index
-
         x = self.enc(data.x_dict)
 
         x = self.conv(x, data.edge_index_dict)
@@ -105,7 +104,30 @@ class Hetero_GCN_MRF_v4(torch.nn.Module):
             tmp_edge_data.lbp_edges = edge_data.lbp_edges
         if hasattr(edge_data, "nmf_edges"):
             tmp_edge_data.nmf_edges = edge_data.nmf_edges
-        tmp_edge_data.factor_sizes = torch.concatenate([torch.ones(x["variable"].shape[0], dtype=torch.int, device=xp.device), edge_data["constraint"].factor_sizes])
+
+        b_var = data["variable"].batch
+        b_con = data["constraint"].batch
+        G = int(edge_data.lbp_edges.num_graphs) if hasattr(edge_data.lbp_edges, "num_graphs") else int(b_var.max().item() + 1)
+        
+        pieces = []
+        fs_list = []
+        for g in range(G):
+            xv = x["variable"][b_var == g]        # all variable "unary factors" of graph g
+            xc = x["constraint"][b_con == g]      # all constraint factors of graph g
+        
+            # per-graph embedding order: [unaries_of_g, constraints_of_g]
+            pieces.append(torch.cat([xv, xc], dim=0))
+        
+            # per-graph factor sizes: [1's for unaries_of_g, constraint arities of g]
+            fs_g = torch.cat([
+                torch.ones(xv.shape[0], dtype=torch.long, device=xv.device),
+                edge_data["constraint"].factor_sizes[b_con == g].to(torch.long)
+            ], dim=0)
+            fs_list.append(fs_g)
+
+        #tmp_edge_data.factor_sizes = torch.concatenate([torch.ones(x["variable"].shape[0], dtype=torch.int, device=xp.device), edge_data["constraint"].factor_sizes])
+        tmp_edge_data.factor_sizes = torch.cat(fs_list, dim=0)
+
 
         xp = self.efc(xp, tmp_edge_data)
         assert xp.numel() == int(edge_data.lbp_edges.n_ss.sum().item())
