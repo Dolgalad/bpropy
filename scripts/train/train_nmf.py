@@ -214,12 +214,12 @@ def main():
 
     loader_train = DataLoader(
         ds_train, batch_size=args.batch_size, shuffle=True,
-        num_workers=4, pin_memory=True, persistent_workers=True, prefetch_factor=2,
+        num_workers=2, pin_memory=True, persistent_workers=True, prefetch_factor=2,
         collate_fn=mrf_collate,
     )
     loader_val = DataLoader(
         ds_val, batch_size=1, shuffle=False,
-        num_workers=4, pin_memory=True, persistent_workers=True, prefetch_factor=2,
+        num_workers=2, pin_memory=True, persistent_workers=True, prefetch_factor=2,
         collate_fn=mrf_collate,
     )
 
