@@ -151,7 +151,7 @@ def evaluate_on_train_split(
                 logits, y.to(device, non_blocking=True).float()
             ).item()
             # same gap definition you used during validation
-            if maximize:
+            if args.maximize:
                 gap =  (y.sum().item() - grd_sol.sum()) / (y.sum().item() + 1e-8)
             else:
                 gap =  (grd_sol.sum() - y.sum().item()) / (y.sum().item() + 1e-8)
@@ -295,7 +295,7 @@ def main():
                 # solve greedy
                 grd_sol = pb[0].greedy(scores=logits.cpu().numpy())
                 # gap
-                if maximize:
+                if args.maximize:
                     gap = (y.sum().item() - grd_sol.sum()) / y.sum().item()
                 else:
                     gap = (grd_sol.sum() - y.sum().item()) / y.sum().item()
