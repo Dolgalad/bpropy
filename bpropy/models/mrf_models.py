@@ -110,10 +110,14 @@ class Hetero_GCN_MRF_v4(torch.nn.Module):
         xp = self.efc(xp, tmp_edge_data)
         assert xp.numel() == int(edge_data.lbp_edges.n_ss.sum().item())
         if self.normalize_theta:
-            xp = (xp - xp.min()) / (xp.max() - xp.min())
+            #xp = (xp - xp.min()) / (xp.max() - xp.min())
+            m_idx = torch.arange(edge_data.lbp_edges.m_stride.size(0), device=xp.device).repeat_interleave(edge_data.lbp_edges.m_stride)
+            # per-factor logsumexp of θ
+            z_theta = torch_scatter.scatter_logsumexp(xp, m_idx)
+            xp = xp - z_theta.repeat_interleave(edge_data.lbp_edges.m_stride)
         if self.inference == "loopy_belief_propagation":
-            #v2f = xp.new_zeros(int(edge_data.lbp_edges.n_f2v_msg.sum().item()))
-            v2f = torch.zeros_like(xp)
+            v2f = xp.new_zeros(int(edge_data.lbp_edges.n_f2v_msg.sum().item()))
+            #v2f = torch.zeros_like(xp)
             return loopy_belief_propagation(xp, v2f, edge_data.lbp_edges, max_iter=self.bp_max_iter, tol=self.bp_tol, damping=self.bp_damping), xp
         if self.inference == "naive_mean_field":
             return naive_mean_field(xp, edge_data.nmf_edges, max_iter=self.bp_max_iter, tol=self.bp_tol), xp
