@@ -108,9 +108,12 @@ class Hetero_GCN_MRF_v4(torch.nn.Module):
         tmp_edge_data.factor_sizes = torch.concatenate([torch.ones(x["variable"].shape[0], dtype=torch.int, device=xp.device), edge_data["constraint"].factor_sizes])
 
         xp = self.efc(xp, tmp_edge_data)
+        assert xp.numel() == int(edge_data.lbp_edges.n_ss.sum().item())
         if self.normalize_theta:
             xp = (xp - xp.min()) / (xp.max() - xp.min())
         if self.inference == "loopy_belief_propagation":
-            return loopy_belief_propagation(xp, torch.zeros_like(xp), edge_data.lbp_edges, max_iter=self.bp_max_iter, tol=self.bp_tol, damping=self.bp_damping), xp
+            #v2f = xp.new_zeros(int(edge_data.lbp_edges.n_f2v_msg.sum().item()))
+            v2f = torch.zeros_like(xp)
+            return loopy_belief_propagation(xp, v2f, edge_data.lbp_edges, max_iter=self.bp_max_iter, tol=self.bp_tol, damping=self.bp_damping), xp
         if self.inference == "naive_mean_field":
             return naive_mean_field(xp, edge_data.nmf_edges, max_iter=self.bp_max_iter, tol=self.bp_tol), xp

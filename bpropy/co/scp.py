@@ -103,7 +103,9 @@ class SCP(LPProblem, SerializableLPMixin):
                 def ratio(i):
                     gain = (np.logical_not(covered) & self.adj_vec(self.F[i])).sum()
                     #return np.inf if gain == 0 else (-scores[i] / gain)
+                    return np.inf if gain == 0 else (1 - self.sigmoid(scores[i]))
                     return np.inf if gain == 0 else ((1 - self.sigmoid(scores[i])) / gain)
+
 
             #print("remaining candidates : ", len(cand))
             #print("candidates: ", cand)

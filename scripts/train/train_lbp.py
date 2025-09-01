@@ -55,7 +55,9 @@ def parse_args():
     p.add_argument("--patience", type=int, default=20,
                    help="epochs without gap improvement before early stop")
     p.add_argument("--resume", default="", help="Path to checkpoint (.pt/.pth) to resume training")
-
+    p.add_argument("--maximize", action="store_true")
+    p.add_argument("--steps_per_epoch", type=int, default=10000000)
+    p.add_argument("--steps_per_val", type=int, default=10000000)
 
     return p.parse_args()
 
@@ -151,7 +153,11 @@ def evaluate_on_train_split(
                     variable_marginals[:,1], y.to(device, non_blocking=True).float()
             ).item()
             # same gap definition you used during validation
-            gap = -args.maximize * (grd_sol.sum() - y.sum().item()) / (y.sum().item() + 1e-8)
+            if args.maximize:
+                gap = (y.sum().item() - grd_sol.sum()) / (y.sum().item() + 1e-8)
+            else:
+                gap = (grd_sol.sum() - y.sum().item()) / (y.sum().item() + 1e-8)
+
 
             losses.append(loss)
             gaps.append(gap)
@@ -267,6 +273,7 @@ def main():
         model.train()
         tr_losses = []
         bar = Bar(f"[Train] epoch {epoch}", max=len(loader_train))
+        c = 0
         for data, y in CUDAPrefetcher(loader_train, device):
             opt.zero_grad()
             lbp_res, theta = model(data)
@@ -276,6 +283,9 @@ def main():
             opt.step()
             tr_losses.append(loss.item())
             bar.next()
+            c+=1
+            if c > args.steps_per_epoch:
+                break
         bar.finish()
         tr = float(np.mean(tr_losses)) if tr_losses else 0.0
 
@@ -284,6 +294,7 @@ def main():
         va_losses = []
         va_opts = []
         with torch.no_grad():
+            c = 0
             bar = Bar(f"[Val]   epoch {epoch}", max=len(loader_val))
             for pb, data, y in CUDAPrefetcher(loader_val, device):
                 lbp_res, theta = model(data)
@@ -293,8 +304,16 @@ def main():
                 # solve greedy
                 grd_sol = pb[0].greedy(scores=variable_marginals[:,1].cpu().numpy())
                 # gap
-                gap = -args.maximize * ( grd_sol.sum() - y.sum().item()) / y.sum().item()
+                if args.maximize:
+                    gap = (y.sum().item() - grd_sol.sum()) / y.sum().item()
+                else:
+                    gap = (grd_sol.sum() - y.sum().item()) / y.sum().item()
+
                 va_opts.append(gap)
+                c+= 1
+                if c > args.steps_per_val:
+                    break
+
                 #print("logits 0: ", logits[y==0].mean(), " logits 1: ", logits[y==1].mean())
             bar.finish()
         va = float(np.mean(va_losses)) if va_losses else 0.0
