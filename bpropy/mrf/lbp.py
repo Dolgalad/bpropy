@@ -23,6 +23,7 @@ def loopy_belief_propagation(theta, v2f, edges, max_iter=100, tol=1e-6, damping=
     
     nv = edges.n_vars.sum() #number_of_variables(g)
     vmar = torch.zeros(2 * nv, dtype=theta.dtype, device=dev)
+    vmar_log = torch.zeros_like(vmar)
 
     stack = torch.empty(theta.shape[0] + v2f.shape[0], dtype=theta.dtype, device=theta.device)
     v2f_subsum = torch.empty(edges.n_f2v_ss.sum(), dtype=theta.dtype, device=theta.device)
@@ -68,12 +69,17 @@ def loopy_belief_propagation(theta, v2f, edges, max_iter=100, tol=1e-6, damping=
 
         # marginals
         vmar.zero_().scatter_add_(0, edges.vm_edges[:,0], r[edges.vm_edges[:,1]])
+        # normalize per variable (2 states)
+        zv = torch.logsumexp(vmar.view(-1,2), dim=1, keepdim=True)
+        vmar_log_norm = (vmar.view(-1,2) - zv).view(-1)
+        # probabilities if/when needed:
+        vmar_p = vmar_log_norm.exp()
 
         #vmar = torch.zeros_like(vmar).scatter_add_(0, edges.vm_edges[:,0], r[edges.vm_edges[:,1]])
 
         if u < tol:
             break
-    return BPSolution(mu, u, T, mu_v=vmar)
+    return BPSolution(mu, u, T, mu_v=vmar_p)
 
 def loopy_belief_propagation_with_graph(
     theta: torch.Tensor,

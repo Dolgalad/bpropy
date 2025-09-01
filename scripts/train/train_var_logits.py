@@ -14,10 +14,12 @@ from bpropy.datasets.prefetcher import CUDAPrefetcher
 
 # Import the new models:
 from bpropy.models.logit_models import GCNVarLogits, HeteroGCNVarLogits
+from bpropy.models.mrf_models import Hetero_GCN_MRF_v4
 
 MODEL_REGISTRY = {
     "GCNVarLogits": GCNVarLogits,
     "HeteroGCNVarLogits": HeteroGCNVarLogits,
+    "Hetero_GCN_MRF_v4": Hetero_GCN_MRF_v4,
 }
 
 def parse_args():
@@ -53,6 +55,7 @@ def parse_args():
     p.add_argument("--patience", type=int, default=20,
                    help="epochs without gap improvement before early stop")
     p.add_argument("--resume", default="", help="Path to checkpoint (.pt/.pth) to resume training")
+    p.add_argument("--maximize", action="store_true", help="Optimization is a maximization problem")
 
 
     return p.parse_args()
@@ -88,6 +91,93 @@ def make_ds(root, split, cfg, hetero, feature_mode, with_lbp, with_nmf, processe
         processed_dir=processed_dir
     )
 
+def _sync(device):
+    if isinstance(device, torch.device) and device.type == "cuda":
+        torch.cuda.synchronize()
+
+def evaluate_on_train_split(
+    args, device, log_dir, model,
+    make_ds_fn, mrf_collate, MRFDatasetConfig
+):
+    """
+    Evaluates on the TRAIN split with (pb, data, y) per item.
+    Computes BCE loss, greedy gap, and times (prediction, greedy, total).
+    Saves mean/std to <log_dir>/train_eval.json.
+    """
+    # config that yields (pb, data, y)
+    eval_cfg = MRFDatasetConfig(
+        feature_mode=args.feature_mode,
+        yield_mode="both",
+        refresh=False,
+        return_assignment=True,
+        assignment_solver=args.solver,
+    )
+    ds_train_eval = make_ds_fn(
+        args.dataset_root, "test", eval_cfg,
+        args.hetero, args.feature_mode, args.with_lbp, args.with_nmf,
+        args.processed_dir
+    )
+    loader_eval = DataLoader(
+        ds_train_eval, batch_size=1, shuffle=False,
+        num_workers=2, pin_memory=True, persistent_workers=True, prefetch_factor=2,
+        collate_fn=mrf_collate,
+    )
+
+    model.eval()
+    losses, gaps = [], []
+    t_pred, t_grd, t_tot = [], [], []
+
+    with torch.no_grad():
+        bar = Bar(f"[Test]          ", max=len(loader_eval))
+        for pb, data, y in CUDAPrefetcher(loader_eval, device):
+            # timing with CUDA-sync for accuracy
+            _sync(device)
+            t0 = time.perf_counter()
+
+            # prediction
+            t1 = time.perf_counter()
+            logits = model(data)
+            _sync(device)
+            t2 = time.perf_counter()
+
+            # greedy on CPU scores (your pb API)
+            scores = logits.detach().cpu().numpy()
+            t3 = time.perf_counter()
+            grd_sol = pb[0].greedy(scores=scores)
+            t4 = time.perf_counter()
+
+            # metrics
+            loss = F.binary_cross_entropy_with_logits(
+                logits, y.to(device, non_blocking=True).float()
+            ).item()
+            # same gap definition you used during validation
+            gap = - args.maximize * (grd_sol.sum() - y.sum().item()) / (y.sum().item() + 1e-8)
+
+            losses.append(loss)
+            gaps.append(gap)
+            t_pred.append(t2 - t1)
+            t_grd.append(t4 - t3)
+            t_tot.append(t4 - t0)
+            bar.next()
+        bar.finish()
+
+    def _m_s(x):
+        x = np.array(x, dtype=np.float64)
+        return float(x.mean()) if x.size else 0.0, float(x.std(ddof=1)) if x.size > 1 else 0.0
+
+    out = {
+        "loss": {"mean": _m_s(losses)[0], "std": _m_s(losses)[1]},
+        "gap":  {"mean": _m_s(gaps)[0],   "std": _m_s(gaps)[1]},
+        "time_pred_s": {"mean": _m_s(t_pred)[0], "std": _m_s(t_pred)[1]},
+        "time_greedy_s": {"mean": _m_s(t_grd)[0], "std": _m_s(t_grd)[1]},
+        "time_total_s": {"mean": _m_s(t_tot)[0], "std": _m_s(t_tot)[1]},
+        "count": len(losses),
+    }
+
+    out_path = os.path.join(log_dir, "test_eval.json")
+    with open(out_path, "w") as f:
+        json.dump(out, f, indent=2, sort_keys=True)
+    print(f"[test-eval] saved stats to {out_path}")
 
 def main():
     args = parse_args()
@@ -171,6 +261,7 @@ def main():
 
     best_gap = float("inf")
     best_epoch = 1
+    epochs_bad = 0
     for epoch in range(1, args.epochs + 1):
         # ---- Train ----
         model.train()
@@ -200,7 +291,7 @@ def main():
                 # solve greedy
                 grd_sol = pb[0].greedy(scores=logits.cpu().numpy())
                 # gap
-                gap = ( grd_sol.sum() - y.sum().item()) / y.sum().item()
+                gap = -args.maximize * ( grd_sol.sum() - y.sum().item()) / y.sum().item()
                 va_opts.append(gap)
                 #print("logits 0: ", logits[y==0].mean(), " logits 1: ", logits[y==1].mean())
             bar.finish()
@@ -225,6 +316,13 @@ def main():
                 best_ckpt_path, epoch, model, opt,
                 extra={"best_gap": best_gap, "best_epoch": best_epoch}
             )
+            epochs_bad = 0
+        else:
+            epochs_bad += 1
+            if epochs_bad >= args.patience:
+                print(f"[early-stop] No gap improvement for {epochs_bad} epochs "
+                      f"(patience={args.patience}). Stopping at epoch {epoch}.")
+                break
 
     writer.close()
     print("Done. Best opt:", best_gap)
@@ -237,6 +335,22 @@ def main():
     }
     with open(os.path.join(log_dir, "hparams.json"), "w") as f:
         json.dump(summary, f, indent=2, sort_keys=True)
+
+    # --- Load best model before final evaluation ---
+    best_ckpt_path = os.path.join(log_dir, "checkpoints", "best.pt")
+    if os.path.exists(best_ckpt_path):
+        print(f"[eval] Loading best checkpoint from {best_ckpt_path}")
+        _, ckpt = load_checkpoint(best_ckpt_path, model, optimizer=None, map_location=device)
+    else:
+        print("[eval] No best checkpoint found, using final model.")
+
+    # test model
+    evaluate_on_train_split(
+        args, device, log_dir, model,
+        make_ds_fn=make_ds,
+        mrf_collate=mrf_collate,
+        MRFDatasetConfig=MRFDatasetConfig,
+    )
 
 if __name__ == "__main__":
     main()

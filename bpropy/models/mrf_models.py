@@ -3,7 +3,7 @@ import torch_scatter
 import torch.nn.functional as F
 from torch.nn import ReLU, ELU, Dropout, BatchNorm1d
 from torch_geometric.nn.conv import GATConv
-from torch_geometric.nn import GCNConv, Sequential, LayerNorm, to_hetero
+from torch_geometric.nn import GCNConv, Sequential, LayerNorm, to_hetero, HeteroDictLinear
 from torch_geometric.nn.models import GCN, GAT
 from torch_geometric.data import Data
 from torchvision.ops import MLP
@@ -57,14 +57,16 @@ class GCN_MRF_v4(torch.nn.Module):
             return naive_mean_field(x, edge_data.nmf_edges, max_iter=self.bp_max_iter, tol=self.bp_tol), x
 
 class Hetero_GCN_MRF_v4(torch.nn.Module):
-    def __init__(self, in_dim, n_layers=4, hidden_dim=64, dropout_p=0.25, normalize=False, bp_max_iter=10, bp_tol=1e-6, bp_damping=0.5, factor_sizes=[1,2], jk="lstm", norm="LayerNorm", act="elu", inference="loopy_belief_propagation", mapping_aggr="mean", normalize_theta=False, gnn_f="GAT"):
+    def __init__(self, in_variable_dim=10, in_constraint_dim=4, n_layers=4, hidden_dim=64, dropout_p=0.25, normalize=False, bp_max_iter=10, bp_tol=1e-6, bp_damping=0.5, factor_sizes=[1,2], jk="lstm", norm="LayerNorm", act="elu", inference="loopy_belief_propagation", mapping_aggr="mean", normalize_theta=False, gnn_f="GAT"):
         super().__init__()
         self.inference = inference 
         self.bp_max_iter = bp_max_iter
         self.bp_tol = bp_tol
         self.bp_damping = bp_damping
-        self.conv = eval(gnn_f)(in_dim, hidden_dim, n_layers, out_channels=hidden_dim, dropout=dropout_p, act=act, norm=norm, jk=jk, add_self_loops=False)
+        self.conv = eval(gnn_f)(hidden_dim, hidden_dim, n_layers, out_channels=hidden_dim, dropout=dropout_p, act=act, norm=norm, jk=jk, add_self_loops=False)
         # debug
+        self.enc = HeteroDictLinear({'variable': in_variable_dim, 'constraint': in_constraint_dim}, hidden_dim)
+
         self.conv = to_hetero(self.conv, (['variable', 'constraint'], [('variable', 'v2c', 'constraint'), ('constraint', 'c2v', 'variable')]), aggr="sum")
 
         self.mapping_aggr=mapping_aggr
@@ -76,7 +78,9 @@ class Hetero_GCN_MRF_v4(torch.nn.Module):
     def forward(self, data, fg_data=None, fg_map=None):
         #x, edge_index = data.x, data.edge_index
 
-        x = self.conv(data.x_dict, data.edge_index_dict)
+        x = self.enc(data.x_dict)
+
+        x = self.conv(x, data.edge_index_dict)
 
         if not fg_data is None:
             # mapping
