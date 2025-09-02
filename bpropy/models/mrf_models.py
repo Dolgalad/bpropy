@@ -100,14 +100,16 @@ class Hetero_GCN_MRF_v4(torch.nn.Module):
         xp = torch.cat((x["variable"], x["constraint"]))
 
         tmp_edge_data = Data()
-        if hasattr(edge_data, "lbp_edges"):
-            tmp_edge_data.lbp_edges = edge_data.lbp_edges
-        if hasattr(edge_data, "nmf_edges"):
-            tmp_edge_data.nmf_edges = edge_data.nmf_edges
-
         b_var = data["variable"].batch
         b_con = data["constraint"].batch
-        G = int(edge_data.lbp_edges.num_graphs) if hasattr(edge_data.lbp_edges, "num_graphs") else int(b_var.max().item() + 1)
+
+        if hasattr(edge_data, "lbp_edges"):
+            tmp_edge_data.lbp_edges = edge_data.lbp_edges
+            G = int(edge_data.lbp_edges.num_graphs) if hasattr(edge_data.lbp_edges, "num_graphs") else int(b_var.max().item() + 1)
+        if hasattr(edge_data, "nmf_edges"):
+            tmp_edge_data.nmf_edges = edge_data.nmf_edges
+            G = int(edge_data.nmf_edges.num_graphs) if hasattr(edge_data.nmf_edges, "num_graphs") else int(b_var.max().item() + 1)
+
         
         pieces = []
         fs_list = []
@@ -130,7 +132,11 @@ class Hetero_GCN_MRF_v4(torch.nn.Module):
 
 
         xp = self.efc(xp, tmp_edge_data)
-        assert xp.numel() == int(edge_data.lbp_edges.n_ss.sum().item())
+        if hasattr(edge_data, "lbp_edges"):
+            assert xp.numel() == int(edge_data.lbp_edges.n_ss.sum().item())
+        if hasattr(edge_data, "nmf_edges"):
+            assert xp.numel() == int(edge_data.nmf_edges.n_ss.sum().item())
+
         if self.normalize_theta:
             #xp = (xp - xp.min()) / (xp.max() - xp.min())
             m_idx = torch.arange(edge_data.lbp_edges.m_stride.size(0), device=xp.device).repeat_interleave(edge_data.lbp_edges.m_stride)
