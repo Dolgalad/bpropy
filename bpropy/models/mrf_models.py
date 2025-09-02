@@ -100,36 +100,40 @@ class Hetero_GCN_MRF_v4(torch.nn.Module):
         xp = torch.cat((x["variable"], x["constraint"]))
 
         tmp_edge_data = Data()
-        b_var = data["variable"].batch
-        b_con = data["constraint"].batch
-
         if hasattr(edge_data, "lbp_edges"):
             tmp_edge_data.lbp_edges = edge_data.lbp_edges
-            G = int(edge_data.lbp_edges.num_graphs) if hasattr(edge_data.lbp_edges, "num_graphs") else int(b_var.max().item() + 1)
         if hasattr(edge_data, "nmf_edges"):
             tmp_edge_data.nmf_edges = edge_data.nmf_edges
-            G = int(edge_data.nmf_edges.num_graphs) if hasattr(edge_data.nmf_edges, "num_graphs") else int(b_var.max().item() + 1)
 
-        
-        pieces = []
-        fs_list = []
-        for g in range(G):
-            xv = x["variable"][b_var == g]        # all variable "unary factors" of graph g
-            xc = x["constraint"][b_con == g]      # all constraint factors of graph g
-        
-            # per-graph embedding order: [unaries_of_g, constraints_of_g]
-            pieces.append(torch.cat([xv, xc], dim=0))
-        
-            # per-graph factor sizes: [1's for unaries_of_g, constraint arities of g]
-            fs_g = torch.cat([
-                torch.ones(xv.shape[0], dtype=torch.long, device=xv.device),
-                edge_data["constraint"].factor_sizes[b_con == g].to(torch.long)
-            ], dim=0)
-            fs_list.append(fs_g)
 
-        #tmp_edge_data.factor_sizes = torch.concatenate([torch.ones(x["variable"].shape[0], dtype=torch.int, device=xp.device), edge_data["constraint"].factor_sizes])
-        tmp_edge_data.factor_sizes = torch.cat(fs_list, dim=0)
-
+        # 2) Keys for a stable, vectorized lex-sort: by (graph_id, type) with variables first
+        b_var = data["variable"].batch          # [n_var]
+        b_con = data["constraint"].batch        # [n_con]
+        g_ids = torch.cat([b_var, b_con], dim=0)                      # graph id per row in `xp`
+        t_key = torch.cat([torch.zeros_like(b_var), torch.ones_like(b_con)], dim=0)  # 0=var, 1=constraint
+        
+        # Stable lexicographic sort: first by type (vars first), then by graph id
+        idx = torch.arange(g_ids.numel(), device=g_ids.device)
+        # secondary key (type), then primary (graph id) — both stable
+        idx = idx[torch.argsort(t_key, stable=True)]
+        idx = idx[torch.argsort(g_ids[idx], stable=True)]
+        
+        # 3) Apply the same permutation to `xp` and to factor sizes
+        xp = xp.index_select(0, idx)
+        
+        fs_all = torch.cat([
+            torch.ones(b_var.numel(), dtype=torch.long, device=xp.device),
+            edge_data["constraint"].factor_sizes.to(torch.long)
+        ], dim=0)
+        fs_all = fs_all.index_select(0, idx)
+        
+        # 4) Pack into a temporary Data for EFCanonicalParam
+        tmp_edge_data = Data()
+        if hasattr(edge_data, "lbp_edges"):
+            tmp_edge_data.lbp_edges = edge_data.lbp_edges
+        if hasattr(edge_data, "nmf_edges"):
+            tmp_edge_data.nmf_edges = edge_data.nmf_edges
+        tmp_edge_data.factor_sizes = fs_all
 
         xp = self.efc(xp, tmp_edge_data)
         if hasattr(edge_data, "lbp_edges"):

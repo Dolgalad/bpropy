@@ -55,6 +55,7 @@ def parse_args():
     p.add_argument("--patience", type=int, default=20,
                    help="epochs without gap improvement before early stop")
     p.add_argument("--resume", default="", help="Path to checkpoint (.pt/.pth) to resume training")
+    p.add_argument("--maximize", action="store_true", help="Optimization is a maximization problem")
 
 
     return p.parse_args()
@@ -151,7 +152,10 @@ def evaluate_on_train_split(
                     variable_marginals[:,1], y.to(device, non_blocking=True).float()
             ).item()
             # same gap definition you used during validation
-            gap = -args.maximize * (grd_sol.sum() - y.sum().item()) / (y.sum().item() + 1e-8)
+            if args.maximize:
+                gap = (y.sum().item() - grd_sol.sum()) / (y.sum().item() + 1e-8)
+            else:
+                gap = (grd_sol.sum() - y.sum().item()) / (y.sum().item() + 1e-8)
 
             losses.append(loss)
             gaps.append(gap)
@@ -214,12 +218,12 @@ def main():
 
     loader_train = DataLoader(
         ds_train, batch_size=args.batch_size, shuffle=True,
-        num_workers=4, pin_memory=True, persistent_workers=True, prefetch_factor=2,
+        num_workers=2, pin_memory=True, persistent_workers=True, prefetch_factor=2,
         collate_fn=mrf_collate,
     )
     loader_val = DataLoader(
         ds_val, batch_size=1, shuffle=False,
-        num_workers=4, pin_memory=True, persistent_workers=True, prefetch_factor=2,
+        num_workers=2, pin_memory=True, persistent_workers=True, prefetch_factor=2,
         collate_fn=mrf_collate,
     )
 
@@ -293,7 +297,10 @@ def main():
                 # solve greedy
                 grd_sol = pb[0].greedy(scores=variable_marginals[:,1].cpu().numpy())
                 # gap
-                gap = -args.maximize * ( grd_sol.sum() - y.sum().item()) / y.sum().item()
+                if args.maximize:
+                    gap = ( y.sum().item() - grd_sol.sum()) / y.sum().item()
+                else:
+                    gap = ( grd_sol.sum() - y.sum().item()) / y.sum().item()
                 va_opts.append(gap)
                 #print("logits 0: ", logits[y==0].mean(), " logits 1: ", logits[y==1].mean())
             bar.finish()
