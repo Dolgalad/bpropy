@@ -149,7 +149,7 @@ class Hetero_GCN_MRF_v4(torch.nn.Module):
             if hasattr(edge_data, "nmf_edges"):
                 fs = tmp_edge_data.factor_sizes.to(torch.long)        # [n_factors]
                 m_stride = (1 << fs)                                  # [n_factors], 2**arity
-                m_idx = torch.arange(fs.numel(), device=xp.device).r
+                m_idx = torch.arange(fs.numel(), device=xp.device).repeat_interleave(m_stride)
             # per-factor logsumexp of θ
             z_theta = torch_scatter.scatter_logsumexp(xp, m_idx)
             xp = xp - z_theta.repeat_interleave(edge_data.lbp_edges.m_stride)
