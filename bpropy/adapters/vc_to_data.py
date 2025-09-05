@@ -88,6 +88,7 @@ def problem_to_data(pb,
                *,
                with_lbp: bool = False,
                with_nmf: bool = False,
+               with_ss_labels: bool = False,
                y: Optional[torch.Tensor] = None,
                hetero: bool = False,
                feature_mode: str = None) -> Union[Data, HeteroData]:
@@ -133,7 +134,7 @@ def problem_to_data(pb,
                 data.nmf_edges = NMFEdges(fg)                                  # NMFEdges has batching/slicing utilities already :contentReference[oaicite:15]{index=15}
             if y is not None:
                 data.y = y
-                data.y_ss = torch.from_numpy(x2ss(y.to(torch.long).numpy(), fg)).to(torch.float32)
+                data.y_ss = torch.from_numpy(x2ss(y.astype(int), fg)).to(torch.float32)
         return data
 
     # HeteroData branch – mirrors your MIS hetero converter
@@ -174,7 +175,8 @@ def problem_to_data(pb,
         if with_nmf: data.nmf_edges = NMFEdges(fg)
         if y is not None:
             data.y = y
-            data.y_ss = torch.from_numpy(x2ss(y.to(torch.long).numpy(), fg)).to(torch.float32)
+            data.y_ss = torch.from_numpy(x2ss(y.astype(int), fg)).to(torch.float32)
+
     return data
 
 # ---- public: Data/HeteroData -> problem instance ----------------------------

@@ -8,18 +8,20 @@
 #SBATCH --time=20:00:00
 #SBATCH --output=slurm_outputs/train/scp/scp_n50_m50_k5_train_nmf_bce.out
 #SBATCH --error=slurm_outputs/train/scp/scp_n50_m50_k5_train_nmf_bce.err
-#SBATCH --exclusive
+##SBATCH --exclusive
+#SBATCH -A bnq@v100
 
 set -euo pipefail
+export PYTHONUNBUFFERED=TRUE
 
 # Parameters
-DATASET="/data1/schulz/datasets/scp/scp_n50_m50_k5"
-LOGDIR="/data1/schulz/logs/scp/nmf_bce"
+DATASET="$WORK/datasets/scp/scp_n50_m50_k5"
+LOGDIR="$WORK/logs/scp/scp_n50_m50_k5/nmf_bce"
 LR="1e-6"
 SOLVER="cbc"
 MODEL_CLASS="Hetero_GCN_MRF_v4"
-MODEL_ARGS='{"in_variable_dim": 10, "in_constraint_dim": 4, "factor_sizes": [1,2,3,4,5], "inference": "naive_mean_field"}'
-PROCESSED_DIR="/data1/schulz/datasets/scp/scp_n50_m50_k5/processed_nmf_bce"
+MODEL_ARGS='{"in_variable_dim": 10, "in_constraint_dim": 4, "factor_sizes": [1,2,3,4,5], "inference": "naive_mean_field", "normalize_theta": true}'
+PROCESSED_DIR="$WORK/datasets/scp/scp_n50_m50_k5/processed_nmf"
 EPOCHS=10000
 PATIENCE=100
 

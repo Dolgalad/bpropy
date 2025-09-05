@@ -8,18 +8,20 @@
 #SBATCH --time=20:00:00
 #SBATCH --output=slurm_outputs/train/mis/mis_n100_p0.15_train_lbp_bce.out
 #SBATCH --error=slurm_outputs/train/mis/mis_n100_p0.15_train_lbp_bce.err
-#SBATCH --exclusive
+##SBATCH --exclusive
+#SBATCH -A bnq@v100
 
 set -euo pipefail
+export PYTHONUNBUFFERED=TRUE
 
 # Parameters
-DATASET="/data1/schulz/datasets/mis/mis_n100_p0.15"
-LOGDIR="/data1/schulz/logs/mis/mis_n100_p0.15/lbp_bce"
+DATASET="$WORK/datasets/mis/mis_n100_p0.15"
+LOGDIR="$WORK/logs/mis/mis_n100_p0.15/lbp_bce"
 LR="1e-6"
 SOLVER="kamis"
 MODEL_CLASS="Hetero_GCN_MRF_v4"
 MODEL_ARGS='{"in_variable_dim": 10, "in_constraint_dim": 4, "factor_sizes": [1,2,3,4,5]}'
-PROCESSED_DIR="/data1/schulz/datasets/mis/mis_n100_p0.15/processed_lbp_bce"
+PROCESSED_DIR="$WORK/datasets/mis/mis_n100_p0.15/processed_lbp"
 EPOCHS=10000
 PATIENCE=100
 

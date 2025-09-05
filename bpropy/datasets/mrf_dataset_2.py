@@ -1,4 +1,5 @@
 # bpropy/data/mrf_dataset.py
+import inspect
 import os, json, hashlib, time
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Tuple, Union
@@ -236,19 +237,32 @@ class MRFDataset(Dataset):
             data = self._load_from_cache(stem, cache_key)  # existing:contentReference[oaicite:4]{index=4}
     
         pb = None
+        assignment = None
+
         if data is None or self.cfg.yield_mode in {"problem", "both"}:
             pb = _load_problem_by_type(stem, prob_type)    # existing:contentReference[oaicite:5]{index=5}
     
         if data is None:
-            data = self.preprocess(pb)                     # existing:contentReference[oaicite:6]{index=6}
+            # inspect the preprocess function, if it takes two arguments pass the labels
+            sig = inspect.signature(self.preprocess)
+            params = sig.parameters
+            required = [p for p in params.values() if p.default is inspect._empty and p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)]
+            if len(required)==1:
+                data = self.preprocess(pb)                     # existing:contentReference[oaicite:6]{index=6}
+            elif len(required)==2:
+                assignment = _load_assignment_from_stem(pb, stem, solver=self.cfg.assignment_solver)
+                data = self.preprocess(pb, assignment)                     # existing:contentReference[oaicite:6]{index=6}
+            else:
+                raise Exception(f"Preprocess function should admit 1 or 2 arguments. Found {len(required)}")
+
             self._save_to_cache(stem, cache_key, data, prob_type)
     
     
-        assignment = None
         if self.cfg.return_assignment:
             if pb is None:
                 pb = _load_problem_by_type(stem, prob_type)
-            assignment = _load_assignment_from_stem(pb, stem, solver=self.cfg.assignment_solver)
+            if assignment is None:
+                assignment = _load_assignment_from_stem(pb, stem, solver=self.cfg.assignment_solver)
         return pb, data, assignment
 
     def __getitem__(self, index: int):
