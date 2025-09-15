@@ -1,5 +1,6 @@
 # train_var_logits.py
 import os, time, json, argparse, numpy as np, torch
+from dataclasses import dataclass
 import sys
 sys.path.append("../..")
 import torch.nn.functional as F
@@ -56,13 +57,27 @@ def parse_args():
                    help="epochs without gap improvement before early stop")
     p.add_argument("--resume", default="", help="Path to checkpoint (.pt/.pth) to resume training")
     p.add_argument("--maximize", action="store_true", help="Optimization is a maximization problem")
+    p.add_argument("--steps_per_epoch", type=int, default=10000000)
+    p.add_argument("--steps_per_val", type=int, default=10000000)
+    p.add_argument("--loss", default="factor_ce", choices=["factor_ce", "focal_ce"])
 
 
     return p.parse_args()
 
-def save_checkpoint(path, epoch, model, optimizer, extra=None):
+@dataclass
+class EpochState:
+    epoch = None
+    start = None
+    best_gap = None
+    best_epoch = None
+    epochs_bad = None
+
+def save_checkpoint(path, epoch_state, model, optimizer, extra=None):
     ckpt = {
-        "epoch": int(epoch),
+        "epoch": int(epoch_state.epoch),
+        "best_gap": float(epoch_state.best_gap),
+        "best_epoch": int(epoch_state.best_epoch),
+        "epochs_bad": int(epoch_state.epochs_bad),
         "model_state_dict": model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
     }
@@ -75,8 +90,13 @@ def load_checkpoint(path, model, optimizer=None, map_location="cpu"):
     model.load_state_dict(ckpt["model_state_dict"])
     if optimizer is not None and "optimizer_state_dict" in ckpt:
         optimizer.load_state_dict(ckpt["optimizer_state_dict"])
-    start_epoch = int(ckpt.get("epoch", 0)) + 1
-    return start_epoch, ckpt
+    epoch_state = EpochState()
+    epoch_state.epoch = int(ckpt.get("epoch",0))+1
+    epoch_state.best_gap = float(ckpt.get("best_gap", "inf"))
+    epoch_state.best_epoch = int(ckpt.get("best_epoch", 1))
+    epoch_state.epochs_bad = int(ckpt.get("epochs_bad", 0))
+
+    return epoch_state, ckpt
 
 def bce_on_variables(logits, y):
     return F.binary_cross_entropy_with_logits(logits, y.float())
@@ -188,7 +208,7 @@ def main():
     torch.manual_seed(args.seed); np.random.seed(args.seed)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    run_name = f"{args.model_class}_{'hetero' if args.hetero else 'homo'}_{int(time.time())}"
+    run_name = f"{args.model_class}_{'hetero' if args.hetero else 'homo'}_{int(time.time())}_{int(args.seed)}"
     log_dir = os.path.join(args.log_dir, run_name)
     print("Log dir : ", log_dir)
     os.makedirs(os.path.join(log_dir, "checkpoints"), exist_ok=True)
@@ -259,18 +279,28 @@ def main():
     opt = torch.optim.Adam(model.parameters(), lr=args.lr * args.batch_size)
 
     start_epoch = 1
-    if args.resume:
-        start_epoch, _ = load_checkpoint(args.resume, model, opt, map_location=device)
-        print(f"[resume] Loaded checkpoint from {args.resume}, resuming at epoch {start_epoch}")
-
     best_gap = float("inf")
     best_epoch = 1
     epochs_bad = 0
-    for epoch in range(1, args.epochs + 1):
+
+    if args.resume:
+        epoch_state, _ = load_checkpoint(args.resume, model, opt, map_location=device)
+        start_epoch = epoch_state.epoch
+        best_gap = epoch_state.best_gap
+        best_epoch = epoch_state.best_epoch
+        epochs_bad = epoch_state.epochs_bad
+        # copy best checkpoint to new log directory
+        original_best_ckpt_path = os.path.join(os.path.dirname(args.resume), "best.pt")
+        target_best_ckpt_path = os.path.join(log_dir, "checkpoints", "best.pt")
+        os.system(f"cp {original_best_ckpt_path} {target_best_ckpt_path}")
+        print(f"[resume] Loaded checkpoint from {args.resume}, resuming at epoch {start_epoch}")
+
+    for epoch in range(start_epoch, args.epochs + 1):
         # ---- Train ----
         model.train()
         tr_losses = []
         bar = Bar(f"[Train] epoch {epoch}", max=len(loader_train))
+        c = 0
         for data, y in CUDAPrefetcher(loader_train, device):
             opt.zero_grad()
             logits = model(data)
@@ -279,6 +309,9 @@ def main():
             opt.step()
             tr_losses.append(loss.item())
             bar.next()
+            c+=1
+            if c>=args.steps_per_epoch:
+                break
         bar.finish()
         tr = float(np.mean(tr_losses)) if tr_losses else 0.0
 
@@ -288,6 +321,7 @@ def main():
         va_opts = []
         with torch.no_grad():
             bar = Bar(f"[Val]   epoch {epoch}", max=len(loader_val))
+            c=0
             for pb, data, y in CUDAPrefetcher(loader_val, device):
                 logits = model(data)
                 loss = bce_on_variables(logits, y.to(device, non_blocking=True))
@@ -302,6 +336,9 @@ def main():
 
                 va_opts.append(gap)
                 #print("logits 0: ", logits[y==0].mean(), " logits 1: ", logits[y==1].mean())
+                c+=1
+                if c>=args.steps_per_val:
+                    break
             bar.finish()
         va = float(np.mean(va_losses)) if va_losses else 0.0
         gap = float(np.mean(va_opts)) if va_opts else 0.0
@@ -309,28 +346,47 @@ def main():
         writer.add_scalars("loss", {"train": tr, "val": va, "gap": gap}, epoch)
         print(f"Epoch {epoch:03d} | train {tr:.4f} | val {va:.4f} | gap {gap:.4f}")
 
-        last_ckpt = os.path.join(log_dir, "checkpoints", "last.pt")
-        save_checkpoint(
-            last_ckpt, epoch, model, opt,
-            extra={"best_gap": best_gap, "best_epoch": best_epoch}
-        )
-
+        # epoch state
+        save_best = False
+        end_train = False
+        epoch_state = EpochState()
+        epoch_state.epoch = epoch
 
         if gap < best_gap:
             best_gap = gap
             best_epoch = epoch
-            best_ckpt_path = os.path.join(log_dir, "checkpoints", "best.pt")
-            save_checkpoint(
-                best_ckpt_path, epoch, model, opt,
-                extra={"best_gap": best_gap, "best_epoch": best_epoch}
-            )
             epochs_bad = 0
+            epoch_state.best_gap = gap
+            epoch_state.best_epoch = best_epoch
+            epoch_state.epochs_bad = 0
+            save_best = True
         else:
             epochs_bad += 1
+            epoch_state.best_gap = gap
+            epoch_state.best_epoch = best_epoch
+            epoch_state.epochs_bad = epochs_bad
+
             if epochs_bad >= args.patience:
+                end_train = True
+
+        last_ckpt = os.path.join(log_dir, "checkpoints", "last.pt")
+        save_checkpoint(
+            last_ckpt, epoch_state, model, opt,
+            extra={"best_gap": best_gap, "best_epoch": best_epoch}
+        )
+
+        if save_best:
+            best_ckpt_path = os.path.join(log_dir, "checkpoints", "best.pt")
+            save_checkpoint(
+                best_ckpt_path, epoch_state, model, opt,
+                extra={"best_gap": best_gap, "best_epoch": best_epoch}
+            )
+        else:
+            if end_train:
                 print(f"[early-stop] No gap improvement for {epochs_bad} epochs "
                       f"(patience={args.patience}). Stopping at epoch {epoch}.")
                 break
+
 
     writer.close()
     print("Done. Best opt:", best_gap)

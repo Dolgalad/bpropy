@@ -3,6 +3,7 @@ import time
 import sys
 import argparse
 import json
+import itertools
 sys.path.append("../..")
 import numpy as np
 import torch
@@ -18,6 +19,7 @@ from bpropy.datasets.collator import mrf_collate
 from bpropy.adapters.vc_to_data import problem_to_data
 from bpropy.mrf.lbp import loopy_belief_propagation
 from bpropy.mrf.mis_factor_graph import MISFactorGraph
+from bpropy.mrf.scp_factor_graph import SCPFactorGraph
 
 ArrayLike = Union[np.ndarray, torch.Tensor]
 
@@ -159,7 +161,88 @@ def make_ss_evidence_mask_dict(
         return out
     return mask_np
 
-def greedy_fast(pb, theta, data):
+def update_greedy_candidates(pb, u, candidates, x):
+    evidence = {u: 1}
+    if pb.__class__ == MIS:
+        # all neighboring nodes that are still in the candidate set are removed
+        neighbors = list(pb.g.neighbors(u))
+        for v in neighbors:
+            if v in candidates:
+                evidence[v] = 0
+        neighbors += [u]
+        new_candidates = np.delete(candidates, np.array([v in neighbors for v in candidates], dtype=bool))
+        return new_candidates, evidence
+    if pb.__class__ == SCP:
+        # all sets that do not cover any new elements can be removed
+        # get mask of all currently covered items
+        covered = np.zeros(pb.ne(), dtype=bool)
+        for idx in np.argwhere(x).flatten():
+            covered |= pb.adj_vec(pb.F[idx])
+        covered |= pb.adj_vec(pb.F[u])
+        candidate_gains = np.array([(np.logical_not(covered) & pb.adj_vec(pb.F[i])).sum() for i in candidates])
+        for v in candidates[candidate_gains==0]:
+            if v!=u:
+                evidence[v] = 0
+        new_candidates = np.delete(candidates, candidate_gains==0)
+        return new_candidates, evidence
+
+
+
+
+
+
+def generic_greedy(pb, theta, data, update_interval=1, bp_max_iter=10, bp_tol=1e-6, bp_damping=0.5):
+    # initialize empty solution
+    x = np.zeros(pb.nv(), dtype=int)
+    candidates = np.arange(pb.nv())
+    # keep track of the LBP result
+    if pb.__class__ == MIS:
+        fg = MISFactorGraph(pb)
+    if pb.__class__ == SCP:
+        fg = SCPFactorGraph(pb)
+
+    device = theta.device
+    idx0, idx1, SS_total = build_var_to_ss_indices(fg, data.lbp_edges)
+    v2f = torch.zeros(
+        int(data.lbp_edges.n_f2v_msg.sum().item()), device=device, dtype=theta.dtype
+    )
+    lbp_res = None
+    # keep track of new evidence
+    NEG_INF = torch.finfo(theta.dtype).min / 2
+    neg_inf_vals = torch.full_like(theta, NEG_INF)
+    mask = torch.full_like(theta, 1).to(torch.bool)
+    new_evidence = {}
+    # keep iterating until solution is complete
+    c = 0
+    while candidates.size != 0:
+        # update the scores based on current evidence
+        if c % update_interval == 0:
+            th = torch.where(mask, theta, neg_inf_vals)
+            lbp_res = loopy_belief_propagation(th, v2f, data.lbp_edges,
+                                           max_iter=bp_max_iter, tol=bp_tol, damping=bp_damping)
+            mu_evid = lbp_res.mu_v.reshape(-1,2)[:,1].cpu().numpy()
+            mu_evid[np.isnan(mu_evid)] = 0
+
+        # select next candidate
+        idx = np.argmax(mu_evid[candidates])
+        u = candidates[idx]
+
+        # update set of candidates and evidence based on the selected candidate
+        candidates, new_evidence = update_greedy_candidates(pb, u, candidates, x)
+        # update solution
+        for k,v in new_evidence.items():
+            x[k] = v
+
+        # update the evidence mask
+        tmp_mask = make_ss_evidence_mask_fast(new_evidence, idx0, idx1, SS_total, device)
+        mask &= tmp_mask
+
+        # increment iteration counter
+        c += 1
+    # return solution
+    return x
+
+def greedy_fast(pb, theta, data, update_int=1):
     """Greedy solver for MIS problems
     """
     fg = MISFactorGraph(pb)
@@ -177,19 +260,38 @@ def greedy_fast(pb, theta, data):
     NEG_INF = torch.finfo(theta.dtype).min / 2  # or simply a large negative like -1e9 for float32
     neg_inf_vals = torch.full_like(theta, NEG_INF)
     mask = torch.full_like(theta, 1).to(torch.bool)
+
+    # debug
+    h_min = []
+
+    # keep lbp result
+    lbp_res = None
     while len(queue)>0:
         new_evid = {}
         # compute scores with evidence
         #th = theta.clone()
         #theta = torch.where(mask, theta, torch.full_like(theta, NEG_INF))
-        th = torch.where(mask, theta, neg_inf_vals)
-        lbp_res = loopy_belief_propagation(th, v2f, data.lbp_edges,
-                                       max_iter=10, tol=1e-6, damping=0.5)
+        if c % update_int == 0:
+            th = torch.where(mask, theta, neg_inf_vals)
+            lbp_res = loopy_belief_propagation(th, v2f, data.lbp_edges,
+                                           max_iter=10, tol=1e-6, damping=0.5)
 
-        mu_evid = lbp_res.mu_v.reshape(-1,2)[:,1].numpy()
+        mu_evid = lbp_res.mu_v.reshape(-1,2)[:,1].cpu().numpy()
         mu_evid[np.isnan(mu_evid)] = 0
+        #print("MU       ", mu_evid[np.array(queue)])
 
-        u = queue[np.argmax(mu_evid[np.array(queue)])]
+        #mu = lbp_res.mu_v.reshape(-1,2).numpy()
+        #H = -mu[:,0] * np.log(mu[:,0]) - mu[:,1] * np.log(mu[:,1])
+        #H = H[np.array(queue)]
+        #print("H        ", H)
+        #print("H argmin ", np.argmin(H), np.min(H))
+        #print("         ", mu[np.array(queue),:][np.argmin(H)])
+        #h_min.append(queue[np.argmin(H)])
+        idx = np.argmax(mu_evid[np.array(queue)])
+        #print("idx      ", idx, np.max(mu_evid[np.array(queue)]))
+        #print(np.min(H), np.max(H))
+        #print(H[idx], mu_evid[idx])
+        u = queue[idx]
         sol[u] = 1
         new_evid[u] = 1
         queue.remove(u)
@@ -206,6 +308,7 @@ def greedy_fast(pb, theta, data):
         t_ = time.time() - t_
         t_evid_mask += t_
 
+    #print("Min entropy variable values : ", sol[np.array(h_min)])
     return sol
 
 def mis_idealized_canonical_parameters(fg, M=10.):
@@ -252,18 +355,30 @@ if __name__=="__main__":
     p.add_argument("dataset")
     p.add_argument("processed_dir", default="processed",
                    help="subdirectory under <root>/processed/ used for cached features")
-    p.add_argument("--limit", default=100)
+    p.add_argument("output", default="output",
+                   help="output file path")
+
+    p.add_argument("--solver", default="kamis")
+    p.add_argument("--limit", default=100000, type=int)
 
     args = p.parse_args()
 
-    device = "cpu"
+    print("Solving instance")
+    print("\tDataset            : ", args.dataset)
+    print("\tProcessed directory: ", args.processed_dir)
+    print("\tOutput file        : ", args.output)
+    print("\tSolver             : ", args.solver)
+    print("\tLimit              : ", args.limit)
+
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
     eval_cfg = MRFDatasetConfig(
         feature_mode="EB",
         yield_mode="both",
         refresh=False,
         return_assignment=True,
-        assignment_solver="kamis",
+        assignment_solver=args.solver,
     )
     ds_train_eval = make_ds(
         args.dataset, "test", eval_cfg,
@@ -276,40 +391,64 @@ if __name__=="__main__":
         collate_fn=mrf_collate,
     )
     
-    
+   
+    update_intervals = [1,2,4,8,16,32]
+    headers = ["id"] + list(itertools.chain(*[[f"gap(%, k={k})",f"t(s,k={k})"] for k in update_intervals]))
     gaps_0, gaps_1, gaps_2 = [], [], []
     time_0, time_1, time_2 = [], [], []
-    L,c = 502,1
+    L,c = args.limit,0
     with torch.no_grad():
         bar = Bar(f"[Test]          ", max=len(loader_eval))
-        for pb, data, y in CUDAPrefetcher(loader_eval, device):
-            t0 = time.time()
+        with open(args.output, "w") as f:
+            # write headers
+            print(",".join(headers), file=f)
+            for pb, data, y in CUDAPrefetcher(loader_eval, device):
+                t0 = time.time()
+                NEG_INF = torch.finfo(torch.float32).min / 2
+                if pb[0].__class__.__name__=="MIS":
+                    fg = MISFactorGraph(pb[0])
+                    theta = mis_idealized_canonical_parameters(fg, M=NEG_INF)
+                if pb[0].__class__.__name__=="SCP":
+                    fg = SCPFactorGraph(pb[0])
+                    theta = scp_idealized_canonical_parameters(fg, M=NEG_INF)
+                # create the sufficient statistics
+                t_pred = time.time() - t0
+                if pb[0].__class__ == MIS:
+                    up_gaps = []
+                    up_time = []
+                    for up_int in update_intervals:
+                        t_v3 = time.time()
+                        x_ = generic_greedy(pb[0], theta, data, update_interval=up_int)
+                        t_v3 = time.time() - t_v3 + t_pred
+                        gap_3 = 100 * (y.sum().item() - sum(x_)) / y.sum().item()
+                        up_gaps.append(gap_3)
+                        up_time.append(t_v3)
 
-            fg = MISFactorGraph(pb[0])
-            NEG_INF = torch.finfo(torch.float32).min / 2
-            theta = mis_idealized_canonical_parameters(fg, M=NEG_INF)
+                    gaps_2.append(up_gaps)
+                    time_2.append(up_time)
+                if pb[0].__class__ == SCP:
+                    up_gaps = []
+                    up_time = []
+                    for up_int in update_intervals:
+                        t_v3 = time.time()
+                        x_ = generic_greedy(pb[0], theta, data, update_interval=up_int)
+                        t_v3 = time.time() - t_v3 + t_pred
+                        gap_3 = 100 * (sum(x_) - y.sum().item()) / y.sum().item()
+                        up_gaps.append(gap_3)
+                        up_time.append(t_v3)
 
-            # create the sufficient statistics
-            t_pred = time.time() - t0
+                    gaps_2.append(up_gaps)
+                    time_2.append(up_time)
 
+                values = [c] + list(itertools.chain(*[[g,t] for g,t in zip(up_gaps,up_time)]))
+                values = [str(it) for it in values]
+                print(",".join(values), file=f)
 
-            if pb[0].__class__ == MIS:
-                t_v2 = time.time()
-                x = greedy_fast(pb[0], theta, data)
-                t_v2 = time.time() - t_v2 + t_pred
-                gap_2 = 100 * (y.sum().item() - sum(x)) / y.sum().item()
-                gaps_2.append(gap_2)
-                time_2.append(t_v2)
-                print(f"{c} GRD 2: gap = {np.mean(gaps_2):.3f} ({np.std(gaps_2):.3f}), time = {np.mean(time_2):.3f} ({np.std(time_2):.3f})")
-                print(t_v2, t_pred)
+                #print(f"{c} GRD 2: gap = {np.mean(gaps_2,axis=0).round(decimals=3)} ({np.std(gaps_2,axis=0).round(decimals=3)}), time = {np.mean(time_2, axis=0).round(decimals=3)} ({np.std(time_2, axis=0).round(decimals=3)})")
 
-            if pb[0].__class__ == SCP:
-                pass
-  
-            #bar.next()
-            c+= 1
-            if c >= L:
-                break
+                c+= 1
+                if c >= L:
+                    break
         bar.finish()
     
     print(f"V2 gaps: {np.mean(gaps_2):.3f}% ({np.std(gaps_2):.3f}%), time: {np.mean(time_2):.3f}s ({np.std(time_2):.3f}s)")

@@ -14,7 +14,7 @@ class NMFSolution:
         self.u = u
         self.n_iter = n_iter
 
-def naive_mean_field(theta, edges, max_iter=1000, tol=1e-6):
+def naive_mean_field(theta, edges, max_iter=1000, tol=1e-6, damping=0.0):
     dev = theta.device
     nV = int(edges.n_vars.sum().item())
     mu = torch.full((2*nV,), 0.5, dtype=torch.float, device=dev)  # neutral start
@@ -32,9 +32,11 @@ def naive_mean_field(theta, edges, max_iter=1000, tol=1e-6):
 
         # normalize per variable
         mup = torch.flatten(torch.nn.functional.softmax(y1.reshape(nV, 2), dim=1))
+        mu_next = (1.-damping) * mup + damping * mu
 
-        delta = (mup - mu).abs().max()
-        mu = mup
+
+        delta = (mu_next - mu).abs().max()
+        mu = mu_next
         if delta < tol:
             return NMFSolution(mu, delta, it + 1)
 

@@ -54,7 +54,7 @@ class GCN_MRF_v4(torch.nn.Module):
         if self.inference == "loopy_belief_propagation":
             return loopy_belief_propagation(x, torch.zeros_like(x), edge_data.lbp_edges, max_iter=self.bp_max_iter, tol=self.bp_tol, damping=self.bp_damping), x
         if self.inference == "naive_mean_field":
-            return naive_mean_field(x, edge_data.nmf_edges, max_iter=self.bp_max_iter, tol=self.bp_tol), x
+            return naive_mean_field(x, edge_data.nmf_edges, max_iter=self.bp_max_iter, tol=self.bp_tol, damping=self.bp_damping), x
 
 class Hetero_GCN_MRF_v4(torch.nn.Module):
     def __init__(self, in_variable_dim=10, in_constraint_dim=4, n_layers=4, hidden_dim=64, dropout_p=0.25, normalize=False, bp_max_iter=10, bp_tol=1e-6, bp_damping=0.5, factor_sizes=[1,2], jk="lstm", norm="LayerNorm", act="elu", inference="loopy_belief_propagation", mapping_aggr="mean", normalize_theta=False, gnn_f="GAT", add_self_loops=False):
@@ -158,4 +158,4 @@ class Hetero_GCN_MRF_v4(torch.nn.Module):
             #v2f = torch.zeros_like(xp)
             return loopy_belief_propagation(xp, v2f, edge_data.lbp_edges, max_iter=self.bp_max_iter, tol=self.bp_tol, damping=self.bp_damping), xp
         if self.inference == "naive_mean_field":
-            return naive_mean_field(xp, edge_data.nmf_edges, max_iter=self.bp_max_iter, tol=self.bp_tol), xp
+            return naive_mean_field(xp, edge_data.nmf_edges, max_iter=self.bp_max_iter, tol=self.bp_tol, damping=self.bp_damping), xp
