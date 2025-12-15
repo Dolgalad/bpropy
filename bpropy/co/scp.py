@@ -62,6 +62,7 @@ class SCP(LPProblem, SerializableLPMixin):
         return -self.w                                      # minimize -> maximize
 
     def solve(self, disp=False, solver="cbc", relax_integrality=False):
+        #print("in SCP.solve", self.w)
         if solver == "scipy":
             integrality = np.zeros(self.nv()) if relax_integrality else np.ones(self.nv())
             return SCPSolution.from_scipy_milp(milp(

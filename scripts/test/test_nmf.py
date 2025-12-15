@@ -1,25 +1,53 @@
+import os
 import time
 import sys
+import json
 sys.path.append("../..")
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from progress.bar import Bar
 from typing import Dict, Optional, Tuple, Union, Mapping
+import argparse
 
+from bpropy.co.mis import MIS
+from bpropy.co.scp import SCP
 from bpropy.models.mrf_models import Hetero_GCN_MRF_v4
 from bpropy.datasets.mrf_dataset_2 import MRFDatasetConfig, MRFDataset
 from bpropy.datasets.prefetcher import CUDAPrefetcher
 from bpropy.datasets.collator import mrf_collate
 from bpropy.adapters.vc_to_data import problem_to_data
 from bpropy.mrf.naive_mean_field import naive_mean_field
+from bpropy.models.mrf_models import Hetero_GCN_MRF_v4
+from bpropy.datasets.collator import mrf_collate
+from bpropy.mrf.mis_factor_graph import MISFactorGraph
 from bpropy.mrf.scp_factor_graph import SCPFactorGraph
+from bpropy.mrf.lbp_edges import LBPEdges
 
 ArrayLike = Union[np.ndarray, torch.Tensor]
 
+MODEL_REGISTRY = {
+    "Hetero_GCN_MRF_v4": Hetero_GCN_MRF_v4,
+}
+
+def time_func(func, *args, **kwargs):
+    t0 = time.time()
+    res = func(*args, **kwargs)
+    t0 = time.time() - t0
+    return t0, res
 def load_checkpoint(path, model, map_location="cpu"):
     ckpt = torch.load(path, map_location=map_location)
     model.load_state_dict(ckpt["model_state_dict"])
+def load_model_description(path):
+    with open(path,"r") as f:
+        return json.load(f)
+def load_model_from_log_dir(path, map_location="cpu"):
+    # load the description
+    model_desc = load_model_description(os.path.join(path,"hparams.json"))
+    # initialize model
+    model = MODEL_REGISTRY[model_desc["model_class"]](**model_desc["model_args"]).to(map_location)
+    load_checkpoint(os.path.join(path, "checkpoints", "best.pt"), model, map_location=map_location)
+    return model
 
 def make_ds(root, split, cfg, hetero, feature_mode, with_lbp, with_nmf, processed_dir):
     return MRFDataset(
@@ -31,429 +59,258 @@ def make_ds(root, split, cfg, hetero, feature_mode, with_lbp, with_nmf, processe
         processed_dir=processed_dir
     )
 
-def make_ss_evidence_mask_dict(
-    fg,
-    evidence: Mapping[int, Optional[int]],
-    *,
-    as_torch: bool = True,
-    device: Optional[torch.device] = None,
-    dtype: torch.dtype = torch.bool,
-    strict: bool = False,
-) -> Union[np.ndarray, torch.Tensor]:
+def build_var_to_ss_indices(fg, edges_lbp):
     """
-    Build a mask over the over-complete sufficient-statistics vector that is True
-    iff a factor configuration is consistent with the given (possibly partial) evidence.
-
-    Args:
-      fg: FactorGraph
-      evidence: dict {var_id -> 0/1 or None}; missing keys are 'unknown'
-      as_torch: return a torch.Tensor if True, else a np.ndarray
-      device, dtype: only used when as_torch=True
-      strict: if True, raise on bad var ids or values not in {0,1,None}
-
     Returns:
-      mask of shape (sum_F 2**|F|,), in the same factor order and bit-endian
-      convention as fg.factor_sufficient_statistics / your SS layout.
+      idx0: List[torch.LongTensor], len = n_vars; indices where that var's bit == 0
+      idx1: List[torch.LongTensor], len = n_vars; indices where that var's bit == 1
+      SS_total: total length of SS vector
+    Assumes your SS order per factor is little-endian (k-th var -> bit k).
     """
-    # Normalize evidence: keep only observed {0,1}
-    obs = {}
-    for k, v in evidence.items():
-        if v is None:
+
+    edges = LBPEdges(fg).to(device)
+    SS_total = int(edges.m_stride.sum().item())
+    nF = edges.m_stride.numel()
+    m_stride = edges.m_stride.cpu().numpy()   # lengths = 2**arity
+    starts = np.concatenate([[0], np.cumsum(m_stride[:-1])])
+
+    n_vars = edges.n_vars.sum().to(torch.long).item()
+    idx0 = [[] for _ in range(n_vars)]
+    idx1 = [[] for _ in range(n_vars)]
+
+    # Cache bit tables per arity to avoid recomputation
+    bit_cache = {}  # arity -> np.ndarray [2**arity, arity] of 0/1
+    def bits_for_arity(a):
+        if a not in bit_cache:
+            idx = np.arange(1 << a, dtype=np.uint32)[:, None]
+            ks  = np.arange(a, dtype=np.uint32)[None, :]
+            bit_cache[a] = ((idx >> ks) & 1).astype(np.uint8)  # [2^a, a]
+        return bit_cache[a]
+
+    # Loop once over factors (preprocessing only; runtime masking will be O(|evidence|))
+    factors = list(fg.iter_factors())
+    for F_id, (s, w) in enumerate(zip(starts, m_stride)):
+        F = factors[F_id]
+        vars_F = fg.factor_variables(F)  # list[int], stable var order
+        a = len(vars_F)
+        if a == 0:
             continue
-        if v in (0, 1):
-            obs[int(k)] = int(v)
-        elif strict:
-            raise ValueError(f"Evidence for var {k} must be 0/1/None, got {v!r}")
+        bits = bits_for_arity(a)           # [2^a, a]
+        # global SS positions for this factor
+        pos = np.arange(s, s + w, dtype=np.int64)  # [2^a]
 
-    blocks = []
-    for F in fg.iter_factors():
-        vars_F = fg.factor_variables(F)                   # sorted list of variable ids
-        nF = len(vars_F)
-        if nF == 0:
-            # Degenerate factor: one configuration, always allowed
-            blocks.append(np.array([True], dtype=bool))
+        # Append positions to per-variable lists depending on bit value
+        for j, v in enumerate(vars_F):
+            b = bits[:, j]                 # [2^a], 0/1 at this var's bit
+            idx0[v].extend(pos[b == 0])
+            idx1[v].extend(pos[b == 1])
+
+    # Turn into tensors once, on CPU (move to GPU when you build masks)
+    idx0 = [torch.as_tensor(x, dtype=torch.long) if len(x) else torch.empty(0, dtype=torch.long) for x in idx0]
+    idx1 = [torch.as_tensor(x, dtype=torch.long) if len(x) else torch.empty(0, dtype=torch.long) for x in idx1]
+    return idx0, idx1, SS_total
+
+def make_ss_evidence_mask_fast(evidence, idx0, idx1, SS_total, device, dtype=torch.bool):
+    mask = torch.ones(SS_total, dtype=dtype, device=device)
+    # Zero-out inconsistent positions
+    for v, val in evidence.items():
+        if val is None: 
             continue
+        bad = idx0[v] if val == 1 else idx1[v]   # positions incompatible with v=val
+        if bad.numel():
+            mask[bad.to(device)] = False
+    return mask
 
-        # Precompute all assignments for this factor as little-endian bits
-        idx = np.arange(1 << nF, dtype=np.uint32)[:, None]     # [2^nF, 1]
-        ks  = np.arange(nF, dtype=np.uint32)[None, :]          # [1, nF]
-        bits = ((idx >> ks) & 1).astype(np.int64)              # [2^nF, nF], 0/1
 
-        # Start with all allowed; constrain with observed vars in this factor
-        allowed = np.ones((1 << nF), dtype=bool)
-        for j, vj in enumerate(vars_F):
-            if vj in obs:
-                allowed &= (bits[:, j] == obs[vj])
+def update_greedy_candidates(pb, u, candidates, x):
+    evidence = {u: 1}
+    if pb.__class__ == MIS:
+        # all neighboring nodes that are still in the candidate set are removed
+        neighbors = list(pb.g.neighbors(u))
+        for v in neighbors:
+            if v in candidates:
+                evidence[v] = 0
+        neighbors += [u]
+        new_candidates = np.delete(candidates, np.array([v in neighbors for v in candidates], dtype=bool))
+        return new_candidates, evidence
+    if pb.__class__ == SCP:
+        # all sets that do not cover any new elements can be removed
+        # get mask of all currently covered items
+        covered = np.zeros(pb.ne(), dtype=bool)
+        for idx in np.argwhere(x).flatten():
+            covered |= pb.adj_vec(pb.F[idx])
+        covered |= pb.adj_vec(pb.F[u])
+        candidate_gains = np.array([(np.logical_not(covered) & pb.adj_vec(pb.F[i])).sum() for i in candidates])
+        for v in candidates[candidate_gains==0]:
+            if v!=u:
+                evidence[v] = 0
+        new_candidates = np.delete(candidates, candidate_gains==0)
+        return new_candidates, evidence
 
-        blocks.append(allowed)
+def generic_score_greedy(pb, scores):
+    # initialize empty solution
+    x = np.zeros(pb.nv(), dtype=int)
+    candidates = np.arange(pb.nv())
+    # keep iterating until solution is complete
+    c = 0
+    while candidates.size != 0:
+        # select next candidate
+        idx = np.argmax(scores[candidates])
+        u = candidates[idx]
 
-    mask_np = np.concatenate(blocks, axis=0)  # length == fg.number_sufficient_statistics()
-    if as_torch:
-        out = torch.from_numpy(mask_np)
-        if device is not None:
-            out = out.to(device=device, dtype=dtype)
-        else:
-            out = out.to(dtype=dtype)
-        return out
-    return mask_np
+        # update set of candidates and evidence based on the selected candidate
+        candidates, new_evidence = update_greedy_candidates(pb, u, candidates, x)
+        # update solution
+        for k,v in new_evidence.items():
+            x[k] = v
 
-@torch.no_grad()
-def bp_guided_sampler(
-    theta: torch.Tensor,
-    edges,                              # LBPEdges (already built for this problem)
-    pb, 
-    evidence: Optional[Dict[int, int]] = None,  # {var_index: 0|1}
-    steps: Optional[int] = None,
-    max_iter: int = 10,
-    tol: float = 1e-6,
-    damping: float = 0.5,
-    clamp_U: float = 12.0,              # strength for soft clamping
-    state: Optional[dict] = None,       # warm-start: {"v2f": tensor}
-) -> Tuple[torch.Tensor, float, dict]:
-    """
-    BP-guided sequential sampler (decimation).
-    Returns:
-      x          : sampled assignment over variables (0/1) as int64 tensor (shape [nv])
-      log_q      : log proposal prob under product of marginals (Bethe-style)
-      new_state  : {"v2f": tensor} for warm-starting the next call
+        # increment iteration counter
+        c += 1
+    # return solution
+    return x
 
-    Notes:
-      • We apply evidence by *shifting a copy* of theta (no in-place mutation).
-      • We reuse and update v2f messages across steps for speed.
-    """
-    fg = SCPFactorGraph(pb)
+def generic_greedy(pb, theta, data, update_interval=1, bp_max_iter=10, bp_tol=1e-6, bp_damping=0.5):
+    # initialize empty solution
+    x = np.zeros(pb.nv(), dtype=int)
+    candidates = np.arange(pb.nv())
+    # keep track of the LBP result
+    if pb.__class__ == MIS:
+        fg = MISFactorGraph(pb)
+    if pb.__class__ == SCP:
+        fg = SCPFactorGraph(pb)
+
     device = theta.device
-    nv = int(edges.n_vars.sum().item())
-    x  = torch.full((nv,), -1, dtype=torch.int64, device=device)
-    log_q = 0.0
+    idx0, idx1, SS_total = build_var_to_ss_indices(fg, data.nmf_edges)
+    nmf_res = None
+    # keep track of new evidence
+    NEG_INF = torch.finfo(theta.dtype).min / 2
+    neg_inf_vals = torch.full_like(theta, NEG_INF)
+    mask = torch.full_like(theta, 1).to(torch.bool)
+    new_evidence = {}
+    # keep iterating until solution is complete
+    c = 0
+    while candidates.size != 0:
+        # update the scores based on current evidence
+        if c % update_interval == 0:
+            th = torch.where(mask, theta, neg_inf_vals)
+            nmf_res = naive_mean_field(th, data.nmf_edges,
+                                           max_iter=bp_max_iter, tol=bp_tol, damping=bp_damping)
+            mu_evid = nmf_res.mu.reshape(-1,2)[:,1].cpu().numpy()
+            mu_evid[np.isnan(mu_evid)] = 0
 
+        # select next candidate
+        idx = np.argmax(mu_evid[candidates])
+        u = candidates[idx]
 
-    # current (soft-)clamped parameters
-    base_theta = theta
-    cur_evid = dict(evidence or {})
+        # update set of candidates and evidence based on the selected candidate
+        candidates, new_evidence = update_greedy_candidates(pb, u, candidates, x)
+        # update solution
+        for k,v in new_evidence.items():
+            x[k] = v
 
-    # helper: apply evidence to a *fresh* theta view
-    def apply_evidence(th: torch.Tensor) -> torch.Tensor:
-        if not cur_evid:
-            return th
-        th = th.clone()
-        mask = make_ss_evidence_mask_dict(fg, cur_evid)
-        NEG_INF = torch.finfo(th.dtype).min / 2  # or simply a large negative like -1e9 for float32
-        th = torch.where(mask, th, torch.full_like(th, NEG_INF))
-        #for i, yi in cur_evid.items():
-        #    # Unary slots for var i live at [2*i : 2*i+2]
-        #    # push probability mass to yi with a large positive shift and away from 1-yi
-        #    if yi == 1:
-        #        th[2*i + 0] /= clamp_U
-        #        th[2*i + 1] *= clamp_U
-        #    else:
-        #        th[2*i + 0] *= clamp_U
-        #        th[2*i + 1] /= clamp_U
-        return th
+        # update the evidence mask
+        tmp_mask = make_ss_evidence_mask_fast(new_evidence, idx0, idx1, SS_total, device)
+        mask &= tmp_mask
 
-    # how many sequential picks?
-    T = steps if steps is not None else nv - (len(cur_evid) if cur_evid else 0)
-
-    for _ in range(T):
-        # 1) Run a few BP iters with current (soft-)evidence; warm-start with v2f
-        theta_e = apply_evidence(base_theta)
-        sol = naive_mean_field(theta_e, edges,
-                                       max_iter=max_iter, tol=tol)
-        # sol.mu_v: size 2*nv, probs per state (normalized per variable)
-        vm = sol.mu.view(nv, 2)  # [nv, {0,1}]  (your code already normalizes these) :contentReference[oaicite:1]{index=1}
-
-        # 2) Exclude already fixed variables from sampling
-        if cur_evid:
-            idx = torch.tensor(list(cur_evid.keys()), device=device, dtype=torch.long)
-            # lock their distributions to deltas (so they don't affect arg sampling)
-            vm[idx, :] = 0.0
-            vm[idx, torch.tensor([cur_evid[i] for i in cur_evid], device=device)] = 1.0
-
-        # 3) Choose next variable to clamp (simple policy: most uncertain first → reduces contradictions)
-        #    You can switch to "most confident first" by sorting on margin |p1 - 0.5|.
-        undecided = (vm.sum(dim=1) > 0) & torch.tensor(
-            [i not in (cur_evid or {}) for i in range(nv)], device=device, dtype=torch.bool
-        )
-        if not torch.any(undecided):
-            break
-        i_candidates = torch.nonzero(undecided, as_tuple=False).flatten()
-        # pick the one with max entropy (closest to 0.5) to stabilize later steps
-        p1 = vm[i_candidates, 1]
-        ent = -(p1.clamp(1e-9, 1-1e-9).log()*p1 + (1-p1).clamp(1e-9,1-1e-9).log()*(1-p1))
-        i_star = i_candidates[torch.argmax(ent)]
-
-        # 4) Sample state from its unary marginal and accumulate proposal log-prob
-        p = vm[i_star, :]
-        yi = torch.distributions.Categorical(probs=p).sample().item()
-        log_q += float(torch.log(p[yi] + 1e-12))
-
-        # 5) Clamp and continue (update evidence & warm-start)
-        cur_evid[int(i_star.item())] = int(yi)
-
-        # (optional) early exit if everything is fixed
-        if len(cur_evid) >= nv:
-            break
-
-    # finalize x from evidence; if some variables remain unset (possible with steps<T), fill by argmax
-    for i in range(nv):
-        if i in cur_evid:
-            x[i] = cur_evid[i]
-        else:
-            # one last quick BP pass (cheap) to decide remaining vars by MAP of unary marginal
-            theta_e = apply_evidence(base_theta)
-            sol = naive_mean_field(theta_e, edges,
-                                           max_iter=max_iter, tol=tol)
-            vm = sol.mu.view(nv, 2)
-            x[i] = int(torch.argmax(vm[i]).item())
-            log_q += float(torch.log(vm[i, x[i]] + 1e-12))
-
-    new_state = {}
-    return x.detach().cpu(), float(log_q), new_state, vm
-
-
-def scp_repair(
-    pb,
-    x0: Optional[np.ndarray] = None,    # seed selection over sets, shape [pb.nv()]
-    scores: Optional[np.ndarray] = None # guidance per set; higher = more desirable
-) -> np.ndarray:
-    """
-    Feasibility repair for Set Cover + pruning, tailored to your SCP class.
-    - Phase A (cover): greedily add sets until all items are covered.
-      Priority ~ (effective_price / new_gain), where effective_price is cost
-      or cost / score when scores are provided.
-    - Phase B (prune): remove redundant picked sets while keeping coverage.
-
-    Args:
-      pb: SCP instance (with fields A, F, w and methods ne(), nv()).
-      x0: optional 0/1 seed vector over sets (len = pb.nv()).
-      scores: optional guidance (e.g., BP p(x=1) or model scores).
-
-    Returns:
-      y: feasible 0/1 vector over sets, shape [pb.nv()].
-    """
-    m = pb.nv()               # number of sets
-    n = pb.ne()               # number of items
-    cost = np.asarray(pb.w, dtype=float)  # per-set cost (already in SCP)  :contentReference[oaicite:1]{index=1}
-
-    # Normalize/validate inputs
-    if x0 is None:
-        y = np.zeros(m, dtype=np.uint8)
-    else:
-        x0 = np.asarray(x0).reshape(-1)
-        assert x0.size == m, f"x0 length {x0.size} != nv {m}"
-        y = (x0 > 0).astype(np.uint8)
-
-    if scores is not None:
-        scores = np.asarray(scores, dtype=float).reshape(-1)
-        assert scores.size == m, f"scores length {scores.size} != nv {m}"
-
-    # Precompute coverage lists (items covered by each set) from pb.F  :contentReference[oaicite:2]{index=2}
-    # pb.F[j] is a sorted list of item indices in pb.A covered by set j.
-    sets_cover = [np.asarray(f, dtype=np.int32) for f in pb.F]
-
-    # Build item -> sets map once to accelerate pruning & (optionally) cover phase
-    item_sets = [[] for _ in range(n)]
-    for j, cov in enumerate(sets_cover):
-        for a in cov:
-            item_sets[a].append(j)
-    item_sets = [np.asarray(js, dtype=np.int32) for js in item_sets]
-
-    # --- Coverage bookkeeping (from warm start) ---
-    covered_cnt = np.zeros(n, dtype=np.int32)
-    for j in np.flatnonzero(y):
-        if sets_cover[j].size:
-            covered_cnt[sets_cover[j]] += 1
-    uncovered = np.flatnonzero(covered_cnt == 0)
-
-    # Helper: “price” possibly biased by scores
-    eps = 1e-12
-    if scores is None:
-        eff_price = cost
-    else:
-        # Prefer higher score at similar cost
-        eff_price = cost / (scores + eps)
-
-    # ----------------- Phase A: cover -----------------
-    # Greedily add sets until all items are covered.
-    # Gain(j) = number of still-uncovered items that set j would newly cover.
-    # Pick argmin (eff_price / gain) among gain > 0.
-    while uncovered.size > 0:
-        # Mark uncovered items to compute gains quickly
-        is_uncovered = np.zeros(n, dtype=np.uint8)
-        is_uncovered[uncovered] = 1
-
-        gains = np.zeros(m, dtype=np.int32)
-        # Only compute gains for not-yet-picked sets
-        for j in np.flatnonzero(1 - y):
-            cov = sets_cover[j]
-            if cov.size:
-                gains[j] = int(is_uncovered[cov].sum())
-
-        mask = gains > 0
-        if not np.any(mask):
-            # In typical SCP instances this shouldn't happen; bail with current y
-            # (caller can decide what to do next)
-            break
-
-        cand = np.where(mask)[0]
-        # ratio = price / gain
-        ratio = eff_price[cand] / gains[cand].astype(np.float64)
-        j_star = cand[int(np.argmin(ratio))]
-
-        # Select j_star and update coverage
-        y[j_star] = 1
-        if sets_cover[j_star].size:
-            covered_cnt[sets_cover[j_star]] += 1
-        uncovered = np.flatnonzero(covered_cnt == 0)
-
-    # ----------------- Phase B: prune -----------------
-    # Remove any picked set whose covered items remain covered >= 1 without it.
-    # Order removals to drop “least valuable” first:
-    #   - If scores given: low (scores/cost) first.
-    #   - Else: high cost first (drop expensive redundancies).
-    picked = np.flatnonzero(y)
-    if picked.size:
-        if scores is None:
-            order = picked[np.argsort(-cost[picked])]  # expensive first
-        else:
-            value = scores[picked] / (cost[picked] + eps)
-            order = picked[np.argsort(value)]          # lower value first
-
-        for j in order:
-            cov = sets_cover[j]
-            if cov.size == 0:
-                y[j] = 0
-                continue
-            # If every item in cov would stay covered after removing j, drop it
-            if np.all(covered_cnt[cov] - 1 >= 1):
-                y[j] = 0
-                covered_cnt[cov] -= 1
-
-    return y
-
-def greedy(pb, theta, data):
-    fg = SCPFactorGraph(pb)
-    covered = np.zeros(pb.ne(), dtype=bool)
-    x = np.zeros(pb.nv(), dtype=bool)
-
-    while not np.all(covered):
-        gains = {i:(np.logical_not(covered) & pb.adj_vec(pb.F[i])).sum() for i in range(pb.nv())}
-        cur_evid_1 = {i:1 for i in range(pb.nv()) if x[i]==1}
-        cur_evid_0 = {i:0 for i in range(pb.nv()) if gains[i]==0}
-        cur_evid = {**cur_evid_0, **cur_evid_1}
-
-        th = theta.clone()
-        mask = make_ss_evidence_mask_dict(fg, cur_evid)
-        NEG_INF = -1e9 #torch.finfo(th.dtype).min / 2  # or simply a large negative like -1e9 for float32
-        th = torch.where(mask, th, torch.full_like(th, NEG_INF))
-        #print(th, th.min().item(), th.max().item())
-        nmf_res = naive_mean_field(th, data.nmf_edges, max_iter=10, tol=1e-6)
-        mu_evid = nmf_res.mu.reshape(-1,2)[:,1].numpy()
-        #print(mu_evid)
-        mu_evid[np.isnan(mu_evid)] = 0
-
-        cand = [i for i in range(pb.nv()) if x[i] == 0]
-        def ratio(i):
-            gain = (np.logical_not(covered) & pb.adj_vec(pb.F[i])).sum()
-            #return np.inf if gain == 0 else (-scores[i] / gain)
-            return np.inf if gain == 0 else (1 - pb.sigmoid(mu_evid[i]))
-
-        idx = min(cand, key=ratio)
-        #print([gains[i] for i in range(pb.nv())])
-        #print("Candidate ", idx, " score = ", mu_evid[idx], " gains = ", gains[idx])
-
-        x[idx] = 1
-        covered |= pb.adj_vec(pb.F[idx])
+        # increment iteration counter
+        c += 1
+    # return solution
     return x
 
 
+if __name__=="__main__":
+    p = argparse.ArgumentParser()
+    p.add_argument("dataset", help="<Required> Dataset root path")
+    p.add_argument("output", default="output",
+                   help="<Required> Output file path")
+    p.add_argument("log_dirs", nargs="+", help="<Required> List of model log directories")
+    p.add_argument("--solver", default="kamis")
+    p.add_argument("--limit", default=100000, type=int)
+    p.add_argument("--processed_dir", default="processed",
+                   help="<Optional> subdirectory under <root>/processed/ used for cached features")
 
-model_kwargs = {"in_variable_dim": 10, 
-                "in_constraint_dim": 4, 
-                "factor_sizes": [1,2,3,4,5],
-                "inference": "naive_mean_field"}
+    args = p.parse_args()
 
-checkpoint_path = "../../models/scp/scp_n50_m50_k5/nmf_bce/Hetero_GCN_MRF_v4_hetero_1756792225/checkpoints/best.pt"
-dataset_root = "../../datasets/problems/scp/scp_n50_m50_k5"
-processed_dir = "../../datasets/problems/scp/scp_n50_m50_k5/processed_nmf"
-device = "cpu"
-
-Model = Hetero_GCN_MRF_v4
-model = Model(**model_kwargs)
-
-load_checkpoint(checkpoint_path, model)
-
-eval_cfg = MRFDatasetConfig(
-    feature_mode="EB",
-    yield_mode="both",
-    refresh=False,
-    return_assignment=True,
-    assignment_solver="cbc",
-)
-ds_train_eval = make_ds(
-    dataset_root, "test", eval_cfg,
-    True, "EB", False, True,
-    processed_dir
-)
-loader_eval = DataLoader(
-    ds_train_eval, batch_size=1, shuffle=False,
-    num_workers=2, pin_memory=True, persistent_workers=True, prefetch_factor=2,
-    collate_fn=mrf_collate,
-)
-
-model.eval()
-
-gaps_0, gaps_1, gaps_2 = [], [], []
-time_0, time_1, time_2 = [], [], []
-model.eval()
-L,c = 502,1
-with torch.no_grad():
-    bar = Bar(f"[Test]          ", max=len(loader_eval))
-    gaps_1, gaps_2 = [], []
-    for pb, data, y in CUDAPrefetcher(loader_eval, device):
-        t0 = time.time()
-        nmf_res, theta= model(data)
-        t_pred = time.time() - t0
-
-        x = greedy(pb[0], theta, data)
-        t_v0 = time.time() - t0
-        gap_0 = 100 * (sum(x) - y.sum().item()) / y.sum().item()
-        gaps_0.append(gap_0)
-        time_0.append(t_v0)
-
-        t_v1 = time.time()
-        samp,_,_,mu_v= bp_guided_sampler(theta, data.nmf_edges, pb[0])
-        p1 = mu_v.view(pb[0].nv(), 2)[:, 1].detach().cpu().numpy()
-        t_guide = time.time() - t_v1
-        sol_repaired = scp_repair(pb[0], samp.numpy(), p1)
-        t_v1 = time.time() - t_v1 + t_pred
-        #print(pb[0].check_solution(sol_repaired))
-
-        gap_1 = 100 * (sol_repaired.sum().item() - y.sum().item()) / y.sum().item()
-        gaps_1.append(gap_1)
-        time_1.append(t_v1)
-
-        #print()
-        #print("GRD Gap 1 = ", gap, np.mean(gaps_1))
-
-        t_v2 = time.time()
-        sol_grd = pb[0].greedy(scores=p1)
-        t_v2 = time.time() - t_v2 + t_guide
-        gap_2 = 100 * (sol_grd.sum().item() - y.sum().item()) / y.sum().item()
-        gaps_2.append(gap_2)
-        time_2.append(t_v2)
-        #print("GRD Gap 2 = ", gap, np.mean(gaps_2))
-
-        print(f"{c} - V0: {gap_0:.3f}% ({np.mean(gaps_0):.3f}%, {np.mean(time_0):.3f}s), V1: {gap_1:.3f}% ({np.mean(gaps_1):.3f}%, {np.mean(time_1):.3f}s), V2: {gap_2:.3f}% ({np.mean(gaps_2):.3f}%, {np.mean(time_2):.3f}s)")
-
-        #bar.next()
-        c+= 1
-        if c >= L:
-            break
-    bar.finish()
-
-print(f"V0 gaps: {np.mean(gaps_0):.3f}% ({np.std(gaps_0):.3f}%), time: {np.mean(time_0):.3f}s ({np.std(time_0):.3f}s)")
-print(f"V1 gaps: {np.mean(gaps_1):.3f}% ({np.std(gaps_1):.3f}%), time: {np.mean(time_1):.3f}s ({np.std(time_1):.3f}s)")
-print(f"V1 gaps: {np.mean(gaps_2):.3f}% ({np.std(gaps_2):.3f}%), time: {np.mean(time_2):.3f}s ({np.std(time_2):.3f}s)")
+    print("Solving instance")
+    print("\tDataset            : ", args.dataset)
+    print("\tProcessed directory: ", args.processed_dir)
+    print("\tOutput file        : ", args.output)
+    print("\tSolver             : ", args.solver)
+    print("\tLimit              : ", args.limit)
+    print("\tModels")
+    print("\n".join(["\t\t"+p for p in args.log_dirs]))
 
 
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    eval_cfg = MRFDatasetConfig(
+        feature_mode="EB",
+        yield_mode="problem",
+        refresh=False,
+        return_assignment=True,
+        assignment_solver=args.solver,
+    )
+    ds_train_eval = make_ds(
+        args.dataset, "test", eval_cfg,
+        False, "EB", False, False,
+        args.processed_dir
+    )
+    loader_eval = DataLoader(
+        ds_train_eval, batch_size=1, shuffle=False,
+        num_workers=2, pin_memory=True, persistent_workers=True, prefetch_factor=2,
+        collate_fn=mrf_collate,
+    )
+
+    # data preprocessing function
+    preprocess_f = lambda pb: mrf_collate([problem_to_data(
+            pb, hetero=True, feature_mode="EB",
+            with_nmf=True, with_lbp=False
+        )]).to(device)
+    
+    # load models
+    models = [load_model_from_log_dir(p, map_location=device) for p in args.log_dirs]
+    for m in models:
+        m.eval()
+
+    headers = ["id","solver_val","t_data(s)","model_id","t_pred(s)","t_grd(s)","t_total_grd(s)","gap_grd(%)", "t_gd(s)", "t_total_gd(s)", "gap_gd(%)"]
+    L,c = args.limit,0
+    with torch.no_grad():
+        bar = Bar(f"[Test]          ", max=len(loader_eval))
+        with open(args.output, "w") as f:
+            # write headers
+            print(",".join(headers), file=f)
+            for pb, y in loader_eval:
+                pb = pb[0]
+                y = y[0]
+                # create the data object
+                t_data, data = time_func(preprocess_f, pb)
+
+                # for each model predict logits and solve
+                for m_id,m in enumerate(models):
+                    t_pred, (nmf_res,theta) = time_func(lambda d: m(d), data)
+
+                    # Marginal guided greedy
+                    t_solve_grd, x_grd = time_func(lambda pb, nmf_r: generic_score_greedy(pb, nmf_r.mu.reshape(-1,2)[:,1].cpu().numpy()), pb, nmf_res)
+                    
+                    if pb.__class__ == MIS:
+                        gap_grd = 100 * (y.sum() - x_grd.sum()) / y.sum()
+                    if pb.__class__ == SCP:
+                        gap_grd = 100 * (x_grd.sum() - y.sum()) / y.sum()
+
+                    # Guided Decimation
+                    t_solve_gd, x_gd = time_func(generic_greedy, pb, theta, data)
+                    
+                    if pb.__class__ == MIS:
+                        gap_gd = 100 * (y.sum() - x_gd.sum()) / y.sum()
+                    if pb.__class__ == SCP:
+                        gap_gd = 100 * (x_gd.sum() - y.sum()) / y.sum()
+
+
+                    values = [c,y.sum(),t_data,m_id,t_pred,t_solve_grd,t_data+t_pred+t_solve_grd,gap_grd, t_solve_gd, t_data+t_pred+t_solve_gd, gap_gd]
+                    values = [str(it) for it in values]
+                    print(",".join(values), file=f)
+                    print(",".join(values))
+                c+= 1
+                if c >= L:
+                    break
+        bar.finish()

@@ -157,7 +157,7 @@ class MIS(LPProblem, SerializableLPMixin):
         # default is using CBC
         md = mip.Model("mis")
         x = [md.add_var(lb=0.0, ub=1.0, var_type=BINARY) for i in range(self.nv())]
-        md.objective = mip.maximize(xsum(x))
+        md.objective = mip.maximize(xsum(x[i]*self.w[i] for i in range(self.nv())))
         for c in cliques:
             md += mip.xsum(x[u] for u in c) <= 1
         md.verbose = 0
