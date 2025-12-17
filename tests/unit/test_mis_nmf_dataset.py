@@ -17,7 +17,7 @@ from bpropy.mrf.nmf_edges import NMFEdges
 from bpropy.datasets.mrf_dataset import MRFDataset
 from bpropy.datasets.mrf_dataloader import MRFDataLoader, MRFDataCollater
 
-from bpropy.test.test_mis_mrf_dataset import create_in_memory_dataset, create_on_disk_dataset
+from tests.helpers.mis_dataset import create_in_memory_dataset, create_on_disk_dataset
 
 class TestMISNMFDataset(unittest.TestCase):
     def __init__(self, *args, **kwargs):

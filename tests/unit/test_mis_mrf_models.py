@@ -4,12 +4,14 @@ import unittest
 import atexit
 import numpy as np
 
-from bpropy.test.test_mis_mrf_dataset import random_mis, create_in_memory_dataset
 from bpropy.adapters.mis_data import data_to_mis
 from bpropy.mrf.mis_factor_graph import MISFactorGraph
 from bpropy.datasets.mrf_dataset import MRFDataset
 from bpropy.datasets.mrf_dataloader import MRFDataLoader
 from bpropy.models.mrf_models import GCN_MRF_v4
+
+from tests.helpers.mis import random_mis
+from tests.helpers.mis_dataset import create_in_memory_dataset
 
 class TestMISMRFModels(unittest.TestCase):
     def __init__(self, *args, **kwargs):

@@ -44,10 +44,10 @@ python -m pip install -U pip
 # -------------------------
 if [[ -n "${TORCH_VERSION}" ]]; then
   echo "Installing torch==${TORCH_VERSION} from ${TORCH_INDEX_URL}"
-  python -m pip install --upgrade --index-url "${TORCH_INDEX_URL}" "torch==${TORCH_VERSION}"
+  python -m pip install --upgrade --index-url "${TORCH_INDEX_URL}" "torch==${TORCH_VERSION}" "torchvision"
 else
   echo "Installing torch (unversioned) from ${TORCH_INDEX_URL}"
-  python -m pip install --upgrade --index-url "${TORCH_INDEX_URL}" torch
+  python -m pip install --upgrade --index-url "${TORCH_INDEX_URL}" torch torchvision
 fi
 
 # -------------------------
