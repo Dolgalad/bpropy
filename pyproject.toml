@@ -9,10 +9,12 @@ requires-python = ">=3.10"
 dependencies = [
   "numpy",
   "scipy",
-  "torch",
   "networkx",
   "matplotlib",
   "mip",
+  "pandas",
+  "progress",
+  "tensorboard",
 ]
 
 [tool.setuptools]

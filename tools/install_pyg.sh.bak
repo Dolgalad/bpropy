@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+python -m pip install -U pip
+python -m pip install torch==2.8.0
+
+# Check torch availability
+python - <<'EOF'
+import sys
+try:
+    import torch
+except Exception:
+    print("ERROR: PyTorch is not installed in this environment.")
+    print("Install torch first (conda or pip), then rerun this script.")
+    sys.exit(1)
+EOF
+
+# Extract torch version and CUDA tag
+TORCH_VERSION=$(python - <<'EOF'
+import torch
+print(torch.__version__)
+EOF
+)
+
+# Split version and build tag
+BASE_VERSION="${TORCH_VERSION%%+*}"
+BUILD_TAG="${TORCH_VERSION#*+}"
+
+if [[ "$BASE_VERSION" == "$BUILD_TAG" ]]; then
+    # No +tag found → assume CPU
+    BUILD_TAG="cpu"
+fi
+
+echo "Detected torch version : ${BASE_VERSION}"
+echo "Detected build tag    : ${BUILD_TAG}"
+
+# Construct PyG wheel index URL
+PYG_WHL_URL="https://data.pyg.org/whl/torch-${BASE_VERSION}+${BUILD_TAG}.html"
+
+echo "Using PyG wheel index:"
+echo "  ${PYG_WHL_URL}"
+
+python -m pip install -U pip
+
+# Core PyG binary packages (add/remove as needed)
+python -m pip install torch-scatter -f "${PYG_WHL_URL}"
+
+# Optional (uncomment if needed)
+# python -m pip install torch-sparse torch-cluster torch-spline-conv -f "${PYG_WHL_URL}"
+
+# High-level PyG package (pure Python)
+python -m pip install torch-geometric
+
+echo "PyG installation completed successfully."
+
