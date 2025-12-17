@@ -36,6 +36,7 @@ class MIS(LPProblem, SerializableLPMixin):
     def __init__(self, g, weights=None, cliques=None, num_graphs=1, graph_sizes=None):
         super(LPProblem).__init__()
         super(SerializableLPMixin).__init__()
+
         self.g = g
         if weights is None:
             self.w = np.ones(nx.number_of_nodes(g))
