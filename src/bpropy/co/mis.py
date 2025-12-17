@@ -1,6 +1,18 @@
 """
-MIS solving routines
+Maximum Independent Set (MIS) formulations and solvers.
+
+This module provides a linear-programming-based representation of the
+Maximum Independent Set (MIS) problem on graphs, along with multiple
+solution methods:
+
+- MILP solvers (CBC, CPLEX, SCIP via SciPy)
+- Specialized MIS solvers (KaMIS)
+- Greedy and randomized heuristics
+- Batched and serialized problem instances
+
+The main entry point is the :class:`MIS` class.
 """
+
 import os
 import tempfile
 import networkx as nx
@@ -34,6 +46,44 @@ from bpropy.co.kamis import write_metis_graph, kamis_solve, load_kamis_solution
 
 class MIS(LPProblem, SerializableLPMixin):
     def __init__(self, g, weights=None, cliques=None, num_graphs=1, graph_sizes=None):
+        """
+        Maximum Independent Set (MIS) problem.
+
+        Represents a weighted MIS problem on a graph using clique constraints.
+        Each clique enforces that at most one vertex can be selected.
+
+        Parameters
+        ----------
+        g : networkx.Graph
+            Input graph.
+        weights : array-like, optional
+            Node weights. Defaults to all ones.
+        cliques : list[list[int]], optional
+            Cliques covering all edges of the graph. If not provided,
+            edges are treated as size-2 cliques.
+        num_graphs : int, default=1
+            Number of graphs in a batched problem.
+        graph_sizes : array-like, optional
+            Number of vertices per graph in a batch.
+
+        Attributes
+        ----------
+        g : networkx.Graph
+            Underlying graph.
+        w : numpy.ndarray
+            Node weights.
+        C : list[list[int]]
+            Clique constraints.
+        num_graphs : int
+            Number of graphs in the batch.
+        graph_sizes : numpy.ndarray
+            Sizes of each graph in the batch.
+
+        Raises
+        ------
+        Exception
+            If the provided cliques do not cover all edges of the graph.
+        """
         super(LPProblem).__init__()
         super(SerializableLPMixin).__init__()
 

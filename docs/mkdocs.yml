@@ -7,10 +7,10 @@ theme:
 plugins:
   - search
   - mkdocstrings:
-    handlers:
-      python:
-        options:
-          show_source: false
+      handlers:
+        python:
+          options:
+            show_source: false
 
 nav:
   - Home: index.md
