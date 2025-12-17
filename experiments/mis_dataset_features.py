@@ -1,64 +1,218 @@
 import os
-import sys
-sys.path.insert(0,"..")
-import torch
-import argparse
+from dopy.mis import *
+
+import pandas as pd
 import networkx as nx
-#from progress.bar import Bar
-from multiprocessing import Pool
-
-from bpropy.co.mis import MIS
-from bpropy.co.mis_solution import load_kamis_solution
-from bpropy.datasets.mis_data import mis_to_data
-
 import numpy as np
-np.random.seed(2025)
+import time
+import sys
+
 import random
-random.seed(2025)
+random.seed(2024)
+np.random.seed(2024)
 
-#import tqdm
+from progress.bar import Bar
 
-parser = argparse.ArgumentParser("mis_dataset_features.sh")
-parser.add_argument("dataset_path", help="Dataset path")
-parser.add_argument("output_path", help="Path in which to save the features")
-parser.add_argument("category", help="MIS feature category (EB,CC,CF,EC,CP)")
-parser.add_argument("task_id", help="Task", type=int)
-parser.add_argument("n_tasks", help="Total number of tasks", type=int)
+from clique_covering import clique_covering_3,sorted_cliques
+from bipartite_graph import *
 
-def load_mis(path):
-    g = nx.read_adjlist(os.path.join(path, "graph.adjlist"), nodetype=int)
-    return MIS(g)
-
-def create_features(args, save_to_disk=True):
-    instance_path, output, category = args
-    print(f"Instance {instance_path}, output = {output}, category = {category}", flush=True)
-     # load problem
-    pb = load_mis(instance_path)
-    y = load_kamis_solution(os.path.join(instance_path, "redumis.sol"))
-    # solve continuous relaxation
-    data = mis_to_data(pb, category, with_lbp_edges=True)
-    data.y = torch.from_numpy(y)
-    if save_to_disk:
-        return torch.save(data, output)
+def ordered_edges(g):
+    nV = nx.number_of_nodes(g)
+    adj = nx.to_numpy_array(g, nodelist=range(nV))
+    if g.is_directed():
+        for (s,t) in zip(*np.where(adj > 0)):
+            yield (s,t)
     else:
-        return data
+        for (s,t) in zip(*np.where(adj > 0)):
+            if s<t:
+                yield (s,t)
+
+
+def variable_features(pb, md):
+    varlist = [md.get_var_by_name(f"x{i}") for i in range(pb.g.number_of_nodes())]
+    n = len(varlist)
+    sol = md.solve()
+    x = np.array([sol.get_value(var) for var in varlist])
+    if x.shape[0] != n:
+        print(f"Solution shape {x.shape} does not match number of nodes {n}")
+
+    # variable basis status
+    varbasis = np.array([bstt.value for bstt in md.var_basis_statuses(varlist)])
+    varbasis_onehot = np.zeros((varbasis.size, 4))
+    varbasis_onehot[np.arange(varbasis.size), varbasis - 1] = 1
+
+    # variable features
+    nfeat = np.zeros((pb.nv(), 10))
+    nfeat[:,0] = pb.w
+    nfeat[:,1] = (x == 0)
+    nfeat[:,2] = (x == 1)
+    nfeat[:,3] = ( (x > 0) & (x < 1))
+    nfeat[:,4:8] = varbasis_onehot
+    nfeat[:,8] = np.array(sol.get_reduced_costs(varlist))
+    nfeat[:,9] = x
+    return nfeat
+
+def eb_features(pb, md):
+    C = [list(e) for e in ordered_edges(pb.g)]
+
+    nfeat = variable_features(pb, md)
+
+    # constraint features
+    constraints = list(md.iter_constraints())
+
+    # edge features
+    efeat = np.ones(2 * sum(len(c) for c in C))
+    
+    slacks = np.array(md.slack_values(constraints))
+    duals = np.array(md.dual_values(constraints))
+    cfeat = np.zeros((len(constraints), 4))
+    cfeat[:,0] = np.cos(2) * np.ones(len(constraints))
+    cfeat[:,1] = slacks
+    cfeat[:,2] = (slacks == 0)
+    cfeat[:,3] = duals
+
+    return C, nfeat, efeat, cfeat
+
+def cf_features(pb, cliques, md):
+    nfeat = variable_features(pb, md)
+
+
+    constraints = list(md.iter_constraints())
+
+    slacks = np.array(md.slack_values(constraints))
+    duals = np.array(md.dual_values(constraints))
+    _cfeat = np.zeros((len(constraints), 4))
+    _cfeat[:,0] = np.cos(2) * np.ones(len(constraints))
+    _cfeat[:,1] = slacks
+    _cfeat[:,2] = (slacks == 0)
+    _cfeat[:,3] = duals
+
+
+    edges = list([e for e in ordered_edges(pb.g)])
+    efeat = np.ones(4 * len(edges))
+
+    cfeat = np.zeros((pb.ne(), 4))
+    for i in range(pb.ne()):
+        a = 0
+        for j,c in enumerate(cliques):
+            if all(u in c for u in edges[i]):
+                cfeat[i,:] += _cfeat[j,:]
+                a += 1
+        cfeat[i,:] /= a
+    return edges,nfeat,efeat,cfeat
+
+def cp_features(pb):
+    C = clique_covering_3(pb.g, randomize=False)
+    md = cplex_model(pb, continuous_relaxation=True, cliques=C)
+    varlist = [md.get_var_by_name(f"x{i}") for i in range(pb.g.number_of_nodes())]
+    sol = md.solve()
+    x = np.array([sol.get_value(var) for var in varlist])
+    _g = pb.g.copy()
+    nx.set_node_attributes(_g, {i:int(1000 * x[i]) for i in range(pb.nv())}, name="weight")
+
+    MC,W = nx.max_weight_clique(_g)
+    while W > 1000:
+        C.append(MC)
+        C = sorted_cliques(C)
+        md = cplex_model(pb, continuous_relaxation=True, cliques=C)
+        varlist = [md.get_var_by_name(f"x{i}") for i in range(pb.g.number_of_nodes())]
+        sol = md.solve()
+        x = np.array([sol.get_value(var) for var in varlist])
+        _g = pb.g.copy()
+        nx.set_node_attributes(_g, {i:int(1000 * x[i]) for i in range(pb.nv())}, name="weight")
+
+        MC,W = nx.max_weight_clique(_g)
+
+    _,nfeat,_,cfeat = eb_features(pb, md)
+    efeat = np.ones(2 * sum(len(c) for c in C))
+
+    return C,nfeat,efeat,cfeat
+
+def get_features(pb, mode):
+    if mode == "EB":
+        C = [list(e) for e in ordered_edges(pb.g)]
+        md = cplex_model(pb, continuous_relaxation=True)
+        return eb_features(pb, md)
+    if mode == "CC":
+        C = clique_covering_3(pb.g, randomize=False)
+        md = cplex_model(pb, continuous_relaxation=True, cliques=C)
+        _,nfeat,_,cfeat = eb_features(pb, md)
+        efeat = np.ones(2 * sum(len(c) for c in C))
+        return C,nfeat,efeat,cfeat
+    if mode == "CF":
+        C = clique_covering_3(pb.g, randomize=False)
+        md = cplex_model(pb, continuous_relaxation=True, cliques=C)
+        return cf_features(pb, C, md)
+    if mode == "EC":
+        C = [list(e) for e in ordered_edges(pb.g)] + clique_covering_3(pb.g, randomize=False)
+        C = sorted_cliques(C)
+        md = cplex_model(pb, continuous_relaxation=True, cliques=C)
+        _,nfeat,_,cfeat = eb_features(pb, md)
+        efeat = np.ones(2 * sum(len(c) for c in C))
+        return C,nfeat,efeat,cfeat
+    if mode == "CP":
+        return cp_features(pb)
+
+def load_redumis_solution(path):
+    with open(path, "r") as f:
+        return np.array(list(map(int, filter(None, f.read().split("\n")))))
 
 if __name__=="__main__":
-    args = parser.parse_args()
+    dataset_path = sys.argv[1]
+    
+    mis_formulation = sys.argv[2]
+    
+    identical_node_features = 0
+    identical_constraint_features = 0
+    
+    instance_ids = sorted(list(os.listdir(dataset_path)))
+    bar = Bar("Extracting features: ", max=len(instance_ids))
+    gaps = []
+    for instance_id in instance_ids:
+        instance_path = os.path.join(dataset_path, instance_id)
+        graph_file_path = os.path.join(instance_path, "graph.adjlist")
+        # load graph
+        g = nx.read_adjlist(graph_file_path)
+        nmap = {str(i): i for i in range(g.number_of_nodes())}
+        g = nx.relabel_nodes(g, nmap, copy=False)
+        n = g.number_of_nodes()
+    
+        pb = MIS(g)
+        C,nfeat,efeat,cfeat = get_features(pb, mis_formulation)
 
-    instance_list = sorted(list(os.listdir(args.dataset_path)))
-
-    block_size = int(len(instance_list) / args.n_tasks)
-    if args.task_id < args.n_tasks:
-        instance_list = instance_list[(args.task_id - 1) * block_size:args.task_id*block_size]
-    else:
-        instance_list = instance_list[(args.task_id-1)*block_size:]
-
-    arg_list = [(os.path.join(args.dataset_path, f), os.path.join(args.output_path, f"{f}.dat"), args.category) for f in instance_list]
-    N = len(instance_list)
-
-    if not os.path.exists(args.output_path):
-        os.makedirs(args.output_path)
-
-    for a in arg_list:
-        create_features(a)
+        if len(C)!=cfeat.shape[0]:
+            print("Bad constraint feature shape")
+            print(len(C), cfeat.shape, g.number_of_edges())
+            exit()
+    
+        # load optimal solution
+        sol = load_redumis_solution(os.path.join(instance_path, "redumis.sol"))
+        val = sol.sum()
+    
+        # solve greedy
+        grd_sol = mis_greedy(pb, nfeat[:,-1])
+        grd_val = grd_sol.sum()
+        gap = (val - grd_val) / val
+        gaps.append(gap)
+    
+        # bipartite graph
+        bpg,bpg_feat = bipartite_graph(pb, cliques=C)
+        if 2*bpg.number_of_edges() != efeat.shape[0]:
+            print("Bad edges feature shape ")
+            exit()
+        if bpg.number_of_nodes() != len(C)+n:
+            print("Bad number of constraint nodes in BPG")
+            exit()
+        bipartite_graph_file_path = os.path.join(instance_path, "bipartite.adjlist")
+        nx.write_adjlist(bpg, bipartite_graph_file_path)
+    
+        with open(os.path.join(instance_path, "node_features.npy"), "wb") as f:
+            np.save(f, nfeat)
+        with open(os.path.join(instance_path, "edge_features.npy"), "wb") as f:
+            np.save(f, efeat)
+        with open(os.path.join(instance_path, "constraint_features.npy"), "wb") as f:
+            np.save(f, cfeat)
+    
+        bar.suffix = f" {np.mean(gaps)}"
+        bar.next()
+    bar.finish()
