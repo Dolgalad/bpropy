@@ -1,0 +1,137 @@
+"""
+FactorGraph class definition
+"""
+import numpy as np
+import networkx as nx
+from networkx import Graph
+
+from bpropy.utils.set_sort import lenlex_sort
+
+class FactorGraph(Graph):
+    def __init__(self):
+        super().__init__()
+    def add_variable(self, n):
+        """Add a variable node to the graph
+        """
+        self.add_node(n, bipartite=0)
+    def add_variables_from(self, nl):
+        """Add multiple variable nodes from list
+        """
+        self.add_nodes_from(nl, bipartite=0)
+    def add_factor(self, nl):
+        """Add a factor node connected to nodes in `nl`
+        """
+        f = self.number_of_nodes()
+        self.add_node(f, bipartite=1)
+        for n in nl:
+            self.add_edge(n, f)
+    def add_factors_from(self, nl):
+        """Add multiple factors from list of adjacent nodes `nl`. `nl` should be a list of lists of nodes. Factor will first be sorted, first by increasing size and then by lexicographical order.
+        """
+        for n in lenlex_sort(nl):
+            self.add_factor(n)
+    def iter_variables(self):
+        """Iterate over variable nodes, always iterates in increasing label value
+        """
+        for i in range(self.number_of_nodes()):
+            if self.nodes[i]["bipartite"]==0:
+                yield i
+    def iter_factors(self):
+        """Iterate over factor nodes, always iterates in increasing label value
+        """
+        for i in range(self.number_of_nodes()):
+            if self.nodes[i]["bipartite"]==1:
+                yield i
+    def factor_variables(self, F):
+        """Return list of variable nodes adjacent to factor node `F`. Always returns a sorted list.
+        """
+        return sorted(list(self.neighbors(F)))
+    def factor_size(self, F):
+        """Return number of variable nodes adjacent to factor node `F`
+        """
+        return len(self.factor_variables(F))
+    def factor_sizes(self):
+        """Return all factor sizes
+        """
+        return np.array([self.factor_size(F) for F in self.iter_factors()], dtype=int)
+    def containing_factors(self, i):
+        return sorted(list(self.neighbors(i)))
+    def factor_index_map(self):
+        return {F:iF for iF,F in enumerate(self.iter_factors())} 
+    def factor_variables_map(self):
+        return {F:self.factor_variables(F) for F in self.iter_factors()}
+    def containing_factors_map(self):
+        return {v:self.containing_factors(v) for v in self.iter_variables()}
+    def number_sufficient_statistics(self):
+        """Number of sufficient statistics needed for the Over-Complete representation
+        """
+        return sum([2**self.factor_size(F) for F in self.iter_factors()])
+    def nss(self):
+        return self.number_sufficient_statistics()
+    def number_of_variables(self):
+        """Return number of variables
+        """
+        return len(list(self.iter_variables()))
+    def nv(self):
+        """Convenience function for getting number of variables
+        """
+        return self.number_of_variables()
+    def number_of_factors(self):
+        """Returns number of factor nodes
+        """
+        return len(list(self.iter_factors()))
+    def nf(self):
+        """Convenience function for getting number of factor nodes
+        """
+        return self.number_of_factors()
+    def factor_sufficient_statistics(self, F, xF):
+        """Return sufficient statistics corresponding to assignment xF
+        """
+        nF = self.factor_size(F)
+        idx = int(sum((int(b) & 1) << k for k,b in enumerate(xF)))
+        ss = np.zeros(1 << nF, dtype=np.uint32)
+        ss[idx] = 1
+        return ss
+
+        ss = np.zeros(2**nF, dtype=np.uint32)
+        ss[np.packbits(xF, bitorder="little")] = 1
+        return ss
+    def factor_assignment(self, F, ssF):
+        """Returns variable assignments corresponding to the values of sufficient statistics of F
+        """
+        
+
+        nF = self.factor_size(F)
+        idx = int(np.argmax(ssF))
+        bits = np.array([(idx >> k) & 1 for k in range(nF)], dtype=np.uint8)
+        return bits
+
+        return np.unpackbits(np.argwhere(ssF).astype(np.uint8), count=nF, bitorder="little")
+    def ne(self):
+        """Return number of edges
+        """
+        return self.number_of_edges()
+    def num_f2v_edges(self):
+        fs = self.factor_sizes()
+        return (np.power(2,fs) * np.power(fs,2)).sum()
+    def num_r_edges(self):
+        fs = self.factor_sizes()
+        return (np.power(2,fs) * fs).sum()
+    def num_q_edges(self):
+        res=0
+        for F in self.iter_factors():
+            for v in self.factor_variables(F):
+                res += 2*(len(self.containing_factors(v))-1)
+        return res
+    def num_m_edges(self):
+        return self.num_r_edges()
+    def num_vm_edges(self):
+        return (2 * np.array([len(self.containing_factors(v)) for v in self.iter_variables()], dtype=int)).sum()
+
+
+    # Loopy Belief Propagation computation graph edges, will be moved
+    def f2v_messages_dim(self):
+        return sum([2*self.factor_size(F) for F in self.iter_factors()])
+    def number_vm_edges(self):
+        return sum([2*len(list(self.neighbors(n))) for n in self.iter_variables()])
+
