@@ -9,7 +9,7 @@ from bpropy.mrf.nmf_edges import NMFEdges
 from bpropy.mrf.naive_mean_field import naive_mean_field
 from bpropy.mrf.sufficient_statistics import x2ss
 
-from bpropy.test.test_mis import random_mis, simple_mis, very_simple_mis
+from tests.helpers.mis import random_mis, simple_mis, very_simple_mis
 
 class TestMISNMF(unittest.TestCase):
     def test_mis_nmf(self):

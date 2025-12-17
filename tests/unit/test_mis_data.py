@@ -9,7 +9,7 @@ from bpropy.adapters.mis_data import mis_to_data, data_to_mis
 from bpropy.mrf.sufficient_statistics import x2ss, ss2x
 from bpropy.mrf.mis_factor_graph import MISFactorGraph
 
-from bpropy.test.test_mis import simple_mis
+from tests.helpers.mis import simple_mis
 
 class TestMISData(unittest.TestCase):
     def test_mis_to_data_and_back(self):

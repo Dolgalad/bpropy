@@ -9,7 +9,7 @@ from bpropy.mrf.lbp_edges import LBPEdges
 from bpropy.mrf.lbp import loopy_belief_propagation, max_sum_loopy_belief_propagation, loopy_belief_propagation_with_graph
 from bpropy.mrf.sufficient_statistics import x2ss
 
-from bpropy.test.test_mis import random_mis, simple_mis, very_simple_mis
+from tests.helpers.mis import random_mis, simple_mis, very_simple_mis
 
 
 class TestMISLBP(unittest.TestCase):

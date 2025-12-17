@@ -8,7 +8,7 @@ from bpropy.adapters.vc_to_data import problem_to_data, data_to_lp
 from bpropy.mrf.mis_factor_graph import MISFactorGraph
 from bpropy.mrf.sufficient_statistics import x2ss, ss2x
 
-from bpropy.test.test_mis import simple_mis  # tiny fixture if you use it elsewhere
+from tests.helpers.mis import simple_mis  # tiny fixture if you use it elsewhere
 
 
 def _tensor_items(d):

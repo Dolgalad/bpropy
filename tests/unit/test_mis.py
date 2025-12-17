@@ -10,18 +10,6 @@ from bpropy.clique_cover import clique_cover
 
 from tests.helpers.mis import very_simple_mis, simple_mis
 
-#def very_simple_mis():
-#    g = nx.Graph()
-#    g.add_nodes_from([0,1])
-#    g.add_edges_from([[0,1]])
-#    return MIS(g)
-#
-#def simple_mis():
-#    g = nx.Graph()
-#    g.add_nodes_from([0,1,2])
-#    g.add_edges_from([[0,1],[1,2],[0,2]])
-#    return MIS(g)
-
 class TestMIS(unittest.TestCase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
