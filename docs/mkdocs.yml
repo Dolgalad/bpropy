@@ -1,0 +1,21 @@
+site_name: bpropy
+site_url: https://dolgalad.github.io/bpropy.git
+repo_url: https://github.com/dolgalad/bpropy.git
+theme:
+  name: material
+
+plugins:
+  - search
+  - mkdocstrings:
+    handlers:
+      python:
+        options:
+          show_source: false
+
+nav:
+  - Home: index.md
+  - Installation: installation.md
+  - Usage: usage.md
+  - API:
+    - Overview: api/index.md
+    - bpropy: api/bpropy.md
