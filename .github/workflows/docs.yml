@@ -32,6 +32,10 @@ jobs:
           restore-keys: |
             pip-${{ runner.os }}-
 
+      - name: Generate figures
+        run: |
+          python tools/gen_docs_figures.py
+
 
       - name: Install docs deps
         run: |
