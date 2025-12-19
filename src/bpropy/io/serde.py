@@ -58,7 +58,7 @@ class SerializableLPMixin:
             "metadata": {}
         }
         use_npz = split_large
-        payload = self._to_serializable(use_npz=use_npz, arrays=arrays)
+        payload = self._to_serializable(use_npz=use_npz, arrays=arrays, threshold_bytes=threshold_bytes)
         manifest.update(payload)
 
         # Decide whether to split
