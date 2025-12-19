@@ -4,7 +4,7 @@ import time
 import numpy as np
 
 from bpropy.co.mis import MIS
-from bpropy.mrf.mis_factor_graph import MISFactorGraph
+from bpropy.mrf.factor_graph import FactorGraph
 from bpropy.mrf.nmf_edges import NMFEdges
 from bpropy.mrf.naive_mean_field import naive_mean_field
 from bpropy.mrf.sufficient_statistics import x2ss
@@ -14,8 +14,8 @@ from tests.helpers.mis import random_mis, simple_mis, very_simple_mis
 class TestMISNMF(unittest.TestCase):
     def test_mis_nmf(self):
         pb = simple_mis()
-        x = pb.greedy()
-        fg = MISFactorGraph(pb)
+        x = pb.greedy().x
+        fg = FactorGraph(pb)
         edges = NMFEdges(fg)
 
         self.assertTrue(edges.n_ss == fg.number_sufficient_statistics())
@@ -33,8 +33,8 @@ class TestMISNMF(unittest.TestCase):
             offset += 2
     def test_large_mis_nmf(self):
         pb = random_mis(100)
-        x = pb.greedy()
-        fg = MISFactorGraph(pb)
+        x = pb.greedy().x
+        fg = FactorGraph(pb)
         edges = NMFEdges(fg)
 
         self.assertTrue(edges.n_ss == fg.nss())
@@ -60,7 +60,7 @@ class TestMISNMF(unittest.TestCase):
         batch_thetas = []
         for _ in range(batch_size):
             pb = random_mis(10)
-            fg = MISFactorGraph(pb)
+            fg = FactorGraph(pb)
             edges = NMFEdges(fg)
             theta = torch.randn(fg.number_sufficient_statistics())
             mu = naive_mean_field(theta.clone(), edges.clone(), max_iter=max_iter, tol=1e-6).mu
@@ -88,14 +88,14 @@ class TestMISNMF(unittest.TestCase):
 
         # batch mis problems
         batch_pb = MIS.batch(pbs)
-        batch_fg = MISFactorGraph(batch_pb)
+        batch_fg = FactorGraph(batch_pb)
         batch_edges = NMFEdges(batch_fg)
         batch_theta = torch.randn(batch_fg.nss())
         batch_mu = naive_mean_field(batch_theta, batch_edges, max_iter=max_iter, tol=1e-6).mu
 
         ss_offset, mu_offset = 0,0
         for i,pb in enumerate(pbs):
-            fg = MISFactorGraph(pb)
+            fg = FactorGraph(pb)
             edges = NMFEdges(fg)
             theta = batch_theta[ss_offset:ss_offset+fg.nss()]
             mu = naive_mean_field(theta, edges, max_iter=max_iter, tol=1e-6).mu

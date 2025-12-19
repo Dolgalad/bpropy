@@ -3,8 +3,10 @@ import copy
 import torch
 from torch_geometric.data import HeteroData
 
-from bpropy.co.mis import random_mis, MIS
+from bpropy.co.mis import MIS
+from bpropy.co.generators.mis import random_mis
 from bpropy.adapters.vc_to_data import problem_to_data
+from bpropy.mrf.factor_graph import FactorGraph
 
 FEATURE_MODES = ["EB", "CC", "CF", "EC", "CP"]
 
@@ -97,8 +99,7 @@ class TestMISHeteroData(unittest.TestCase):
                 # Sanity: factor-graph count must match constraints + variables
                 # (for MIS, factors = variables + cliques)
                 # Delay import to avoid heavy deps if not installed in minimal env
-                from bpropy.mrf.mis_factor_graph import MISFactorGraph
-                fg = MISFactorGraph(pb)
+                fg = FactorGraph(pb)
                 self.assertEqual(fg.nf(), nv + nc)
 
                 # Bounds and coherence

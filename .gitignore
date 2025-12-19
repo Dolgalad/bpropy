@@ -25,4 +25,5 @@ logs*/
 *.pkl
 
 # docs
-docs/site
+site
+

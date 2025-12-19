@@ -34,3 +34,7 @@ def load_kamis_solution(path):
     with open(path, "r") as f:
         return np.array(list(map(int, filter(None, f.read().split("\n")))))
 
+def solution_from_kamis(path):
+    x = load_kamis_solution(path)
+    return Solution(x=x, olver="kamis")
+

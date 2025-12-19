@@ -2,11 +2,12 @@ import unittest
 import networkx as nx
 import numpy as np
 
-from bpropy.co.mis import MIS, mis_batch, mis_equal, random_mis
+from bpropy.co.mis import MIS, mis_batch, mis_equal
+from bpropy.co.generators.mis import random_mis
 from bpropy.clique_cover import clique_cover
 from bpropy.mrf.lbp_edges import LBPEdges
 from bpropy.mrf.mis_factor_graph import MISFactorGraph
-
+from bpropy.mrf.factor_graph import FactorGraph
 
 class TestMISBatch(unittest.TestCase):
     def __init__(self, *args, **kwargs):
@@ -26,23 +27,23 @@ class TestMISBatch(unittest.TestCase):
         self.assertTrue(mis_equal(pb3, self.random_pb_cc))
         x = pb.greedy()
 
-        offset = np.roll(pb.graph_sizes.cumsum(),1)
+        offset = np.roll(pb.var_sizes.cumsum(),1)
         offset[0] = 0
 
-        self.assertTrue(pb1.check_solution(x[offset[0]:offset[0]+pb.graph_sizes[0]]))
-        self.assertTrue(pb2.check_solution(x[offset[1]:offset[1]+pb.graph_sizes[1]]))
-        self.assertTrue(pb3.check_solution(x[offset[2]:offset[2]+pb.graph_sizes[2]]))
+        self.assertTrue(pb1.check_solution(x.x[offset[0]:offset[0]+pb.var_sizes[0]]))
+        self.assertTrue(pb2.check_solution(x.x[offset[1]:offset[1]+pb.var_sizes[1]]))
+        self.assertTrue(pb3.check_solution(x.x[offset[2]:offset[2]+pb.var_sizes[2]]))
     def test_mis_big_batch(self):
         pbs = [random_mis(np.random.choice(range(10,100))) for _ in range(10)]
         pb = mis_batch(pbs)
         x = pb.greedy()
-        offset = np.roll(pb.graph_sizes.cumsum(),1)
+        offset = np.roll(pb.var_sizes.cumsum(),1)
         offset[0] = 0
 
         for i in range(10):
             pb_ = pb.get_problem(i)
             self.assertTrue(mis_equal(pb_, pbs[i]))
-            self.assertTrue(pbs[i].check_solution(x[offset[i]:offset[i]+pb.graph_sizes[i]]))
+            self.assertTrue(pbs[i].check_solution(x.x[offset[i]:offset[i]+pb.var_sizes[i]]))
 
     def test_mis_batch_factor_graph(self):
         #pbs = [random_mis(2,1.0), random_mis(3,1.0), random_mis(4,1.0)]
@@ -50,36 +51,36 @@ class TestMISBatch(unittest.TestCase):
 
         pb_batch = mis_batch(pbs)
 
-        fg_batch = MISFactorGraph(pb_batch)
+        fg_batch = FactorGraph(pb_batch)
         edges = []
         for i in range(len(pbs)):
-            ofg = MISFactorGraph(pbs[i])
+            ofg = FactorGraph(pbs[i])
+
             pb = pb_batch.get_problem(i)
-            fg_pb = MISFactorGraph(pb)
+            fg_pb = FactorGraph(pb)
+
             sg = fg_batch.get_subgraph(i)
             self.assertTrue(nx.utils.misc.graphs_equal(fg_pb, fg_batch.get_subgraph(i)))
             self.assertTrue(nx.utils.misc.graphs_equal(fg_pb, ofg))
 
 
     def test_mis_batch_lbp_edges(self):
-        #import random
-        #np.random.seed(123)
-        #random.seed(123)
         pbs = [random_mis(np.random.choice(range(10,50)), .15, cliques=True) for _ in range(3)]
 
         pb_batch = mis_batch(pbs)
 
-        fg_batch = MISFactorGraph(pb_batch)
+        fg_batch = FactorGraph(pb_batch)
         edges_batch = LBPEdges(fg_batch)
 
         edges = []
         for i in range(len(pbs)):
-            ofg = MISFactorGraph(pbs[i])
+            ofg = FactorGraph(pbs[i])
             oed = LBPEdges(ofg)
             pb = pb_batch.get_problem(i)
 
 
-            fg_pb = MISFactorGraph(pb)
+            fg_pb = FactorGraph(pb)
+
             fg_sg = fg_batch.get_subgraph(i)
             esg = LBPEdges(fg_sg)
             edges.append(LBPEdges(fg_pb))

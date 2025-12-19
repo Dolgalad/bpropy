@@ -29,6 +29,7 @@ jobs:
           pip install -e .[docs]
 
       - name: Build docs
+        working-directory: docs
         run: |
           mkdocs build --config-file docs/mkdocs.yml --site-dir site
 

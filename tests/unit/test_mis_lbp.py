@@ -4,7 +4,7 @@ import time
 import numpy as np
 
 from bpropy.co.mis import MIS
-from bpropy.mrf.mis_factor_graph import MISFactorGraph
+from bpropy.mrf.factor_graph import FactorGraph
 from bpropy.mrf.lbp_edges import LBPEdges
 from bpropy.mrf.lbp import loopy_belief_propagation, max_sum_loopy_belief_propagation, loopy_belief_propagation_with_graph
 from bpropy.mrf.sufficient_statistics import x2ss
@@ -15,15 +15,15 @@ from tests.helpers.mis import random_mis, simple_mis, very_simple_mis
 class TestMISLBP(unittest.TestCase):
     def test_mis_factor_graph(self):
         pb = simple_mis()
-        fg = MISFactorGraph(pb)
+        fg = FactorGraph(pb)
 
         self.assertTrue(fg.nv() == pb.nv())
         self.assertTrue(fg.nf() == pb.nv()+pb.ne())
         self.assertTrue(fg.number_sufficient_statistics() == 2*pb.nv() + 4*pb.ne())
     def test_mis_lbp(self):
         pb = simple_mis()
-        x = pb.greedy()
-        fg = MISFactorGraph(pb)
+        x = pb.greedy().x
+        fg = FactorGraph(pb)
         edges = LBPEdges(fg)
 
         self.assertTrue(edges.n_ss == fg.number_sufficient_statistics())
@@ -54,8 +54,8 @@ class TestMISLBP(unittest.TestCase):
 
     def test_large_mis_lbp(self):
         pb = random_mis(100)
-        x = pb.greedy()
-        fg = MISFactorGraph(pb)
+        x = pb.greedy().x
+        fg = FactorGraph(pb)
         edges = LBPEdges(fg)
 
         self.assertTrue(edges.n_ss == fg.number_sufficient_statistics())
@@ -92,11 +92,11 @@ class TestMISLBP(unittest.TestCase):
 
     def test_stack_two(self):
         pb_1 = random_mis(10)
-        fg_1 = MISFactorGraph(pb_1)
+        fg_1 = FactorGraph(pb_1)
         edges_1 = LBPEdges(fg_1)
 
         pb_2 = random_mis(22)
-        fg_2 = MISFactorGraph(pb_2)
+        fg_2 = FactorGraph(pb_2)
         edges_2 = LBPEdges(fg_2)
 
         # stack edges
@@ -121,7 +121,7 @@ class TestMISLBP(unittest.TestCase):
         batch_thetas = []
         for _ in range(batch_size):
             pb = random_mis(10)
-            fg = MISFactorGraph(pb)
+            fg = FactorGraph(pb)
             edges = LBPEdges(fg)
             theta = torch.randn(fg.number_sufficient_statistics())
             v2f = torch.zeros_like(theta)
@@ -151,7 +151,7 @@ class TestMISLBP(unittest.TestCase):
         batch_thetas = []
         for _ in range(batch_size):
             pb = random_mis(10)
-            fg = MISFactorGraph(pb)
+            fg = FactorGraph(pb)
             edges = LBPEdges(fg)
             theta = torch.randn(fg.number_sufficient_statistics())
             v2f = torch.zeros_like(theta)
@@ -175,7 +175,7 @@ class TestMISLBP(unittest.TestCase):
     def test_batch_1(self):
         # prepare problems and solve
         batch_size = 100
-        edges_l = [LBPEdges(MISFactorGraph(random_mis(np.random.choice(range(10,20))))) for _ in range(batch_size)]
+        edges_l = [LBPEdges(FactorGraph(random_mis(np.random.choice(range(10,20))))) for _ in range(batch_size)]
 
         t0 = time.time()
         batch = LBPEdges.batch(edges_l)
@@ -205,7 +205,7 @@ class TestMISLBP(unittest.TestCase):
         pbs = [random_mis(np.random.choice(range(10,20))) for _ in range(batch_size)]
         # batch mis problems
         batch_pb = MIS.batch(pbs)
-        batch_fg = MISFactorGraph(batch_pb)
+        batch_fg = FactorGraph(batch_pb)
         batch_edges = LBPEdges(batch_fg)
         batch_theta = torch.randn(batch_fg.nss())
         batch_v2f = torch.zeros_like(batch_theta)
@@ -213,7 +213,7 @@ class TestMISLBP(unittest.TestCase):
 
         offset = 0
         for i,pb in enumerate(pbs):
-            fg = MISFactorGraph(pb)
+            fg = FactorGraph(pb)
             edges = LBPEdges(fg)
             theta = batch_theta[offset:offset+fg.nss()]
             v2f = torch.zeros_like(theta)
@@ -231,7 +231,7 @@ class TestMISLBP(unittest.TestCase):
 
         # batch mis problems
         batch_pb = MIS.batch(pbs)
-        batch_fg = MISFactorGraph(batch_pb)
+        batch_fg = FactorGraph(batch_pb)
         batch_edges = LBPEdges(batch_fg)
         batch_theta = torch.randn(batch_fg.nss())
         batch_v2f = torch.zeros_like(batch_theta)
@@ -239,7 +239,7 @@ class TestMISLBP(unittest.TestCase):
 
         offset = 0
         for i,pb in enumerate(pbs):
-            fg = MISFactorGraph(pb)
+            fg = FactorGraph(pb)
             edges = LBPEdges(fg)
             theta = batch_theta[offset:offset+fg.nss()]
             v2f = torch.zeros_like(theta)

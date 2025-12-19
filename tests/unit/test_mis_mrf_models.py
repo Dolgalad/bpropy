@@ -5,7 +5,7 @@ import atexit
 import numpy as np
 
 from bpropy.adapters.mis_data import data_to_mis
-from bpropy.mrf.mis_factor_graph import MISFactorGraph
+from bpropy.mrf.factor_graph import FactorGraph
 from bpropy.datasets.mrf_dataset import MRFDataset
 from bpropy.datasets.mrf_dataloader import MRFDataLoader
 from bpropy.models.mrf_models import GCN_MRF_v4
@@ -56,13 +56,13 @@ class TestMISMRFModels(unittest.TestCase):
         with torch.no_grad():
             for d in dataloader:
                 pb = data_to_mis(d, batch=True)
-                fg = MISFactorGraph(pb)
+                fg = FactorGraph(pb)
                 self.assertTrue(fg.nss() == d.lbp_edges.n_ss.sum())
                 lpb_mu, x = self.model(d.to(self.device))
                 self.assertTrue(x.shape[0] == d.lbp_edges.n_ss.sum())
             for d in dataloader_bs2:
                 pb = data_to_mis(d, batch=True)
-                fg = MISFactorGraph(pb)
+                fg = FactorGraph(pb)
                 self.assertTrue(fg.nss() == d.lbp_edges.n_ss.sum())
                 lbp_mu, x = self.model(d.to(self.device))
                 self.assertTrue(x.shape[0] == d.lbp_edges.n_ss.sum())
@@ -79,13 +79,13 @@ class TestMISMRFModels(unittest.TestCase):
         with torch.no_grad():
             for d in dataloader:
                 pb = data_to_mis(d, batch=True)
-                fg = MISFactorGraph(pb)
+                fg = FactorGraph(pb)
                 self.assertTrue(fg.nss() == d.lbp_edges.n_ss.sum())
                 lbp_mu, x = self.model(d.to(self.device))
                 self.assertTrue(x.shape[0] == d.lbp_edges.n_ss.sum())
             for d in dataloader_bs2:
                 pb = data_to_mis(d, batch=True)
-                fg = MISFactorGraph(pb)
+                fg = FactorGraph(pb)
                 self.assertTrue(fg.nss() == d.lbp_edges.n_ss.sum())
                 lbp_mu, x = self.model(d.to(self.device))
                 self.assertTrue(x.shape[0] == d.lbp_edges.n_ss.sum())
@@ -102,13 +102,13 @@ class TestMISMRFModels(unittest.TestCase):
         with torch.no_grad():
             for d in dataloader:
                 pb = data_to_mis(d, batch=True)
-                fg = MISFactorGraph(pb)
+                fg = FactorGraph(pb)
                 self.assertTrue(fg.nss() == d.lbp_edges.n_ss.sum())
                 lbp_mu, x = self.model(d.to(self.device))
                 self.assertTrue(x.shape[0] == d.lbp_edges.n_ss.sum())
             for d in dataloader_bs2:
                 pb = data_to_mis(d, batch=True)
-                fg = MISFactorGraph(pb)
+                fg = FactorGraph(pb)
                 self.assertTrue(fg.nss() == d.lbp_edges.n_ss.sum())
                 lpb_mu, x = self.model(d.to(self.device))
                 self.assertTrue(x.shape[0] == d.lbp_edges.n_ss.sum())
@@ -125,13 +125,13 @@ class TestMISMRFModels(unittest.TestCase):
         with torch.no_grad():
             for d in dataloader:
                 pb = data_to_mis(d, batch=True)
-                fg = MISFactorGraph(pb)
+                fg = FactorGraph(pb)
                 self.assertTrue(fg.nss() == d.lbp_edges.n_ss.sum())
                 lbp_mu, x = self.model(d.to(self.device))
                 self.assertTrue(x.shape[0] == d.lbp_edges.n_ss.sum())
             for d in dataloader_bs2:
                 pb = data_to_mis(d, batch=True)
-                fg = MISFactorGraph(pb)
+                fg = FactorGraph(pb)
                 self.assertTrue(fg.nss() == d.lbp_edges.n_ss.sum())
                 lbp_mu, x = self.model(d.to(self.device))
                 self.assertTrue(x.shape[0] == d.lbp_edges.n_ss.sum())
@@ -148,13 +148,13 @@ class TestMISMRFModels(unittest.TestCase):
         with torch.no_grad():
             for d in dataloader:
                 pb = data_to_mis(d, batch=True)
-                fg = MISFactorGraph(pb)
+                fg = FactorGraph(pb)
                 self.assertTrue(fg.nss() == d.lbp_edges.n_ss.sum())
                 lbp_mu, x = self.model(d.to(self.device))
                 self.assertTrue(x.shape[0] == d.lbp_edges.n_ss.sum())
             for d in dataloader_bs2:
                 pb = data_to_mis(d, batch=True)
-                fg = MISFactorGraph(pb)
+                fg = FactorGraph(pb)
                 self.assertTrue(fg.nss() == d.lbp_edges.n_ss.sum())
                 lbp_mu, x = self.model(d.to(self.device))
                 self.assertTrue(x.shape[0] == d.lbp_edges.n_ss.sum())

@@ -4,7 +4,8 @@ import tempfile
 import unittest
 import numpy as np
 
-from bpropy.co.scp import SCP, random_scp_items_k, random_scp_items_k_balanced
+from bpropy.co.scp import SCP
+from bpropy.co.generators.scp import random_scp_items_k, random_scp_items_k_balanced
 
 def _F_as_sets(F):
     return [set(map(int, f)) for f in F]

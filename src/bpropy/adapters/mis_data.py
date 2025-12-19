@@ -9,7 +9,7 @@ from bpropy.utils.graph_utils import get_edge_index
 from bpropy.graphs.vc_graph import VCGraph
 from bpropy.co.mis import MIS, mis_batch
 
-from bpropy.mrf.mis_factor_graph import MISFactorGraph
+from bpropy.mrf.factor_graph import FactorGraph
 from bpropy.mrf.lbp_edges import LBPEdges
 from bpropy.mrf.nmf_edges import NMFEdges
 from bpropy.mrf.sufficient_statistics import x2ss
@@ -50,7 +50,7 @@ def mis_to_data(pb, feature_category="EB", with_lbp_edges=False, with_nmf_edges=
         data.e=torch.from_numpy(efeat).to(dtype=torch.float32)
 
     if with_lbp_edges or with_nmf_edges:
-        fg = MISFactorGraph(pb)
+        fg = FactorGraph(pb)
         if with_lbp_edges:
             data.lbp_edges = LBPEdges(fg)
         if with_nmf_edges:
@@ -123,7 +123,7 @@ def mis_to_hetero_data(pb, feature_category="EB", with_lbp_edges=False, with_nmf
         #data.e=torch.from_numpy(efeat).to(dtype=torch.float32), # not used for now
 
     if with_lbp_edges or with_nmf_edges:
-        fg = MISFactorGraph(pb)
+        fg = FactorGraph(pb)
         if with_lbp_edges:
             data.lbp_edges = LBPEdges(fg)
         if with_nmf_edges:

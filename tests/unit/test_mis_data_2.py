@@ -3,9 +3,11 @@ import torch
 import numpy as np
 from torch_geometric.data import Batch
 
-from bpropy.co.mis import MIS, mis_equal, random_mis         # MIS API and equality helper
+from bpropy.co.mis import MIS, mis_equal
+from bpropy.co.generators.mis import random_mis
 from bpropy.adapters.vc_to_data import problem_to_data, data_to_lp
-from bpropy.mrf.mis_factor_graph import MISFactorGraph
+from bpropy.mrf.factor_graph import FactorGraph
+
 from bpropy.mrf.sufficient_statistics import x2ss, ss2x
 
 from tests.helpers.mis import simple_mis  # tiny fixture if you use it elsewhere
@@ -61,20 +63,22 @@ class TestMISData(unittest.TestCase):
         x = pb.greedy()  # any feasible solution
         data = problem_to_data(pb)
         pb1 = data_to_lp(data)
-        self.assertTrue(pb1.check_solution(x))
+        self.assertTrue(pb1.check_solution(x.x))
 
         # Exercise multiple feature categories if your adapter supports a param
         for cat in ["EB", "CC", "CF", "EC", "CP"]:
             data_cat = problem_to_data(pb, feature_mode=cat)  # or problem_to_data(pb, feature_category=cat) if exposed
             pb_cat = data_to_lp(data_cat)
-            self.assertTrue(pb_cat.check_solution(x))
+            self.assertTrue(pb_cat.check_solution(x.x))
 
             # Factor-graph & SS round-trip invariants
-            fg = MISFactorGraph(pb_cat)
-            x_ind = x2ss(x.astype(int), fg)
+            #fg = MISFactorGraph(pb_cat)
+            fg = FactorGraph(pb_cat)
+
+            x_ind = x2ss(x.x.astype(int), fg)
             y = ss2x(x_ind, fg)
 
-            self.assertTrue(np.all(y == x))
+            self.assertTrue(np.all(y == x.x))
             self.assertTrue(pb.check_solution(y) and pb_cat.check_solution(y))
 
             # clique ↔ factor alignment (MIS factors after variables correspond to cliques)
@@ -111,7 +115,7 @@ class TestMISData(unittest.TestCase):
         self.assertEqual(pb_rt.nv(), pb.nv())
         # Constraint list outer order preserved (inner canonical already)
         # or for MIS
-        self.assertTrue(all([(a==b).all() for a,b in zip(pb_rt.C, pb.C)]))
+        self.assertTrue(all([(np.array(a)==np.array(b)).all() for a,b in zip(pb_rt.C, pb.C)]))
 
 
 

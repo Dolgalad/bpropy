@@ -1,6 +1,7 @@
 import networkx as nx
 
-from bpropy.co.mis import MIS, random_mis
+from bpropy.co.mis import MIS
+from bpropy.co.generators.mis import random_mis
 
 def very_simple_mis():
     g = nx.Graph()

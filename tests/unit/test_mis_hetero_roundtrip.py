@@ -5,9 +5,10 @@ import numpy as np
 
 from torch_geometric.data import HeteroData
 
-from bpropy.co.mis import MIS, random_mis, mis_equal
+from bpropy.co.mis import MIS, mis_equal
+from bpropy.co.generators.mis import random_mis
 from bpropy.adapters.vc_to_data import problem_to_data, data_to_lp
-from bpropy.mrf.mis_factor_graph import MISFactorGraph
+from bpropy.mrf.factor_graph import FactorGraph
 from bpropy.mrf.sufficient_statistics import x2ss, ss2x
 
 
@@ -48,15 +49,15 @@ class TestMISHeteroRoundtrip(unittest.TestCase):
                                  _canonicalize_cliques(pb.C))
 
                 # 4) Factor-graph shape consistency (factors = variables + cliques for MIS)
-                fg = MISFactorGraph(pb_rt)
+                fg = FactorGraph(pb_rt)
                 self.assertEqual(fg.nf(), pb_rt.nv() + len(pb_rt.C))
 
                 # 5) Sufficient statistics round-trip on a feasible solution
                 x = pb_rt.greedy()  # any feasible independent set
-                self.assertTrue(pb_rt.check_solution(x))
-                ss = x2ss(x.astype(int), fg)
+                self.assertTrue(pb_rt.check_solution(x.x))
+                ss = x2ss(x.x.astype(int), fg)
                 x_back = ss2x(ss, fg)
-                self.assertTrue(np.all(x_back == x))
+                self.assertTrue(np.all(x_back == x.x))
                 self.assertTrue(pb_rt.check_solution(x_back))
 
                 # 6) Edge & node counts in hetero graph match nv / |C|

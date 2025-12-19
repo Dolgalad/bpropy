@@ -1,6 +1,6 @@
 import unittest
 
-from bpropy.co.mis import random_mis
+from bpropy.co.generators.mis import random_mis
 from bpropy.datasets.mis_features import *
 from bpropy.clique_cover import is_edge_cover
 

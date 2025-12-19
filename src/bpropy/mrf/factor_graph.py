@@ -5,11 +5,44 @@ import numpy as np
 import networkx as nx
 from networkx import Graph
 
+from typing import Optional
+
 from bpropy.utils.set_sort import lenlex_sort
 
+try:
+    import scipy.sparse as sp
+except Exception:
+    sp = None
+
 class FactorGraph(Graph):
-    def __init__(self):
+    def __init__(
+            self,
+            pb=None,
+            *,
+            problems=None,
+            add_unaries: bool = True,
+        ):
         super().__init__()
+        self.num_vars = np.array([], dtype=int)
+        self.num_factors = np.array([], dtype=int)
+        self.num_graphs = 0
+
+          # --- builder logic ---
+        if pb is not None:
+            if hasattr(pb, "get_problem") and hasattr(pb, "num_subproblems") and pb.num_subproblems > 1:
+                for i in range(pb.num_subproblems):
+                    self.append_instance(pb.get_problem(i), add_unaries=add_unaries)
+            else:
+                self.append_instance(pb, add_unaries=add_unaries)
+
+        if problems is not None:
+            for p in problems:
+                if hasattr(p, "get_problem") and hasattr(p, "num_subproblems") and p.num_subproblems > 1:
+                    for i in range(p.num_subproblems):
+                        self.append_instance(p.get_problem(i), add_unaries=add_unaries)
+                else:
+                    self.append_instance(p, add_unaries=add_unaries)
+
     def add_variable(self, n):
         """Add a variable node to the graph
         """
@@ -134,4 +167,137 @@ class FactorGraph(Graph):
         return sum([2*self.factor_size(F) for F in self.iter_factors()])
     def number_vm_edges(self):
         return sum([2*len(list(self.neighbors(n))) for n in self.iter_variables()])
+
+    def append_instance(
+        self,
+        pb,  # LPProblem
+        *,
+        add_unaries: bool = True,
+        include_empty_constraints: bool = False,
+        unique_scopes: bool = False,
+        A: Optional[object] = None,
+    ) -> None:
+        """
+        Append one LPProblem instance to this (possibly batched) factor graph.
+
+        Factors are derived from the support of the constraint matrix:
+            scope(row i) = { j | A[i,j] != 0 }.
+
+        Unary factors can be toggled with add_unaries.
+
+        Parameters
+        ----------
+        pb : LPProblem
+            Must expose constraint matrix and number of variables.
+        add_unaries : bool
+            If True, add one unary factor per variable.
+        include_empty_constraints : bool
+            If False, drop constraints with empty scope.
+        unique_scopes : bool
+            If True, deduplicate identical scopes (optional).
+        A : optional
+            Override constraint matrix (otherwise taken from pb).
+        """
+        # --- 1) get matrix A and n_vars ---
+        if A is None:
+            A,_,_ = pb.linear_constraints_matrix()
+
+        # number of variables
+        if hasattr(pb, "nv"):
+            n_vars = int(pb.nv())
+        elif hasattr(pb, "n"):
+            n_vars = int(pb.n)
+        else:
+            # fallback from matrix shape
+            n_vars = int(A.shape[1])
+
+        # --- 2) extract scopes from nonzeros per row ---
+        scopes: list[list[int]] = []
+        if sp is not None and sp.issparse(A):
+            A_csr = A.tocsr()
+            for i in range(A_csr.shape[0]):
+                start, end = A_csr.indptr[i], A_csr.indptr[i + 1]
+                cols = A_csr.indices[start:end]
+                if cols.size == 0 and not include_empty_constraints:
+                    continue
+                scopes.append([int(j) for j in cols])
+        else:
+            A_arr = np.asarray(A)
+            for i in range(A_arr.shape[0]):
+                cols = np.flatnonzero(A_arr[i] != 0)
+                if cols.size == 0 and not include_empty_constraints:
+                    continue
+                scopes.append([int(j) for j in cols])
+
+        if unique_scopes:
+            seen = set()
+            uniq = []
+            for s in scopes:
+                t = tuple(sorted(s))
+                if t not in seen:
+                    seen.add(t)
+                    uniq.append(list(t))
+            scopes = uniq
+
+        # --- 3) add variables + factors with offsets; maintain ordering per instance ---
+        # This assumes you have (or will add) a helper that appends using local scopes:
+        self.append_instance_from_scopes(n_vars, scopes, add_unaries=add_unaries)
+
+    def append_instance_from_scopes(self, n_vars: int, scopes: list[list[int]], *, add_unaries: bool = True) -> None:
+        base = self.number_of_nodes()
+
+        # variable nodes
+        self.add_nodes_from(range(base, base + n_vars), bipartite=0)
+
+        # build per-instance factor scopes (LOCAL), then sort per-instance
+        local_scopes = []
+        if add_unaries:
+            local_scopes.extend([[i] for i in range(n_vars)])
+        local_scopes.extend([sorted(map(int, s)) for s in scopes])
+
+        # IMPORTANT: keep your invariant: size then lex, within the instance
+        local_scopes.sort(key=lambda s: (len(s), s))
+
+        # offset to GLOBAL ids
+        global_scopes = [[base + v for v in s] for s in local_scopes]
+
+        # add factors in given order (make sure add_factors_from doesn’t “global resort” old factors)
+        self.add_factors_from(global_scopes)
+
+        # bookkeeping if you track batching
+        self.num_graphs += 1
+        self.num_vars = np.append(self.num_vars, n_vars)
+        self.num_factors = np.append(self.num_factors, len(local_scopes))
+
+    def get_subgraph(self, idx: int) -> "FactorGraph":
+        """
+        Return the idx-th instance factor graph from a batched FactorGraph,
+        relabeled so node ids start at 0.
+        """
+        if not hasattr(self, "num_graphs") or self.num_graphs == 0:
+            raise ValueError("This FactorGraph does not look batched (num_graphs missing/0).")
+
+        if idx < 0 or idx >= int(self.num_graphs):
+            raise IndexError(f"idx={idx} out of range for num_graphs={self.num_graphs}")
+
+        # each instance contributes (num_vars[idx] variable nodes + num_factors[idx] factor nodes)
+        sizes = self.num_vars + self.num_factors
+        offsets = np.concatenate(([0], np.cumsum(sizes[:-1])))
+
+        start = int(offsets[idx])
+        n_nodes = int(sizes[idx])
+        nodes = list(range(start, start + n_nodes))
+
+        g = nx.subgraph(self, nodes).copy()
+        mapping = {n: n - start for n in nodes}
+        g = nx.relabel_nodes(g, mapping)
+
+        fg = FactorGraph()
+        fg.add_nodes_from(g.nodes(data=True))
+        fg.add_edges_from(g.edges())
+
+        fg.num_graphs = 1
+        fg.num_vars = np.array([int(self.num_vars[idx])], dtype=int)
+        fg.num_factors = np.array([int(self.num_factors[idx])], dtype=int)
+        return fg
 

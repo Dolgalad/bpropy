@@ -2,7 +2,7 @@ import os
 import tempfile
 import pickle as pkl
 
-from bpropy.co.mis import random_mis
+from bpropy.co.generators.mis import random_mis
 from bpropy.adapters.mis_data import mis_to_data
 
 def create_in_memory_dataset(N=10, n=100, p=0.15, formulation="EB", with_lbp_edges=True, with_nmf_edges=False):

@@ -4,10 +4,12 @@ import numpy as np
 
 from torch_geometric.data import Batch
 
-from bpropy.co.mis import mis_equal, random_mis
+from bpropy.co.mis import mis_equal
+from bpropy.co.generators.mis import random_mis
 from bpropy.adapters.mis_data import mis_to_data, data_to_mis
 from bpropy.mrf.sufficient_statistics import x2ss, ss2x
-from bpropy.mrf.mis_factor_graph import MISFactorGraph
+#from bpropy.mrf.mis_factor_graph import MISFactorGraph
+from bpropy.mrf.factor_graph import FactorGraph
 
 from tests.helpers.mis import simple_mis
 
@@ -51,18 +53,20 @@ class TestMISData(unittest.TestCase):
         x = pb.greedy()
         data = mis_to_data(pb)
         pb1 = data_to_mis(data)
-        self.assertTrue(pb1.check_solution(x))
+        self.assertTrue(pb1.check_solution(x.x))
 
         # CC features
         for cat in ["EB","CC","CF","EC","CP"]:
             data_cat = mis_to_data(pb, feature_category=cat)
             pb_cat = data_to_mis(data_cat)
-            self.assertTrue(pb_cat.check_solution(x))
+            self.assertTrue(pb_cat.check_solution(x.x))
             # create factor graph
-            fg = MISFactorGraph(pb_cat)
-            x_ind = x2ss(x.astype(int), fg)
+            #fg = MISFactorGraph(pb_cat)
+            fg = FactorGraph(pb_cat)
+
+            x_ind = x2ss(x.x.astype(int), fg)
             y = ss2x(x_ind, fg)
-            self.assertTrue(np.all(y == x))
+            self.assertTrue(np.all(y == x.x))
             self.assertTrue(pb.check_solution(y))
             self.assertTrue(pb_cat.check_solution(y))
             self.assertTrue(len(pb.C) == fg.nf() - pb.nv())

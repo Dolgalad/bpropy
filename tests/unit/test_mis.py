@@ -5,7 +5,8 @@ import importlib.util
 import numpy as np
 import networkx as nx
 
-from bpropy.co.mis import MIS, random_mis
+from bpropy.co.mis import MIS
+from bpropy.co.generators.mis import random_mis
 from bpropy.clique_cover import clique_cover
 
 from tests.helpers.mis import very_simple_mis, simple_mis
@@ -32,7 +33,7 @@ class TestMIS(unittest.TestCase):
     def test_greedy(self):
         #pb = random_mis()
         x = self.random_pb.greedy()
-        self.assertTrue(self.random_pb.check_solution(x))
+        self.assertTrue(self.random_pb.check_solution(x.x))
 
     def test_ilp_solve(self):
         #pb = simple_mis()
@@ -59,12 +60,12 @@ class TestMIS(unittest.TestCase):
 
     def test_mis_constraints(self):
         #pb = simple_mis()
-        constr = self.simple_pb.constraints()
-        self.assertTrue(len(constr) == self.simple_pb.ne())
+        A,_,_ = self.simple_pb.linear_constraints_matrix()
+        self.assertTrue(A.shape[0] == self.simple_pb.ne())
         res1 = self.simple_pb.solve()
 
-        constr = self.simple_pb.constraints(cliques = [[0,1,2]])
-        self.assertTrue(len(constr) == 1)
+        A,_,_ = self.simple_pb.linear_constraints_matrix(cliques = [[0,1,2]])
+        self.assertTrue(A.shape[0] == 1)
         res2 = self.simple_pb.solve()
 
         self.assertTrue(self.simple_pb.check_solution(res1.x))
