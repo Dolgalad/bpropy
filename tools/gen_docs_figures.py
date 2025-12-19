@@ -1,9 +1,15 @@
 """
 Generate images for documentation
 """
-
+import os
+from pathlib import Path
 import matplotlib.pyplot as plt
 import networkx as nx
+
+# create the assets directory
+root_dir = Path(__file__).resolve().parents[1]
+assets_dir = root_dir / "docs" / "assets"
+assets_dir.mkdir(parents=True, exist_ok=True)
 
 # MIS examples
 from bpropy.co.mis import MIS
