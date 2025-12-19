@@ -281,7 +281,7 @@ class MIS(LPProblem, SerializableLPMixin):
         return cls(g, weights=wcat, cliques=C, num_subproblems=len(problems), var_sizes=np.array(sizes, dtype=int))
 
     # ---- serialization (keep your existing implementation; unchanged signature) ----
-    def _to_serializable(self, use_npz: bool, arrays: Dict[str, np.ndarray]) -> Dict[str, Any]:
+    def _to_serializable(self, use_npz: bool, arrays: Dict[str, np.ndarray], threshold_bytes: int = 200_000) -> Dict[str, Any]:
         edges = [[int(u), int(v)] for (u, v) in self.edges()]
         payload: Dict[str, Any] = {
             "nv": self.nv(),
@@ -290,7 +290,7 @@ class MIS(LPProblem, SerializableLPMixin):
         }
 
         w = np.asarray(self.w, dtype=float).reshape(-1)
-        if use_npz and w.nbytes > 20000:
+        if use_npz and w.nbytes > threshold_bytes:
             arrays["w"] = w
             payload["weights"] = {"source": "npz", "key": "w"}
         else:
