@@ -38,7 +38,7 @@ class TestSCPSerde(unittest.TestCase):
 
     def test_large_roundtrip_npz_incidence(self):
         # K-regular on items; big enough to push NPZ CSR path
-        pb = random_scp_items_k(n=10_000, m=2_000, k=3, seed=1)
+        pb = random_scp_items_k(m=10_000, n=2_000, k=3, seed=1)
 
         with tempfile.TemporaryDirectory() as td:
             stem = os.path.join(td, "scp_large")
