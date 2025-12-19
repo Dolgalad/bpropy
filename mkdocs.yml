@@ -11,6 +11,8 @@ plugins:
         python:
           options:
             show_source: false
+            docstring_style: numpy
+            merge_init_into_class: true
 
 nav:
   - Home: index.md
@@ -19,3 +21,12 @@ nav:
   - API:
     - Overview: api/index.md
     - bpropy: api/bpropy.md
+    - CO: api/co.md
+
+markdown_extensions:
+  - pymdownx.arithmatex:
+      generic: true
+extra_javascript:
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+extra_css:
+  - stylesheets/extra.css

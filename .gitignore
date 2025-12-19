@@ -26,4 +26,5 @@ logs*/
 
 # docs
 site
+docs/assets/*
 

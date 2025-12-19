@@ -38,11 +38,24 @@ from bpropy.co.kamis import write_metis_graph, kamis_solve, load_kamis_solution,
 class MIS(LPProblem, SerializableLPMixin):
     """
     Maximum Independent Set (MIS) in clique-constraint form:
-      maximize   w^T x
-      s.t.       sum_{v in C} x_v <= 1   for all cliques C (edge-covering)
-                 0 <= x <= 1, x binary (unless relaxed)
-    """
+    $$
+    \\max_{x\\in \\{0,1\\}^n}  \\sum_{i\\in V} x_i  \\quad \\text{s.t.} \\quad  \\sum_{i\\in c} x_i \\leq 1 \\quad \\forall c \\in \\mathcal{C}
+    $$
 
+    Parameters
+    ----------
+    g : nx.Graph
+        Undirected graph
+    cliques: List[List[int]], optional
+        Set of cliques used for defining the LP constraints. Defaults to ``None`` in which case cliques defaults to set of edges.
+    weights: ndarray, optional
+        Vertex weights. If ``None`` use unit weights.
+    num_subproblems: int
+        Specifies if the problem is composed of multiple disjoint graphs. Defaults to 1. If greater than 1, ``num_subproblems`` should be set along with ``var_sizes``. Subproblem ``i`` is then defined on the subgraph of ``g`` containing vertices ``[var_sizes[:i-1].sum(), var_sizes[:i-1].sum()+var_sizes[i]]``.
+    var_sizes: ndarray, optional
+        Size of subproblems.
+
+    """
     def __init__(
         self,
         g: nx.Graph,
@@ -86,19 +99,81 @@ class MIS(LPProblem, SerializableLPMixin):
         return "max"
 
     def ne(self):
+        """
+        Number of edges in ``pb.g``.
+
+        Returns
+        -------
+        n : int
+            Number of edges.
+        """
         return nx.number_of_edges(self.g)
 
     def objective_coeffs(self) -> np.ndarray:
+        """
+        Get the LP's objective function coefficients (i.e. vertex weights)
+
+        Returns
+        -------
+        w : ndarray
+            Objective coefficients.
+        """
         return self.w
 
     def nv(self) -> int:
+        """
+        Number of vertices in ``pb.g``.
+
+        Returns
+        -------
+        n : int
+            Number of vertices.
+        """
         return self.g.number_of_nodes()
 
     def variable_bounds(self):
+        """
+        Get LP variable bounds.
+
+        Returns
+        -------
+        lb, ub : Tuple[ndarray, ndarray]
+            Variable lower and upper bound values.
+        """
         n = self.nv()
         return np.zeros(n), np.ones(n)
 
     def linear_constraints_matrix(self, cliques=None):
+        """
+        Get LP constraint matrix, lower and upper bounds.
+
+        Returns
+        -------
+        A, lb, ub : Tuple[ndarray, ndarray, ndarray]
+            LP constraint matrix, lower and upper bound values.
+
+        Examples
+        --------
+        >>> A,lb,ub = pb_house.linear_constraints_matrix()
+        >>> A
+        <Compressed Sparse Row sparse matrix of dtype 'float64'
+        	with 12 stored elements and shape (6, 5)>
+          Coords	Values
+          (0, 0)	1.0
+          (0, 1)	1.0
+          (1, 0)	1.0
+          (1, 3)	1.0
+          (2, 1)	1.0
+          (2, 2)	1.0
+          (3, 1)	1.0
+          (3, 4)	1.0
+          (4, 2)	1.0
+          (4, 3)	1.0
+          (5, 2)	1.0
+          (5, 4)	1.0
+        >>> lb,ub
+        [-inf -inf -inf -inf -inf -inf] [1. 1. 1. 1. 1. 1.]
+        """
         n = self.nv()
         if cliques is None:
             cliques = self.C
@@ -164,6 +239,29 @@ class MIS(LPProblem, SerializableLPMixin):
         return ind
 
     def get_problem(self, idx: int) -> "MIS":
+        """
+        Get subproblem ``idx``.
+
+        Parameters
+        ----------
+        idx : int
+              Index of the subproblem.
+
+        Returns
+        -------
+        pb : MIS
+             Subproblem ``idx``.
+
+        Examples
+        --------
+        >>> pb_batch = MIS.batch([pb_house,pb_tie])
+        >>> pb_batch.get_problem(0).nv()
+        5
+        >>> pb_batch.get_problem(1).nv()
+        5
+        
+        ![Batch subproblems](../../assets/mis_house_tie_batch_subproblems.svg)
+        """
         if idx < 0 or idx >= self._num_subproblems:
             raise ValueError(f"idx={idx} out of range for num_subproblems={self._num_subproblems}")
 
@@ -182,7 +280,32 @@ class MIS(LPProblem, SerializableLPMixin):
         return MIS(gsub, weights=wsub, cliques=Csub)
 
     # ---- solvers (keep your specialized ones) ----
-    def solve(self, disp: bool = False, cliques=None, solver: str = "cbc", relax_integrality: bool = False):
+    def solve(self, disp: bool = False, cliques=None, solver: str = "python-mip", relax_integrality: bool = False):
+        """
+        Solve MIS problem. 
+
+        Parameters
+        ----------
+        disp : bool, optional
+              Show solver output (default ``False``).
+        cliques: List[int], optional
+              Set of cliques used for defining the constraints. Defaults to ``pb.C`` is not provided.
+        solver : str, optional
+              Solver to use. Supported values are ``cplex,scipy,kamis,python-mip,greedy``. Defaults to ``python-mip`` if not provided.
+
+
+        Returns
+        -------
+        sol : Solution
+             Problem solution.
+
+        Examples
+        --------
+        >>> sol = pb_house.solve()
+        >>> sol.x
+        [0. 1. 0. 1. 0.]
+        """
+
         if cliques is None:
             cliques = self.C
 
@@ -193,6 +316,9 @@ class MIS(LPProblem, SerializableLPMixin):
             sol = md.solve()
             return Solution.from_solver("cplex", sol=sol, md=md)
             #return MISSolution.from_cplex(sol, md)
+
+        if solver == "greedy":
+            return self.greedy()
 
         if solver == "scipy":
             n = self.nv()
@@ -217,7 +343,7 @@ class MIS(LPProblem, SerializableLPMixin):
                 x = load_kamis_solution(solution_path)
                 return solution_from_kamis(solution_path)
 
-        # default: CBC via python-mip
+        # default: python-mip
         md = mip.Model("mis")
         x = [md.add_var(lb=0.0, ub=1.0, var_type=BINARY) for _ in range(self.nv())]
         md.objective = mip.maximize(xsum(x[i] * self.w[i] for i in range(self.nv())))
@@ -256,6 +382,25 @@ class MIS(LPProblem, SerializableLPMixin):
         """
         Efficient MIS batching: disjoint-union of graphs (components).
         This is equivalent to block-diagonal constraints but preserves native structure.
+
+        Parameters
+        ----------
+        problems : List[MIS]
+            List of ``MIS`` instances to batch.
+
+        Returns
+        -------
+        pb : MIS
+            Batched ``MIS`` instance.
+
+        Examples
+        --------
+        >>> pb_batch = MIS.batch([pb_house,pb_tie])
+        >>> pb_batch.nv()
+        10
+
+        ![Batched house and tie](../../assets/mis_house_tie_batch.svg)
+
         """
         g = nx.Graph()
         C = []
@@ -324,19 +469,42 @@ class MIS(LPProblem, SerializableLPMixin):
                policy: Literal["argmax", "sample"] = "argmax",
                temperature: float = 1.0,
                rng: Optional[np.random.Generator] = None,
-               ) -> MISSolution:
+               ) -> Solution:
         """
-        Greedy heuristic for MIS.
-
+        Greedy MIS heuristic with configurable vertex selection policy.
+    
+        At each step, pick a vertex from the remaining queue, set it to 1,
+        then remove its neighbors from the queue (set them to 0).
+    
         Parameters
         ----------
-        scores : np.ndarray, optional
-            Score per vertex. If None, uses negative degree (prefer low degree).
-
+        pb: MIS
+            MIS object with:
+            - pb.nv() -> int
+            - pb.g.neighbors(u) iterable
+        scores : np.ndarray
+            Score per vertex (higher is preferred).
+        policy : {"argmax", "sample"}, default="argmax"
+            Selection strategy:
+            - "argmax": pick the remaining vertex with maximum score.
+            - "sample": sample a vertex from remaining ones with probability
+              proportional to softmax(scores/temperature).
+        temperature : float, default=1.0
+            Softmax temperature for policy="sample".
+            Lower -> more greedy; higher -> more uniform.
+        rng : numpy.random.Generator, optional
+            RNG to use for sampling. If None, uses np.random.default_rng().
+    
         Returns
         -------
-        MISSolution
-            Greedy solution.
+        sol : Solution
+            Binary solution vector of length pb.nv().
+
+        Examples
+        --------
+        >>> sol = pb_tie.greedy()
+        >>> sol.x
+        [0. 0. 0. 1. 1.]
         """
         if scores is None:
             scores = np.array([-self.g.degree[n] for n in range(self.nv())], dtype=float)
@@ -369,6 +537,16 @@ class MIS(LPProblem, SerializableLPMixin):
             If True, drop empty cliques and cliques of size < 2.
         rebuild_indicator:
             If True and this is a batched MIS, recompute clique_indicator.
+
+        Examples
+        --------
+        >>> pb_tie.C
+        [[0, 1], [0, 2], [0, 3], [1, 2], [1, 4], [2, 4]]
+        >>> pb_tie.set_cliques([[0,1,2],[1,2,4],[0,3]])
+        >>> pb_tie.C
+        [[0, 1, 2], [1, 2, 4], [0, 3]]
+
+        ![Adding clique constraints](../../assets/mis_tie_constraint_matrix.svg)
         """
         if cliques is None:
             self.C = []
@@ -525,36 +703,6 @@ def mis_greedy(
     temperature: float = 1.0,
     rng: Optional[np.random.Generator] = None,
 ) -> np.ndarray:
-    """
-    Greedy MIS heuristic with configurable vertex selection policy.
-
-    At each step, pick a vertex from the remaining queue, set it to 1,
-    then remove its neighbors from the queue (set them to 0).
-
-    Parameters
-    ----------
-    pb
-        MIS-like object with:
-        - pb.nv() -> int
-        - pb.g.neighbors(u) iterable
-    scores : np.ndarray
-        Score per vertex (higher is preferred).
-    policy : {"argmax", "sample"}, default="argmax"
-        Selection strategy:
-        - "argmax": pick the remaining vertex with maximum score.
-        - "sample": sample a vertex from remaining ones with probability
-          proportional to softmax(scores/temperature).
-    temperature : float, default=1.0
-        Softmax temperature for policy="sample".
-        Lower -> more greedy; higher -> more uniform.
-    rng : numpy.random.Generator, optional
-        RNG to use for sampling. If None, uses np.random.default_rng().
-
-    Returns
-    -------
-    np.ndarray
-        Binary solution vector of length pb.nv().
-    """
     n = pb.nv()
     scores = np.asarray(scores, dtype=float).reshape(-1)
     if scores.size != n:
