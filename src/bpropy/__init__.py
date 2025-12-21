@@ -7,7 +7,7 @@
 Submodules:
 
 - [`bpropy.co`](co.md): combinatorial optimization problems (MIS, SCP, ...)
-- [`bpropy.mrf`](api/mrf.md): factor graphs and inference (LBP, TRW, ...)
+- [`bpropy.mrf`](mrf.md): factor graphs and inference (LBP, TRW, ...)
 - [`bpropy.datasets`](api/datasets.md): dataset utilities
 - [`bpropy.graphs`](api/graphs.md): graph generators / representations
 - [`bpropy.models`](api/models.md): model components

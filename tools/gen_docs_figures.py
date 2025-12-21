@@ -122,3 +122,32 @@ print(">>> A")
 print(A)
 print(">>> lb,ub")
 print(lb,ub)
+
+## Factor Graph
+from bpropy.mrf.factor_graph import FactorGraph
+### Factor graph corresponding to the house graph
+fg = FactorGraph()
+fg.add_variables_from(range(5))
+fg.add_factors_from([[0,1],[0,3],[2,3],[1,2,4]])
+
+pos = nx.drawing.layout.bipartite_layout(fg, nodes=list(fg.iter_variables()))
+fig, ax = plt.subplots(1,2)
+nx.draw(g_house, pos=pos_house, ax=ax[0])
+nx.draw_networkx_labels(g_house, pos_house, ax=ax[0])
+ax[0].set_title("G")
+nx.draw(fg, pos=pos, ax=ax[1])
+labels = {}
+colors = {}
+for n,d in fg.nodes(data=True):
+    if d["bipartite"] == 0:
+        labels[n] = str(n)
+    else:
+        labels[n] = str(list(fg.neighbors(n)))
+print(labels)
+nx.draw_networkx_nodes(fg, pos, nodelist=list(fg.iter_factors()), node_color="orange", node_size=2000, node_shape="s", ax=ax[1])
+nx.draw_networkx_labels(fg, pos, labels=labels, ax=ax[1])
+ax[1].set_title("Factor Graph")
+plt.tight_layout()
+plt.savefig("docs/assets/factor_graph_house.svg")
+plt.close(fig)
+
