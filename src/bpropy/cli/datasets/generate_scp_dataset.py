@@ -48,7 +48,7 @@ def add_scp_subparser(subparsers) -> None:
                     help="Optional split weights/percentages (e.g. 80 10 10).")
 
     # Solving options (your original script had 'both') :contentReference[oaicite:4]{index=4}
-    ap.add_argument("--solve", choices=["none", "cbc", "scipy", "both"], default="none")
+    ap.add_argument("--solve", choices=["none", "cbc", "scipy", "scg3", "both"], default="none")
     ap.add_argument("--relax", action="store_true")
 
     ap.add_argument("--threshold-bytes", type=int, default=8000)

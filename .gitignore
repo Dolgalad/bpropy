@@ -9,6 +9,8 @@ runs/
 dummy*
 results/
 logs*/
+datasets/
+build/
 
 # slurm
 #*.slurm
@@ -27,4 +29,7 @@ logs*/
 # docs
 site
 docs/assets/*
+
+# vendor executable
+src/bpropy/vendor/scg3/scg3
 
