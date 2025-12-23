@@ -1,4 +1,5 @@
 import networkx as nx
+from typing import Optional
 
 from bpropy.co.mis import MIS
 from bpropy.clique_cover import clique_cover
