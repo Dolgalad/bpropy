@@ -1,0 +1,22 @@
+{
+  "command": "generate",
+  "problem": "mis",
+  "output_dir": "datasets/problems/mis/mis_n100_p0.15_dummy",
+  "total": 100,
+  "splits": [80, 10, 10],
+
+  "seed": 0,
+  "nv": "100",
+  "max_deg": "15",
+  "p": "0.15",
+  "ensure_min_deg": 0,
+
+  "solve": "none",
+  "relax": false,
+
+  "threshold_bytes": 8000,
+  "prefix": "",
+  "resume": false,
+  "metadata": true
+}
+

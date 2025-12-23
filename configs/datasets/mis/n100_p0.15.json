@@ -1,0 +1,21 @@
+{
+  "problem": "mis",
+  "output_dir": "datasets/problems/mis/mis_n100_p0.15",
+  "total": 10000,
+  "splits": [80, 10, 10],
+
+  "seed": 0,
+  "nv": "100",
+  "max_deg": "15",
+  "p": "0.15",
+  "ensure_min_deg": 0,
+
+  "solve": "kamis",
+  "relax": false,
+
+  "threshold_bytes": 8000,
+  "prefix": "",
+  "resume": true,
+  "metadata": true
+}
+

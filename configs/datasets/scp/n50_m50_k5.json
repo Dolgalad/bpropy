@@ -1,0 +1,20 @@
+{
+  "problem": "scp",
+  "output_dir": "datasets/problems/scp/scp_n50_m50_k5",
+  "total": 10000,
+  "splits": [80, 10, 10],
+
+  "seed": 0,
+  "n_items": "50",
+  "n_sets": "50",
+  "k": "5",
+  "balanced": false,
+
+  "solve": "scg3",
+  "relax": false,
+
+  "threshold_bytes": 8000,
+  "resume": true,
+  "metadata": true
+}
+

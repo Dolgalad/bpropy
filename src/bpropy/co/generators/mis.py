@@ -27,13 +27,13 @@ def random_mis_bounded_degree(
     seed: Optional[int] = None,
     max_trials_factor: int = 20,
 ):
-    nv_out, edges, w = random_mis_bounded_degree(
+    nv_out, edges, w = random_bounded_degree(
         nv=nv,
         max_deg=max_deg,
         target_avg_deg=target_avg_deg,
         p=p,
         ensure_min_deg=ensure_min_deg,
-        seed=k,
+        seed=seed,
     )
     # Build MIS problem
     return MIS.from_edges(nv_out, edges, weights=w)

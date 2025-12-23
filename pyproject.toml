@@ -17,6 +17,9 @@ dependencies = [
   "tensorboard",
 ]
 
+[project.scripts]
+bpropy-datasets = "bpropy.cli.datasets:main"
+
 [tool.setuptools]
 package-dir = {"" = "src"}
 include-package-data = true
