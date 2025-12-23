@@ -65,8 +65,8 @@ def run_scp_generation(args: argparse.Namespace) -> int:
     if args.total <= 0:
         raise ValueError("--total must be > 0.")
 
-    n_range = parse_int_range(args.n_items)
-    m_range = parse_int_range(args.n_sets)
+    n_range = parse_int_range(args.n_sets)
+    m_range = parse_int_range(args.n_items)
     k_range = parse_int_range(args.k)
 
     split_counts = normalize_splits(args.splits, args.total) if args.splits else None
@@ -104,6 +104,10 @@ def run_scp_generation(args: argparse.Namespace) -> int:
     for idx_global in indices:
         inst_seed = int(args.seed) + int(idx_global)
         rng = np.random.default_rng(inst_seed)
+
+        print("n_set range : ", n_range)
+        print("n_ite_range : ", m_range)
+        print("k range : ", k_range)
 
         n_i = sample_int(rng, n_range)
         m_i = sample_int(rng, m_range)
