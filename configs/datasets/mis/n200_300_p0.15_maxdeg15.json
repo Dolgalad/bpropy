@@ -1,7 +1,7 @@
 {
   "problem": "mis",
   "output_dir": "datasets/problems/mis/mis_n200-300_p0.15_maxdeg15",
-  "total": 10000,
+  "total": 5000,
   "splits": [80, 10, 10],
 
   "seed": 0,

@@ -1,7 +1,7 @@
 {
   "problem": "scp",
   "output_dir": "datasets/problems/scp/scp_n120-180_m150-250_k5_balanced",
-  "total": 10000,
+  "total": 5000,
   "splits": [80, 10, 10],
 
   "seed": 0,
