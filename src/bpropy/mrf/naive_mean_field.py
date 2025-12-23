@@ -14,7 +14,69 @@ class NMFSolution:
         self.u = u
         self.n_iter = n_iter
 
-def naive_mean_field(theta, edges, max_iter=1000, tol=1e-6, damping=0.0):
+def naive_mean_field(theta, edges, max_iter=1000, tol=1e-6, damping=0.0, eps=1e-6):
+    """
+    Mean-field fixed point for a log-linear factor graph:
+        q_i(x_i) ∝ exp( sum_{a∋i} E_{q_{a\i}}[ θ_a(x_a) ] )
+
+    Assumptions about `edges` (based on your current code):
+      - edges.n_vars.sum() == nV
+      - edges.theta_rep repeats θ so each (factor-assignment, center-variable-state) term aligns
+      - edges.pmprod_edges encodes how to build products of the relevant μ entries
+      - edges.pmprodsum_edges encodes how to sum those products into per-(var,state) scores
+
+    Returns:
+      NMFSolution with mu shaped (2*nV,) in the same flat layout you already use.
+    """
+    dev = theta.device
+    nV = int(edges.n_vars.sum().item())
+
+    # Start neutral: q_i(0)=q_i(1)=0.5
+    mu = torch.full((2 * nV,), 0.5, dtype=torch.float, device=dev)
+
+    # Repeat θ to match the number of (factor-assignment × center-slot) contributions
+    th = torch.repeat_interleave(theta, edges.theta_rep)
+
+    u = torch.tensor(float("inf"), device=dev)
+    it = 0
+
+    for it in range(max_iter):
+        # Keep μ in (eps, 1-eps) for numerical stability
+        mu_stable = mu.clamp(min=eps, max=1.0 - eps)
+
+        # This matches your intent:
+        # 1) build products over the “other variables” for each term
+        prod = torch_scatter.scatter_mul(
+            mu_stable[edges.pmprod_edges[:, 1]],
+            edges.pmprod_edges[:, 0],
+        )
+
+        # 2) weight by θ (log potential) for that factor-assignment term
+        x1 = th * prod[edges.pmprodsum_edges[:, 1]]
+
+        # 3) sum contributions into per-(var,state) scores y
+        y = torch_scatter.scatter_add(
+            x1,
+            edges.pmprodsum_edges[:, 0],
+            dim_size=2 * nV
+        )
+
+        # 4) normalize per variable
+        mup = torch.softmax(y.view(nV, 2), dim=1).reshape(-1)
+
+        # 5) damping (damping=0 means no damping, 0<d<1 means partial update)
+        if damping and damping > 0.0:
+            mup = (1.0 - damping) * mu + damping * mup
+
+        u = (mup - mu).abs().max()
+        mu = mup
+
+        if u.item() < tol:
+            break
+
+    return NMFSolution(mu=mu, u=u, n_iter=it)
+
+def naive_mean_field_old2(theta, edges, max_iter=1000, tol=1e-6, damping=0.0):
     dev = theta.device
     nV = int(edges.n_vars.sum().item())
     mu = torch.full((2*nV,), 0.5, dtype=torch.float, device=dev)  # neutral start

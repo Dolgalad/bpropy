@@ -14,7 +14,8 @@ except Exception:  # pragma: no cover
 
 from bpropy.co.base_lp import LPProblem
 from bpropy.io.serde import SerializableLPMixin
-from bpropy.co.scp_solution import SCPSolution
+#from bpropy.co.scp_solution import SCPSolution
+from bpropy.co.solution import Solution
 
 
 def number_containing_sets(a, F):
@@ -76,18 +77,19 @@ class SCP(LPProblem, SerializableLPMixin):
         return [LinearConstraint(A, lb=lb, ub=ub)]
 
     def solve(self, disp: bool = False, solver: str = "cbc", relax_integrality: bool = False):
+        if solver == "greedy":
+            return self.greedy()
         if solver == "scipy":
             n = self.nv()
             integrality = np.zeros(n) if relax_integrality else np.ones(n)
-            return SCPSolution.from_scipy_milp(
-                milp(
+            r = milp(
                     self.w,  # SciPy minimizes => direct
                     integrality=integrality,
                     constraints=self.constraints(),
                     bounds=Bounds(np.zeros(n), np.ones(n)),
                     options={"disp": disp},
                 )
-            )
+            return Solution.from_solver("scipy", r=r)
 
         # default: CBC via python-mip
         md = mip.Model("scp")
@@ -97,7 +99,7 @@ class SCP(LPProblem, SerializableLPMixin):
             md += mip.xsum(x[i] for i, f in enumerate(self.F) if a in f) >= 1
         md.verbose = 0
         md.optimize(relax=relax_integrality)
-        return SCPSolution.from_python_mip(x, md)
+        return Solution.from_solver("python-mip", x=x, md=md)
 
     # ---- serialization (keep your existing logic, but align names) ----
     def _to_serializable(self, use_npz: bool, arrays: dict, threshold_bytes: int = 200_000):
@@ -177,5 +179,130 @@ class SCP(LPProblem, SerializableLPMixin):
         #A_univ = list(range(max(max(f) for f in F) + 1)) if len(F) else []
         return cls(A_univ, F, weights=w)
 
+    def greedy(
+        self,
+        *,
+        policy: Literal["argmax", "sample"] = "argmax",
+        temperature: float = 1.0,
+        rng: Optional[np.random.Generator] = None,
+        use_costs: bool = True,
+    ) -> SCPSolution:
+        """
+        Greedy Set Cover heuristic.
+    
+        Parameters
+        ----------
+        policy : {"argmax","sample"}
+            "argmax": pick best score each step.
+            "sample": sample via softmax(scores/temperature).
+        temperature : float
+            Softmax temperature for sampling.
+        rng : np.random.Generator, optional
+            RNG for sampling.
+        use_costs : bool
+            If True, score = newly_covered / w[j]. If False, score = newly_covered.
+    
+        Returns
+        -------
+        sol : SCPSolution
+        """
+        x = scp_greedy(self, policy=policy, temperature=temperature, rng=rng, use_costs=use_costs)
+        return Solution(x=x, solver="greedy")
+
 LPProblem.register_vcgraph_type("SCP", SCP)
+
+def _softmax(x: np.ndarray, temperature: float = 1.0) -> np.ndarray:
+    x = np.asarray(x, dtype=float)
+    if temperature <= 0:
+        raise ValueError("temperature must be > 0")
+    z = (x - np.max(x)) / temperature
+    e = np.exp(z)
+    s = e.sum()
+    if not np.isfinite(s) or s <= 0:
+        return np.full_like(e, 1.0 / e.size, dtype=float)
+    return e / s
+
+
+def scp_greedy(
+    pb,
+    *,
+    policy: Literal["argmax", "sample"] = "argmax",
+    temperature: float = 1.0,
+    rng: Optional[np.random.Generator] = None,
+    use_costs: bool = True,
+) -> np.ndarray:
+    """
+    Classic greedy heuristic for Set Cover:
+
+      pick j maximizing gain(j) / w[j]   (if use_costs=True)
+      pick j maximizing gain(j)          (if use_costs=False)
+
+    where gain(j) is the number of currently uncovered elements in pb.F[j].
+
+    Returns x ∈ {0,1}^nv.
+    """
+    n = pb.nv()
+    m = pb.ne()
+
+    if policy == "sample" and rng is None:
+        rng = np.random.default_rng()
+
+    # coverage state
+    uncovered = np.ones(m, dtype=bool)
+    active_sets = np.ones(n, dtype=bool)
+
+    x = np.zeros(n, dtype=float)
+
+    # Fail-fast if there are elements no set can cover
+    # (optional but nice)
+    covered_by_any = np.zeros(m, dtype=bool)
+    for j in range(n):
+        for a in pb.F[j]:
+            covered_by_any[int(a)] = True
+    if not covered_by_any.all():
+        # infeasible SCP instance
+        return x
+
+    while uncovered.any():
+        active_idx = np.flatnonzero(active_sets)
+        if active_idx.size == 0:
+            # No sets left but still uncovered elements => infeasible under given representation
+            break
+
+        # Compute gain for each active set
+        gains = np.zeros(active_idx.size, dtype=float)
+        for k, j in enumerate(active_idx):
+            elems = np.asarray(pb.F[int(j)], dtype=int)
+            if elems.size:
+                gains[k] = float(np.sum(uncovered[elems]))
+
+        if use_costs:
+            costs = np.asarray(pb.w, dtype=float).reshape(-1)
+            denom = np.maximum(costs[active_idx], 1e-12)
+            scores = gains / denom
+        else:
+            scores = gains
+
+        # If all gains are 0, we're stuck
+        if np.max(scores) <= 0:
+            break
+
+        if policy == "argmax":
+            j = int(active_idx[np.argmax(scores)])
+        elif policy == "sample":
+            # sample proportional to exp(scores / temperature)
+            p = _softmax(scores, temperature=temperature)
+            j = int(rng.choice(active_idx, p=p))
+        else:
+            raise ValueError(f"Unknown policy={policy!r} (expected 'argmax' or 'sample')")
+
+        # select set j
+        x[j] = 1.0
+        active_sets[j] = False
+
+        # mark covered
+        for a in pb.F[j]:
+            uncovered[int(a)] = False
+
+    return x
 

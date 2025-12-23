@@ -3,6 +3,8 @@ import time
 import networkx as nx
 import numpy as np
 
+from bpropy.co.solution import Solution
+
 def write_metis_graph(filename, g):
     # make graph undirected
     g = nx.to_undirected(g)
@@ -36,5 +38,5 @@ def load_kamis_solution(path):
 
 def solution_from_kamis(path):
     x = load_kamis_solution(path)
-    return Solution(x=x, olver="kamis")
+    return Solution(x=x, solver="kamis")
 

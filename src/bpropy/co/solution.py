@@ -143,6 +143,6 @@ def _from_python_mip(x, md) -> Solution:
         varbasis_onehot=varbasis_onehot,
         reduced_costs=rc,
         raw=md,
-        solver="python-mip",
+        solver="python-mip:"+md.solver_name.lower(),
     )
 

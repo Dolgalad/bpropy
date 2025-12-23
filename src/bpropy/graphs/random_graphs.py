@@ -1,7 +1,7 @@
 import numpy as np
 from typing import Optional
 
-def random_mis_bounded_degree(
+def random_bounded_degree(
     nv: int,
     max_deg: int,
     *,
