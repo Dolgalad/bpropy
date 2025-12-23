@@ -1,7 +1,37 @@
 from __future__ import annotations
+from importlib.resources import files
+import os, subprocess
 from typing import Iterable, Sequence, List, Tuple, Optional
 import numpy as np
 import re
+
+def scg3_executable_path() -> str:
+    exe = "scg3.exe" if os.name == "nt" else "scg3"
+    return str(files("bpropy").joinpath("vendor/scg3", exe))
+
+def run_scg3(
+    instance_sc: str,
+    solution_out: str,
+    verbose: bool = False,
+    log_out: Optional[str] = None,
+) -> None:
+    exe = scg3_executable_path()
+    cmd = [exe, instance_sc, solution_out]
+
+    if verbose:
+        # Show scg3 output in the terminal
+        subprocess.check_call(cmd)
+        return
+
+    # Not verbose: redirect output
+    if log_out is None:
+        # Silence everything
+        with open(os.devnull, "w") as devnull:
+            subprocess.check_call(cmd, stdout=devnull, stderr=devnull)
+    else:
+        # Log everything
+        with open(log_out, "w") as f:
+            subprocess.check_call(cmd, stdout=f, stderr=f)
 
 def write_orlib_sc(
     path: str,
@@ -161,4 +191,5 @@ def parse_scg3_solution_file(
         for j in chosen:
             x[j] = 1
     return x
+
 

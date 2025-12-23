@@ -1,6 +1,7 @@
 # bpropy/co/scp.py
 from __future__ import annotations
-
+import os
+import tempfile
 from typing import Dict, Any, List, Optional, Literal
 import numpy as np
 import mip
@@ -14,8 +15,8 @@ except Exception:  # pragma: no cover
 
 from bpropy.co.base_lp import LPProblem
 from bpropy.io.serde import SerializableLPMixin
-#from bpropy.co.scp_solution import SCPSolution
 from bpropy.co.solution import Solution
+from bpropy.co.scg3 import scp_to_orlib_sc, run_scg3, parse_scg3_solution_file
 
 
 def number_containing_sets(a, F):
@@ -90,6 +91,16 @@ class SCP(LPProblem, SerializableLPMixin):
                     options={"disp": disp},
                 )
             return Solution.from_solver("scipy", r=r)
+        if solver == "scg3":
+            # write instance to temporary orlib .sc file
+            with tempfile.TemporaryDirectory() as d:
+                scp_path = os.path.join(d, "instance.sc")
+                solution_path = os.path.join(d, "solution")
+                scp_to_orlib_sc(self, scp_path, rows_are_zero_based=True)
+                run_scg3(scp_path, solution_path, verbose=disp)
+                # load solution
+                x = parse_scg3_solution_file(solution_path, n_cols=self.nv(), one_based_cols=True)
+                return Solution(solver="scg3", x=x)
 
         # default: CBC via python-mip
         md = mip.Model("scp")

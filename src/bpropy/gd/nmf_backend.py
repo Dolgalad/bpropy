@@ -38,10 +38,10 @@ class NMFBackend:
 
     def reset(self, pb: Any) -> None:
         from bpropy.mrf.nmf_edges import NMFEdges
-        from bpropy.mrf.naive_mean_field import naive_mean_field, naive_mean_field_new
+        from bpropy.mrf.naive_mean_field import naive_mean_field
         from bpropy.mrf.evidence_factory import EvidenceMaskFactory
 
-        self._nmf = naive_mean_field_new
+        self._nmf = naive_mean_field
 
         fg = self.fg_builder(pb)
         self._theta = self.theta_builder(pb, fg, self.device, self.dtype)

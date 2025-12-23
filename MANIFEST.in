@@ -1,0 +1,1 @@
+recursive-include src/bpropy/vendor/scg3 *.c *.h

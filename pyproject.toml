@@ -19,9 +19,15 @@ dependencies = [
 
 [tool.setuptools]
 package-dir = {"" = "src"}
+include-package-data = true
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+bpropy = [
+    "vendor/scg3/scg3",
+]
 
 [project.optional-dependencies]
 dev = [
