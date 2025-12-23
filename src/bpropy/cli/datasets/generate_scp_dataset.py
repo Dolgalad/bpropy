@@ -105,10 +105,6 @@ def run_scp_generation(args: argparse.Namespace) -> int:
         inst_seed = int(args.seed) + int(idx_global)
         rng = np.random.default_rng(inst_seed)
 
-        print("n_set range : ", n_range)
-        print("n_ite_range : ", m_range)
-        print("k range : ", k_range)
-
         n_i = sample_int(rng, n_range)
         m_i = sample_int(rng, m_range)
         k_i = sample_int(rng, k_range)
@@ -135,8 +131,8 @@ def run_scp_generation(args: argparse.Namespace) -> int:
             t_scipy, res_lp = time_f(pb.solve, solver="scipy", relax_integrality=bool(args.relax))
             x_scipy = res_lp.x
         if args.solve in ("scg3", "both"):
-            t_scipy, res_lp = time_f(pb.solve, solver="scg3", relax_integrality=bool(args.relax))
-            x_scipy = res_lp.x
+            t_scg3, res_lp = time_f(pb.solve, solver="scg3", relax_integrality=bool(args.relax))
+            x_scg3 = res_lp.x
 
         # 3) save
         pb.save(str(stem), split_large=True, threshold_bytes=int(args.threshold_bytes))
@@ -145,6 +141,9 @@ def run_scp_generation(args: argparse.Namespace) -> int:
             assignments["cbc"] = x_cbc
         if x_scipy is not None:
             assignments["scipy_lp" if args.relax else "scipy"] = x_scipy
+        if x_scipy is not None:
+            assignments["scg3"] = x_scg3
+
         pb.save_assignments(str(stem), assignments=assignments, threshold_bytes=int(args.threshold_bytes))
 
         # 4) optional legacy (mirrors your existing behavior) :contentReference[oaicite:5]{index=5}
