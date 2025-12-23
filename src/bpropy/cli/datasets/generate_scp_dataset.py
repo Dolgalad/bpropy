@@ -141,7 +141,7 @@ def run_scp_generation(args: argparse.Namespace) -> int:
             assignments["cbc"] = x_cbc
         if x_scipy is not None:
             assignments["scipy_lp" if args.relax else "scipy"] = x_scipy
-        if x_scipy is not None:
+        if x_scg3 is not None:
             assignments["scg3"] = x_scg3
 
         pb.save_assignments(str(stem), assignments=assignments, threshold_bytes=int(args.threshold_bytes))
@@ -157,6 +157,9 @@ def run_scp_generation(args: argparse.Namespace) -> int:
             msg += f" cbc={t_cbc:.3f}s"
         if t_scipy is not None:
             msg += f" scipy={'LP' if args.relax else 'MILP'}={t_scipy:.3f}s"
+        if t_scg3 is not None:
+            msg += f" scg3={t_scg3:.3f}s"
+
         print(msg, flush=True)
 
     return 0
