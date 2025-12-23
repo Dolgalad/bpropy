@@ -5,8 +5,8 @@ from bpropy.co.mis import MIS
 from bpropy.clique_cover import clique_cover
 from bpropy.graphs.random_graphs import random_bounded_degree
 
-def random_mis(n=100, p=0.15, cliques=False):
-    g = nx.generators.random_graphs.erdos_renyi_graph(n, p)
+def random_mis(n=100, p=0.15, cliques=False, seed=None):
+    g = nx.generators.random_graphs.erdos_renyi_graph(n, p, seed=seed)
     if cliques:
         cc = clique_cover(g)
         pb = MIS(g, cliques=cc)

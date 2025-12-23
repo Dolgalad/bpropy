@@ -6,8 +6,8 @@ import numpy as np
 
 from scipy.optimize import LinearConstraint
 
-from bpropy.co.scp import (
-    SCP,
+from bpropy.co.scp import SCP
+from bpropy.co.generators.scp import (
     random_scp_items_k,
     random_scp_items_k_balanced,
 )
@@ -34,7 +34,7 @@ class TestSCP(unittest.TestCase):
     def setUp(self):
         self.pb_simple = simple_scp()
         # Medium instance via K-regular (on items) generator
-        self.pb_rand = random_scp_items_k(n=60, m=25, k=3, seed=0)
+        self.pb_rand = random_scp_items_k(n=25, m=60, k=3, seed=0)
 
     # ---------- basic structure ----------
     def test_scp_init(self):
@@ -44,12 +44,12 @@ class TestSCP(unittest.TestCase):
         self.assertEqual(self.pb_rand.nv(), 25)
 
     def test_constraints_shape_and_count(self):
-        cons = self.pb_simple.constraints()
-        self.assertEqual(len(cons), self.pb_simple.ne())
-        for c in cons:
-            self.assertIsInstance(c, LinearConstraint)
+        #cons = self.pb_simple.constraints()
+        A,_,_ = self.pb_simple.linear_constraints_matrix()
+        self.assertEqual(A.shape[0], self.pb_simple.ne())
+        for c in A:
             # A single row over nv variables
-            self.assertEqual(c.A.shape, (1, self.pb_simple.nv()))
+            self.assertEqual(c.shape, (self.pb_simple.nv(),))
 
     # ---------- feasibility & greedy ----------
     def test_scp_solution_check(self):
@@ -60,7 +60,7 @@ class TestSCP(unittest.TestCase):
         self.assertFalse(pb.check_solution(x_bad))
 
     def test_greedy_feasible(self):
-        x = self.pb_rand.greedy()
+        x = self.pb_rand.greedy().x
         self.assertTrue(self.pb_rand.check_solution(x))
 
     # ---------- ILP & LP relax ----------
@@ -95,7 +95,7 @@ class TestSCP(unittest.TestCase):
     def test_weighted_objective_agreement_small(self):
         # Tiny random instance where both solvers should land at the same optimum
         rng = np.random.default_rng(123)
-        pb = random_scp_items_k(n=6, m=4, k=2, seed=1, weights=1.0 + rng.random(4))
+        pb = random_scp_items_k(n=4, m=6, k=2, seed=1, weights=1.0 + rng.random(4))
         res_cbc  = pb.solve(solver="cbc",  relax_integrality=False)
         res_scip = pb.solve(solver="scipy", relax_integrality=False)
 
@@ -112,19 +112,19 @@ class TestSCP(unittest.TestCase):
         n, m, k = 50, 20, 3
         pb = random_scp_items_k(n=n, m=m, k=k, seed=42)
         # Each item appears in exactly k sets:
-        deg = np.zeros(n, dtype=int)
+        deg = np.zeros(m, dtype=int)
         for j, f in enumerate(pb.F):
             deg[np.array(f, dtype=int)] += 1
         self.assertTrue(np.all(deg == k))
         # Adjacency matrix shape & boolean semantics
         adj = pb.adj_matrix()
-        self.assertEqual(adj.shape, (n, m))
+        self.assertEqual(adj.shape, (m, n))
         for j, f in enumerate(pb.F):
             covered = np.where(adj[:, j] == 1)[0].tolist()
             self.assertEqual(sorted(covered), sorted(f))
 
     def test_balanced_generator_no_empty_sets(self):
-        n, m, k = 80, 30, 2
+        m, n, k = 80, 30, 2
         pb = random_scp_items_k_balanced(n=n, m=m, k=k, seed=7)
         sizes = [len(f) for f in pb.F]
         self.assertTrue(min(sizes) >= 1)  # no empty sets after repair
@@ -140,7 +140,7 @@ class TestSCP(unittest.TestCase):
         F = [[0], [0, 1], [1, 2]]
         w = np.array([1.0, 1.0, 1.0])
         pb = SCP(A, F, weights=w)
-        x = pb.greedy()
+        x = pb.greedy().x
         self.assertTrue(pb.check_solution(x))
 
 

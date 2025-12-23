@@ -20,12 +20,12 @@ def write_metis_graph(filename, g):
             f.write(" ".join([str(i+1) for i in neighbors]))
             f.write("\n")
 
-def kamis_solve(graph_path, solution_path, timelimit=1000, seed=0, executable="redumis", disp=False):
+def kamis_solve(graph_path, solution_path, timelimit=1000, seed=0, executable="redumis", verbose=False):
     kamis_root = os.getenv("KAMIS_ROOT")
     if kamis_root is None:
         raise Exception("KAMIS_ROOT environment variable not set")
     cmd = f"{os.path.join(kamis_root,'deploy',executable)} {graph_path} --output={solution_path} --seed={seed} --time_limit={timelimit}"
-    if not disp:
+    if not verbose:
         cmd += " > /dev/null 2>&1"
     t0 = time.time()
     os.system(cmd)

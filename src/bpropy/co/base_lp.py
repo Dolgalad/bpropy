@@ -13,12 +13,13 @@ try:
 except Exception:  # pragma: no cover
     sp = None
 
+from bpropy.co.solution import Solution
 
 @dataclass
 class LPSolveConfig:
     solver: str = "scipy"              # "scipy" | "cbc" | "cplex" | ...
     relax_integrality: bool = False
-    disp: bool = False
+    verbose: bool = False
 
 
 class LPProblem(ABC):
@@ -170,11 +171,148 @@ class LPProblem(ABC):
         return feas
 
     # ---------- generic solve fallback ----------
+    def solve(
+        self,
+        *,
+        config: Optional[LPSolveConfig] = None,
+        solver: Optional[str] = None,
+        relax_integrality: Optional[bool] = None,
+        verbose: Optional[bool] = None,
+        # override hook for MIS(cliques=...)
+        override_linear_constraints: Optional[Tuple[object, np.ndarray, np.ndarray]] = None,
+    ) -> Solution:
+        """
+        Generic LP/MILP solve for problems that provide the LP view.
+
+        Specialized problem classes (MIS/SCP/...) can implement special solvers,
+        and delegate here for generic solvers.
+
+        Parameters
+        ----------
+        solver:
+            "scipy" | "python-mip" | "cbc" | "cplex" | ...
+        relax_integrality:
+            If True, solve the LP relaxation.
+        verbose:
+            Verbosity (passed to backend if supported).
+        override_linear_constraints:
+            Optional (A, lb, ub) to use instead of self.linear_constraints_matrix().
+            Useful for MIS with custom cliques.
+
+        Returns
+        -------
+        Solution
+        """
+        if config is None:
+            config = LPSolveConfig()
+        if solver is not None:
+            config.solver = solver
+        if relax_integrality is not None:
+            config.relax_integrality = bool(relax_integrality)
+        if verbose is not None:
+            config.verbose = bool(verbose)
+
+        slv = (config.solver or "scipy").lower()
+
+        # --- SciPy backend ---
+        if slv == "scipy":
+            if override_linear_constraints is None:
+                r = self.solve_scipy_milp(
+                    relax_integrality=config.relax_integrality,
+                    verbose=config.verbose,
+                )
+                return Solution.from_solver("scipy", r=r)
+            else:
+                # Use SciPy milp directly with override constraints.
+                from scipy.optimize import milp, Bounds, LinearConstraint
+                n = self.nv()
+                c = np.asarray(self.objective_coeffs(), dtype=float).reshape(-1)
+                c_min = c if self.objective_sense == "min" else -c
+
+                integrality = np.zeros(n) if config.relax_integrality else np.ones(n)
+
+                vb = self.variable_bounds()
+                if vb is None:
+                    lbx = np.full(n, -np.inf)
+                    ubx = np.full(n, np.inf)
+                else:
+                    lbx, ubx = vb
+
+                A, lb, ub = override_linear_constraints
+                r = milp(
+                    c_min,
+                    integrality=integrality,
+                    constraints=[LinearConstraint(A, lb=lb, ub=ub)],
+                    bounds=Bounds(lbx, ubx),
+                    options={"disp": config.verbose},
+                )
+                return Solution.from_solver("scipy", r=r)
+
+        # --- python-mip family backend ---
+        # allow "cbc" as alias; store solver_name accordingly
+        if slv in {"python-mip", "cbc", "cplex", "gurobi", "grb"}:
+            import mip
+
+            # map alias -> mip solver_name if you like
+            solver_name = None if slv in {"python-mip", "cbc"} else slv.upper()
+            if solver_name is None:
+                md = mip.Model("lp")
+            else:
+                md = mip.Model("lp", solver_name=solver_name)
+
+
+            n = self.nv()
+            c = np.asarray(self.objective_coeffs(), dtype=float).reshape(-1)
+
+            vb = self.variable_bounds()
+            if vb is None:
+                lbx = np.full(n, -np.inf)
+                ubx = np.full(n, np.inf)
+            else:
+                lbx, ubx = vb
+                lbx = np.asarray(lbx, dtype=float).reshape(-1)
+                ubx = np.asarray(ubx, dtype=float).reshape(-1)
+
+            # choose var type: continuous if relaxed, binary otherwise
+            var_type = mip.CONTINUOUS if config.relax_integrality else mip.BINARY
+            x = [md.add_var(lb=float(lbx[i]), ub=float(ubx[i]), var_type=var_type) for i in range(n)]
+
+            # objective
+            expr = mip.xsum(float(c[i]) * x[i] for i in range(n))
+            md.objective = mip.minimize(expr) if self.objective_sense == "min" else mip.maximize(expr)
+
+            # constraints: lb <= A x <= ub
+            if override_linear_constraints is None:
+                A, lb, ub = self.linear_constraints_matrix()
+            else:
+                A, lb, ub = override_linear_constraints
+
+            # build constraints row-wise (works for dense or sparse A)
+            # (for sparse, you can use A.getrow(i) with scipy, but keep it simple here)
+            A = A.toarray() if hasattr(A, "toarray") else np.asarray(A, dtype=float)
+            lb = np.asarray(lb, dtype=float).reshape(-1)
+            ub = np.asarray(ub, dtype=float).reshape(-1)
+
+            for i in range(A.shape[0]):
+                row = A[i]
+                row_expr = mip.xsum(float(row[j]) * x[j] for j in range(n) if row[j] != 0.0)
+                if np.isfinite(lb[i]):
+                    md += row_expr >= float(lb[i])
+                if np.isfinite(ub[i]):
+                    md += row_expr <= float(ub[i])
+
+            md.verbose = 1 if config.verbose else 0
+            md.optimize(relax=config.relax_integrality)
+
+            return Solution.from_solver("python-mip", x=x, md=md)
+
+        raise ValueError(f"Unknown generic solver={config.solver!r}")
+
     def solve_scipy_milp(
         self,
         *,
         relax_integrality: bool = False,
-        disp: bool = False,
+        verbose: bool = False,
     ):
         """
         Generic SciPy MILP solver for problems that provide (A,lb,ub) and bounds.
@@ -207,7 +345,7 @@ class LPProblem(ABC):
             integrality=integrality,
             constraints=self.constraints(),
             bounds=Bounds(lbx, ubx),
-            options={"disp": disp},
+            options={"disp": verbose},
         )
 
     # ---------- default batching ----------

@@ -22,7 +22,7 @@ docplex_spec = importlib.util.find_spec("docplex")
 if docplex_spec is not None:
     from docplex.mp.model import Model
 
-from bpropy.co.base_lp import LPProblem
+from bpropy.co.base_lp import LPProblem, LPSolveConfig
 from bpropy.io.serde import SerializableLPMixin
 
 from bpropy.utils.graph_utils import ordered_edges
@@ -280,79 +280,46 @@ class MIS(LPProblem, SerializableLPMixin):
         return MIS(gsub, weights=wsub, cliques=Csub)
 
     # ---- solvers (keep your specialized ones) ----
-    def solve(self, disp: bool = False, cliques=None, solver: str = "python-mip", relax_integrality: bool = False):
-        """
-        Solve MIS problem. 
-
-        Parameters
-        ----------
-        disp : bool, optional
-              Show solver output (default ``False``).
-        cliques: List[int], optional
-              Set of cliques used for defining the constraints. Defaults to ``pb.C`` is not provided.
-        solver : str, optional
-              Solver to use. Supported values are ``cplex,scipy,kamis,python-mip,greedy``. Defaults to ``python-mip`` if not provided.
-
-
-        Returns
-        -------
-        sol : Solution
-             Problem solution.
-
-        Examples
-        --------
-        >>> sol = pb_house.solve()
-        >>> sol.x
-        [0. 1. 0. 1. 0.]
-        """
+    def solve(
+        self,
+        verbose: bool = False,
+        cliques=None,
+        solver: str = "python-mip",
+        relax_integrality: bool = False,
+    ) -> Solution:
 
         if cliques is None:
             cliques = self.C
 
-        if solver == "cplex":
+        slv = (solver or "python-mip").lower()
+
+        # specialized solvers
+        if slv == "greedy":
+            return self.greedy()
+
+        if slv == "kamis":
+            with tempfile.TemporaryDirectory() as d:
+                graph_path = os.path.join(d, "graph.metis")
+                solution_path = os.path.join(d, "solution")
+                write_metis_graph(graph_path, self.g)
+                kamis_solve(graph_path, solution_path, verbose=verbose)
+                return solution_from_kamis(solution_path)
+
+        if slv == "cplex":
             if docplex_spec is None:
                 raise RuntimeError("CPLEX solver not found. Missing package 'docplex'")
             md = cplex_model(self, continuous_relaxation=relax_integrality, cliques=cliques)
             sol = md.solve()
             return Solution.from_solver("cplex", sol=sol, md=md)
-            #return MISSolution.from_cplex(sol, md)
 
-        if solver == "greedy":
-            return self.greedy()
+        # generic solvers, but MIS may override constraints via cliques
+        # Build override constraints matrix only if cliques != self.C (or always, your choice)
+        A, lb, ub = self.linear_constraints_matrix(cliques=cliques)
 
-        if solver == "scipy":
-            n = self.nv()
-            integrality = np.zeros(n) if relax_integrality else np.ones(n)
-            # SciPy minimizes; convert max to min by negating objective
-            res = milp(
-                    -self.w,
-                    integrality=integrality,
-                    constraints=[LinearConstraint(*self.linear_constraints_matrix(cliques=cliques))]
-                    if False else self.constraints_for_scipy(cliques=cliques),
-                    bounds=Bounds(np.zeros(n), np.ones(n)),
-                    options={"disp": disp},
-                )
-            return Solution.from_solver("scipy", r=res)
-
-        if solver == "kamis":
-            with tempfile.TemporaryDirectory() as d:
-                graph_path = os.path.join(d, "graph.metis")
-                solution_path = os.path.join(d, "solution")
-                write_metis_graph(graph_path, self.g)
-                kamis_solve(graph_path, solution_path, disp=disp)
-                x = load_kamis_solution(solution_path)
-                return solution_from_kamis(solution_path)
-
-        # default: python-mip
-        md = mip.Model("mis")
-        x = [md.add_var(lb=0.0, ub=1.0, var_type=BINARY) for _ in range(self.nv())]
-        md.objective = mip.maximize(xsum(x[i] * self.w[i] for i in range(self.nv())))
-        for c in cliques:
-            md += mip.xsum(x[u] for u in c) <= 1
-        md.verbose = 0
-        md.optimize(relax=relax_integrality)
-        return Solution.from_solver("python-mip", x=x, md=md)
-        #return MISSolution.from_python_mip(x, md)
+        return super().solve(
+            config=LPSolveConfig(solver=slv, relax_integrality=relax_integrality, verbose=verbose),
+            override_linear_constraints=(A, lb, ub),
+        )
 
     def constraints_for_scipy(self, cliques=None):
         # SciPy can take a single LinearConstraint with sparse A; better than list-of-rows.

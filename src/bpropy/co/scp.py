@@ -13,7 +13,7 @@ try:
 except Exception:  # pragma: no cover
     sp = None
 
-from bpropy.co.base_lp import LPProblem
+from bpropy.co.base_lp import LPProblem, LPSolveConfig
 from bpropy.io.serde import SerializableLPMixin
 from bpropy.co.solution import Solution
 from bpropy.co.scg3 import scp_to_orlib_sc, run_scg3, parse_scg3_solution_file
@@ -76,41 +76,32 @@ class SCP(LPProblem, SerializableLPMixin):
         # Prefer a single LinearConstraint with full matrix.
         A, lb, ub = self.linear_constraints_matrix()
         return [LinearConstraint(A, lb=lb, ub=ub)]
+    def solve(
+        self,
+        verbose : bool = False,
+        solver: str = "cbc",
+        relax_integrality: bool = False,
+    ) -> Solution:
 
-    def solve(self, disp: bool = False, solver: str = "cbc", relax_integrality: bool = False):
-        if solver == "greedy":
+        slv = (solver or "cbc").lower()
+
+        # specialized
+        if slv == "greedy":
             return self.greedy()
-        if solver == "scipy":
-            n = self.nv()
-            integrality = np.zeros(n) if relax_integrality else np.ones(n)
-            r = milp(
-                    self.w,  # SciPy minimizes => direct
-                    integrality=integrality,
-                    constraints=self.constraints(),
-                    bounds=Bounds(np.zeros(n), np.ones(n)),
-                    options={"disp": disp},
-                )
-            return Solution.from_solver("scipy", r=r)
-        if solver == "scg3":
-            # write instance to temporary orlib .sc file
+
+        if slv == "scg3":
             with tempfile.TemporaryDirectory() as d:
                 scp_path = os.path.join(d, "instance.sc")
                 solution_path = os.path.join(d, "solution")
                 scp_to_orlib_sc(self, scp_path, rows_are_zero_based=True)
-                run_scg3(scp_path, solution_path, verbose=disp)
-                # load solution
+                run_scg3(scp_path, solution_path, verbose=verbose)
                 x = parse_scg3_solution_file(solution_path, n_cols=self.nv(), one_based_cols=True)
                 return Solution(solver="scg3", x=x)
 
-        # default: CBC via python-mip
-        md = mip.Model("scp")
-        x = [md.add_var(lb=0.0, ub=1.0, var_type=BINARY) for _ in range(self.nv())]
-        md.objective = mip.minimize(xsum(self.w[i] * x[i] for i in range(self.nv())))
-        for a in self.A:
-            md += mip.xsum(x[i] for i, f in enumerate(self.F) if a in f) >= 1
-        md.verbose = 0
-        md.optimize(relax=relax_integrality)
-        return Solution.from_solver("python-mip", x=x, md=md)
+        # generic
+        return super().solve(
+            config=LPSolveConfig(solver=slv, relax_integrality=relax_integrality, verbose=verbose)
+        )
 
     # ---- serialization (keep your existing logic, but align names) ----
     def _to_serializable(self, use_npz: bool, arrays: dict, threshold_bytes: int = 200_000):

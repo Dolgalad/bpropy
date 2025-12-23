@@ -54,7 +54,7 @@ def random_scp_items_k_balanced(n: int,
     # 1) Ensure no empty sets: move a random item into empty sets,
     #    removing it from one of its current sets with size > 1.
     empties = [j for j in range(n) if len(F[j]) == 0]
-    if empties:
+    if empties and m*k >= n:
         rng = np.random.default_rng(seed)
         # Precompute item -> sets map
         item_sets = {a: set() for a in range(m)}
