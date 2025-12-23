@@ -130,10 +130,13 @@ def run_scp_generation(args: argparse.Namespace) -> int:
         if args.solve in ("scipy", "both"):
             t_scipy, res_lp = time_f(pb.solve, solver="scipy", relax_integrality=bool(args.relax))
             x_scipy = res_lp.x
+        if args.solve in ("scg3", "both"):
+            t_scipy, res_lp = time_f(pb.solve, solver="scg3", relax_integrality=bool(args.relax))
+            x_scipy = res_lp.x
 
         # 3) save
         pb.save(str(stem), split_large=True, threshold_bytes=int(args.threshold_bytes))
-        assignments: Dict[str, Any] = {"greedy": x_greedy}
+        assignments: Dict[str, Any] = {"greedy": x_greedy.x}
         if x_cbc is not None:
             assignments["cbc"] = x_cbc
         if x_scipy is not None:

@@ -9,8 +9,8 @@ runs/
 dummy*
 results/
 logs*/
-datasets/
-build/
+/datasets/
+/build/
 
 # slurm
 #*.slurm
