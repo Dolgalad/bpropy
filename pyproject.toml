@@ -19,6 +19,7 @@ dependencies = [
 
 [project.scripts]
 bpropy-datasets = "bpropy.cli.datasets:main"
+bpropy-train = "bpropy.cli.train:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

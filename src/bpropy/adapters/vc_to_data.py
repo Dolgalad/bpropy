@@ -16,8 +16,9 @@ from bpropy.graphs.vc_graph import VCGraph, variable_constraint_graph  # shared 
 from bpropy.utils.graph_utils import get_edge_index             # used in both mis/scp adapters today :contentReference[oaicite:5]{index=5}
 
 # Factor-graph + wiring
-from bpropy.mrf.mis_factor_graph import MISFactorGraph
-from bpropy.mrf.scp_factor_graph import SCPFactorGraph
+#from bpropy.mrf.mis_factor_graph import MISFactorGraph
+#from bpropy.mrf.scp_factor_graph import SCPFactorGraph
+from bpropy.mrf.factor_graph import FactorGraph
 from bpropy.mrf.lbp_edges import LBPEdges
 from bpropy.mrf.nmf_edges import NMFEdges                       # has .batch, __getitem__, to(device) you rely on :contentReference[oaicite:6]{index=6}
 from bpropy.mrf.sufficient_statistics import x2ss
@@ -88,7 +89,7 @@ def problem_to_data(pb,
                *,
                with_lbp: bool = False,
                with_nmf: bool = False,
-               with_ss_labels: bool = False,
+               with_ss: bool = False,
                y: Optional[torch.Tensor] = None,
                hetero: bool = False,
                feature_mode: str = None) -> Union[Data, HeteroData]:
@@ -124,17 +125,24 @@ def problem_to_data(pb,
 
         # optional wiring via the right factor-graph class
         if with_lbp or with_nmf:
-            if name == "MIS":
-                fg = MISFactorGraph(pb)
-            else:
-                fg = SCPFactorGraph(pb)
+            fg = FactorGraph(pb)
+            #if name == "MIS":
+            #    fg = MISFactorGraph(pb)
+            #else:
+            #    fg = SCPFactorGraph(pb)
             if with_lbp:
                 data.lbp_edges = LBPEdges(fg)                                  # exactly how you attach today :contentReference[oaicite:13]{index=13} :contentReference[oaicite:14]{index=14}
             if with_nmf:
                 data.nmf_edges = NMFEdges(fg)                                  # NMFEdges has batching/slicing utilities already :contentReference[oaicite:15]{index=15}
             if y is not None:
                 data.y = y
+                if with_ss:
+                    data.y_ss = torch.from_numpy(x2ss(y.astype(int), fg)).to(torch.float32)
+        else:
+            if with_ss and (y is not None):
+                fg = FactorGraph(pb)
                 data.y_ss = torch.from_numpy(x2ss(y.astype(int), fg)).to(torch.float32)
+
         return data
 
     # HeteroData branch – mirrors your MIS hetero converter
@@ -170,13 +178,17 @@ def problem_to_data(pb,
     data.feature_mode = feature_mode
 
     if with_lbp or with_nmf:
-        fg = MISFactorGraph(pb) if name == "MIS" else SCPFactorGraph(pb)
+        #fg = MISFactorGraph(pb) if name == "MIS" else SCPFactorGraph(pb)
+        fg = FactorGraph(pb)
         if with_lbp: data.lbp_edges = LBPEdges(fg)
         if with_nmf: data.nmf_edges = NMFEdges(fg)
         if y is not None:
             data.y = y
             data.y_ss = torch.from_numpy(x2ss(y.astype(int), fg)).to(torch.float32)
-
+    else:
+        if with_ss and (y is not None):
+            fg = FactorGraph(pb)
+            data.y_ss = torch.from_numpy(x2ss(y.astype(int), fg)).to(torch.float32)
     return data
 
 # ---- public: Data/HeteroData -> problem instance ----------------------------

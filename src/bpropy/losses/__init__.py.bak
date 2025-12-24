@@ -1,0 +1,311 @@
+from __future__ import annotations
+from typing import Any, Callable, Dict, Optional, Tuple
+
+import torch
+import torch.nn.functional as F
+
+import torch_scatter
+
+# ---- Simple Binary Cross-Entropy with logits ----
+def loss_bce_logits(logits: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    return F.binary_cross_entropy_with_logits(logits, y.float())
+
+# ---- Factor Cross-Entropy with logits ----
+def _factor_strides_from_factor_sizes(data, scores):
+    """
+    Returns strides (2**|F|) for *factor nodes only* in the same order as data.factor_sizes.
+    """
+    device = scores.device
+    # HeteroData / HeteroDataBatch case
+    if hasattr(data, "node_types") and ("variable" in data.node_types) and ("constraint" in data.node_types):
+        nv = int(data["variable"].num_nodes)
+        var_sizes = torch.ones(nv, device=device, dtype=torch.long)  # all unary, binary vars
+        con_sizes = data["constraint"].factor_sizes.to(device=device, dtype=torch.long)  # [nc]
+        fs = torch.cat([var_sizes, con_sizes], dim=0)  # variables first, then constraints
+        return (1 << fs)
+    fs = data.factor_sizes.to(device=device, dtype=torch.long)  # [n_nodes]
+    strides = (1 << fs)
+    return strides
+
+def _check_layout(strides, scores, y_ss=None):
+    total = int(strides.sum().item())
+    if scores.numel() != total:
+        raise ValueError(f"scores has length {scores.numel()} but sum(strides)={total}. "
+                         "Your flattening order or included factors differ.")
+    if y_ss is not None and y_ss.numel() != total:
+        raise ValueError(f"y_ss has length {y_ss.numel()} but sum(strides)={total}.")
+
+def loss_factor_ce_from_logits_factor_sizes(scores, target, *, data, reduction="mean"):
+    """
+    Per-factor cross-entropy / NLL when `scores` are logits/log-scores (not normalized).
+    Uses only `data.factor_sizes` (1 for variable nodes) to determine factor strides.
+
+    Assumptions:
+      - binary variables
+      - y_ss is one-hot per factor
+      - flattened layout is concat over factor nodes with size>1:
+          [assignments for factor0][assignments for factor1]...
+    """
+    device = scores.device
+
+    strides = _factor_strides_from_factor_sizes(data, scores)  # [nF]
+    _check_layout(strides, scores, data.y_ss)
+
+    nF = int(strides.numel())
+    m_idx = torch.arange(nF, device=device).repeat_interleave(strides)  # [total_assignments]
+
+    # label = argmax per factor (global index into flattened vector)
+    _, global_labels = torch_scatter.scatter_max(
+        data.y_ss.to(device=device), m_idx, dim=0, dim_size=nF
+    )
+    global_labels = global_labels.to(dtype=torch.long, device=device)  # [nF]
+
+    # logZ per factor: stable logsumexp over each factor block
+    maxv, _ = torch_scatter.scatter_max(scores, m_idx, dim=0, dim_size=nF)   # [nF]
+    sumexp = torch_scatter.scatter_add((scores - maxv[m_idx]).exp(), m_idx, dim=0, dim_size=nF)
+    logZ = maxv + sumexp.clamp_min(1e-20).log()  # [nF]
+
+    label_scores = scores[global_labels]  # [nF]
+    nll = -(label_scores - logZ)
+
+    if reduction == "mean":
+        return nll.mean()
+    if reduction == "sum":
+        return nll.sum()
+    return nll
+def loss_factor_focal_ce_from_logits_factor_sizes(
+    scores, target, *, data, reduction="mean", alpha=1.0, gamma=2.0
+):
+    """
+    Per-factor focal cross-entropy / NLL when `scores` are logits/log-scores (not normalized).
+    Uses only `data.factor_sizes` (1 for variable nodes) to determine factor strides.
+    Assumes y_ss is one-hot per node/factor and aligned with flattened scores.
+    """
+    device = scores.device
+
+    strides = _factor_strides_from_factor_sizes(data, scores)  # [n_nodes]
+    _check_layout(strides, scores, data.y_ss)
+
+    nF = int(strides.numel())
+    m_idx = torch.arange(nF, device=device).repeat_interleave(strides)  # [total_assignments]
+
+    # one-hot -> label (global index into flattened assignments), one per factor/node
+    _, global_labels = torch_scatter.scatter_max(
+        data.y_ss.to(device=device), m_idx, dim=0, dim_size=nF
+    )
+    global_labels = global_labels.to(dtype=torch.long, device=device)  # [nF]
+
+    # logZ per factor: stable logsumexp over each factor block
+    maxv, _ = torch_scatter.scatter_max(scores, m_idx, dim=0, dim_size=nF)   # [nF]
+    sumexp = torch_scatter.scatter_add((scores - maxv[m_idx]).exp(), m_idx, dim=0, dim_size=nF)
+    logZ = maxv + sumexp.clamp_min(1e-20).log()  # [nF]
+
+    # log p_t per factor (for the true assignment)
+    label_scores = scores[global_labels]          # [nF]
+    logp_t = label_scores - logZ                  # [nF]
+    p_t = logp_t.exp()                            # [nF]
+
+    # focal loss: -alpha * (1 - p_t)^gamma * log(p_t)
+    l = -alpha * ((1.0 - p_t).clamp_min(0.0) ** gamma) * logp_t
+
+    if reduction == "mean":
+        return l.mean()
+    if reduction == "sum":
+        return l.sum()
+    return l
+
+# losses for marginal inference
+def _num_vars_from_data(data) -> int:
+    # HeteroData / HeteroDataBatch: node store accessible both ways sometimes
+    if hasattr(data, "node_types") and ("variable" in data.node_types):
+        try:
+            return int(data["variable"].num_nodes)
+        except Exception:
+            pass
+
+    # Some PyG batches expose a `.variable` store
+    if hasattr(data, "variable"):
+        var_store = getattr(data, "variable")
+        if hasattr(var_store, "num_nodes") and var_store.num_nodes is not None:
+            return int(var_store.num_nodes)
+        # fall back to x shape
+        if hasattr(var_store, "x") and var_store.x is not None:
+            return int(var_store.x.size(0))
+
+    # Common explicit fields (recommended but optional)
+    for name in ("num_vars", "n_vars", "num_variables", "n_variables"):
+        if hasattr(data, name):
+            return int(getattr(data, name))
+
+    # Heuristic: if you store unary factor nodes somewhere
+    if hasattr(data, "factor_sizes"):
+        fs = data.factor_sizes
+        if torch.is_tensor(fs):
+            return int((fs == 1).sum().item())
+
+    raise AttributeError(
+        "Cannot infer #variables from data (no variable store / num_vars / factor_sizes==1)."
+    )
+
+#def loss_factor_ce_from_marginals_factor_sizes(pred, target, *, data, reduction="mean", eps=1e-8):
+#    inference, theta = pred
+#    mu = inference.mu
+#    device = mu.device
+#    strides = _factor_strides_from_factor_sizes(data, mu)
+#    _check_layout(strides, mu, data.y_ss)
+#
+#    nF = int(strides.numel())
+#    m_idx = torch.arange(nF, device=device).repeat_interleave(strides)
+#
+#    # one-hot -> label per factor
+#    _, global_labels = torch_scatter.scatter_max(
+#        data.y_ss.to(device=device), m_idx, dim=0, dim_size=nF
+#    )
+#    global_labels = global_labels.to(dtype=torch.long, device=device)
+#
+#    logp = mu.clamp_min(eps).log()
+#    ce_per_factor = -logp[global_labels]
+#
+#    if reduction == "mean":
+#        return ce_per_factor.mean()
+#    if reduction == "sum":
+#        return ce_per_factor.sum()
+#    return ce_per_factor
+def loss_factor_ce_from_marginals_factor_sizes(pred, target, *, data, reduction="mean", eps=1e-8):
+    inference, theta = pred
+    mu = inference.mu
+    device = mu.device
+
+    strides_full = _factor_strides_from_factor_sizes(data, theta)  # or mu; but theta is full-sized
+    total_full = int(strides_full.sum().item())
+
+    #nv = _num_vars_from_data(data)A
+    try:
+        nv = _num_vars_from_data(data)
+    except AttributeError:
+        # NMF case: mu is variable marginals => length = 2*nv
+        if mu.numel() % 2 != 0:
+            raise
+        nv = mu.numel() // 2
+    total_unary = 2 * nv
+
+    if mu.numel() == total_full:
+        # LBP-style: full factor marginals
+        strides = strides_full
+        y_ss = data.y_ss.to(device=device)
+
+    elif mu.numel() == total_unary:
+        # NMF-style: variable-only marginals
+        strides = torch.full((nv,), 2, device=device, dtype=torch.long)
+        y_ss = data.y_ss.to(device=device)[:total_unary]
+
+    else:
+        raise ValueError(
+            f"mu has length {mu.numel()} but expected full={total_full} or unary={total_unary}."
+        )
+
+    nF = int(strides.numel())
+    m_idx = torch.arange(nF, device=device).repeat_interleave(strides)
+
+    # one-hot -> label per factor
+    _, global_labels = torch_scatter.scatter_max(
+        y_ss, m_idx, dim=0, dim_size=nF
+    )
+    global_labels = global_labels.to(dtype=torch.long, device=device)
+
+    logp = mu.clamp_min(eps).log()
+    ce_per_factor = -logp[global_labels]
+
+    if reduction == "mean":
+        return ce_per_factor.mean()
+    if reduction == "sum":
+        return ce_per_factor.sum()
+    return ce_per_factor
+
+#def loss_factor_focal_ce_from_marginals_factor_sizes(
+#    pred, target, *, data, reduction="mean", eps=1e-8, alpha=1.0, gamma=2.0
+#):
+#    inference, theta = pred
+#    mu = inference.mu
+#    device = mu.device
+#    strides = _factor_strides_from_factor_sizes(data, mu)
+#    _check_layout(strides, mu, data.y_ss)
+#
+#    nF = int(strides.numel())
+#    m_idx = torch.arange(nF, device=device).repeat_interleave(strides)
+#
+#    _, global_labels = torch_scatter.scatter_max(
+#        data.y_ss.to(device=device), m_idx, dim=0, dim_size=nF
+#    )
+#    global_labels = global_labels.to(dtype=torch.long, device=device)
+#
+#    p_t = mu.clamp_min(eps)[global_labels]           # [nF]
+#    l = -alpha * ((1.0 - p_t) ** gamma) * p_t.log()  # [nF]
+#
+#    if reduction == "mean":
+#        return l.mean()
+#    if reduction == "sum":
+#        return l.sum()
+#    return l
+
+def loss_factor_focal_ce_from_marginals_factor_sizes(
+    pred, target, *, data, reduction="mean", eps=1e-8, alpha=1.0, gamma=2.0
+):
+    inference, theta = pred
+    mu = inference.mu
+    device = mu.device
+
+    strides_full = _factor_strides_from_factor_sizes(data, theta)
+    total_full = int(strides_full.sum().item())
+
+    #nv = _num_vars_from_data(data)
+    try:
+        nv = _num_vars_from_data(data)
+    except AttributeError:
+        # NMF case: mu is variable marginals => length = 2*nv
+        if mu.numel() % 2 != 0:
+            raise
+        nv = mu.numel() // 2
+
+    total_unary = 2 * nv
+
+    if mu.numel() == total_full:
+        strides = strides_full
+        y_ss = data.y_ss.to(device=device)
+
+    elif mu.numel() == total_unary:
+        strides = torch.full((nv,), 2, device=device, dtype=torch.long)
+        y_ss = data.y_ss.to(device=device)[:total_unary]
+
+    else:
+        raise ValueError(
+            f"mu has length {mu.numel()} but expected full={total_full} or unary={total_unary}."
+        )
+
+    nF = int(strides.numel())
+    m_idx = torch.arange(nF, device=device).repeat_interleave(strides)
+
+    _, global_labels = torch_scatter.scatter_max(
+        y_ss, m_idx, dim=0, dim_size=nF
+    )
+    global_labels = global_labels.to(dtype=torch.long, device=device)
+
+    p_t = mu.clamp_min(eps)[global_labels]
+    l = -alpha * ((1.0 - p_t).clamp_min(0.0) ** gamma) * p_t.log()
+
+    if reduction == "mean":
+        return l.mean()
+    if reduction == "sum":
+        return l.sum()
+    return l
+
+
+LOSS_REGISTRY: Dict[str, Callable[..., torch.Tensor]] = {
+    "bce_logits": loss_bce_logits,
+    "fce_logits": loss_factor_ce_from_logits_factor_sizes,
+    "ffce_logits": loss_factor_focal_ce_from_logits_factor_sizes,
+    "fce": loss_factor_ce_from_marginals_factor_sizes,
+    "ffce": loss_factor_focal_ce_from_marginals_factor_sizes,
+    # Later: "factor_ce", "focal_ce", etc.
+}
+

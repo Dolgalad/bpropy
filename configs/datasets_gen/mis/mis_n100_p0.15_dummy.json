@@ -11,7 +11,7 @@
   "p": "0.15",
   "ensure_min_deg": 0,
 
-  "solve": "none",
+  "solve": "kamis",
   "relax": false,
 
   "threshold_bytes": 8000,

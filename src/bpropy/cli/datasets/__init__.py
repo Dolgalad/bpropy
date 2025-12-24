@@ -89,7 +89,7 @@ def _expand_config_to_argv(cfg: Dict[str, Any], out_override: Optional[str]) -> 
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="bpropy-datasets",
+        prog="bpropy-train",
         description="Dataset generation utilities for bpropy.",
     )
 

@@ -49,6 +49,8 @@ class GCN_MRF_v4(torch.nn.Module):
 
 
         x = self.efc(x, edge_data)
+        if self.inference in (None, "none", "theta", "no_inference"):
+            return x
         if self.normalize_theta:
             x = (x - x.min()) / (x.max() - x.min())
         if self.inference == "loopy_belief_propagation":
@@ -136,6 +138,7 @@ class Hetero_GCN_MRF_v4(torch.nn.Module):
         tmp_edge_data.factor_sizes = fs_all
 
         xp = self.efc(xp, tmp_edge_data)
+
         if hasattr(edge_data, "lbp_edges"):
             assert xp.numel() == int(edge_data.lbp_edges.n_ss.sum().item())
         if hasattr(edge_data, "nmf_edges"):
@@ -153,6 +156,9 @@ class Hetero_GCN_MRF_v4(torch.nn.Module):
             # per-factor logsumexp of θ
             z_theta = torch_scatter.scatter_logsumexp(xp, m_idx)
             xp = xp - z_theta.repeat_interleave(m_stride)
+        if self.inference in (None, "none", "theta", "no_inference"):
+            return xp
+
         if self.inference == "loopy_belief_propagation":
             v2f = xp.new_zeros(int(edge_data.lbp_edges.n_f2v_msg.sum().item()))
             #v2f = torch.zeros_like(xp)
