@@ -16,15 +16,30 @@ class DataBundle:
     val_loader: DataLoader
     test_loader: DataLoader
 
+def _deep_merge(base: dict, override: dict) -> dict:
+    out = dict(base)
+    for k, v in override.items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = _deep_merge(out[k], v)
+        else:
+            out[k] = v
+    return out
+
 
 def make_dataset(cfg: Dict[str, Any], split: str, yield_mode: str) -> MRFDataset:
     """
     yield_mode: "data" -> yields (data, y)
                "both" -> yields (pb, data, y)
     """
-    data_cfg = cfg["data"]
+    print("in make dataset split ", split)
+    #data_cfg = cfg["data"]
     gt = cfg.get("problem", {}).get("ground_truth", {"solver": "greedy", "args": {}})
     solver = gt.get("solver", "greedy")
+
+    data_cfg_base = cfg["data"]
+    split_over = data_cfg_base.get("splits", {}).get(split, {})
+    data_cfg = _deep_merge(data_cfg_base, split_over)
+    print(data_cfg.get("precompute", {}))
 
     preprocess_kwargs = {
                 "hetero":bool(data_cfg.get("hetero", False)),

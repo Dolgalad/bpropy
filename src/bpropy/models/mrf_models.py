@@ -26,7 +26,9 @@ class GCN_MRF_v4(torch.nn.Module):
         self.efc = EFCanonicalParam(hidden_dim, lambda in_channels, out_channels: MLP(in_channels, hidden_channels=[64, 64, out_channels], activation_layer=ELU, norm_layer=torch.nn.LayerNorm), factor_sizes=factor_sizes)
         if mapping_aggr=="gat":
             self.mapping = GATConv(hidden_dim, hidden_dim)
-    def forward(self, data, fg_data=None, fg_map=None):
+    def forward(self, data, fg_data=None, fg_map=None, inference: str | None = None):
+        inference = self.inference if inference is None else inference
+
         x, edge_index = data.x, data.edge_index
 
         x = self.conv(x, edge_index)
@@ -49,13 +51,13 @@ class GCN_MRF_v4(torch.nn.Module):
 
 
         x = self.efc(x, edge_data)
-        if self.inference in (None, "none", "theta", "no_inference"):
+        if inference in (None, "none", "theta", "no_inference"):
             return x
         if self.normalize_theta:
             x = (x - x.min()) / (x.max() - x.min())
-        if self.inference == "loopy_belief_propagation":
+        if inference == "loopy_belief_propagation":
             return loopy_belief_propagation(x, torch.zeros_like(x), edge_data.lbp_edges, max_iter=self.bp_max_iter, tol=self.bp_tol, damping=self.bp_damping), x
-        if self.inference == "naive_mean_field":
+        if inference == "naive_mean_field":
             return naive_mean_field(x, edge_data.nmf_edges, max_iter=self.bp_max_iter, tol=self.bp_tol, damping=self.bp_damping), x
 
 class Hetero_GCN_MRF_v4(torch.nn.Module):

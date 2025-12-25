@@ -187,8 +187,9 @@ def final_test_eval(
             t3 = time.perf_counter()
             grd_sol = pb[0].greedy(scores=scores).x
             t4 = time.perf_counter()
-
-            spec = adapter.loss_spec_fn(data, pred, y, cfg)
+            
+            #loss_name = cfg.get("eval", {}).get("loss-name") or cfg["loss"]["name"]
+            spec = adapter.loss_spec_fn(data, pred, y, cfg, loss_name_override=adapter.loss_name)
             
             # In eval, backward_fn should be None; if not, you can log NaN or skip loss
             loss = compute_loss_from_spec(spec, loss_registry=LOSS_REGISTRY)
@@ -254,7 +255,10 @@ def run_training(cfg: Dict[str, Any]) -> None:
     method_name = cfg.get("train", {}).get("method", "var_logits")
     if method_name not in METHOD_REGISTRY:
         raise ValueError(f"Unknown train.method '{method_name}'. Known: {list(METHOD_REGISTRY.keys())}")
-    adapter = METHOD_REGISTRY[method_name]
+    adapter_train = METHOD_REGISTRY[method_name]
+    eval_method = cfg.get("eval", {}).get("method") or method_name
+    adapter_eval = METHOD_REGISTRY[eval_method] 
+    adapter_eval.loss_name = cfg.get("eval", {}).get("loss-name") or cfg["loss"]["name"]
 
     # model/opt/loss
     model = build_model(cfg, device)
@@ -275,8 +279,8 @@ def run_training(cfg: Dict[str, Any]) -> None:
     patience = int(cfg["train"].get("early_stop", {}).get("patience", 20))
 
     for epoch in range(st.epoch, epochs + 1):
-        tr = train_one_epoch(cfg, adapter, model, optimizer, loaders.train_loader, device, epoch)
-        va, gap = validate_one_epoch(cfg, adapter, model, loaders.val_loader, device, epoch)
+        tr = train_one_epoch(cfg, adapter_train, model, optimizer, loaders.train_loader, device, epoch)
+        va, gap = validate_one_epoch(cfg, adapter_train, model, loaders.val_loader, device, epoch)
 
         logger.add_scalars("loss", {"train": tr, "val": va, "gap": gap}, epoch)
         print(f"Epoch {epoch:03d} | train {tr:.4f} | val {va:.4f} | gap {gap:.4f}")
@@ -310,7 +314,7 @@ def run_training(cfg: Dict[str, Any]) -> None:
         load_checkpoint(best_path, model, optimizer=None, map_location=device)
 
     if cfg.get("eval", {}).get("enabled", True):
-        out_path = final_test_eval(cfg, adapter, model, loaders.test_loader, device, paths.log_dir)
+        out_path = final_test_eval(cfg, adapter_eval, model, loaders.test_loader, device, paths.log_dir)
         print(f"[test-eval] saved stats to {out_path}")
 
     logger.close()
