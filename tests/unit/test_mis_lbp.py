@@ -2,7 +2,6 @@ import unittest
 import torch
 import time
 import numpy as np
-import pytest
 
 torch.manual_seed(0)
 torch.use_deterministic_algorithms(True)
@@ -116,7 +115,6 @@ class TestMISLBP(unittest.TestCase):
         self.assertTrue(edges_1.m_edges[:,0].max().item() < SS_total)
         self.assertTrue(edges_1.f2v_edges[:,1].max().item() < (SS_total + V2F_total))
 
-    @pytest.mark.skipif(os.getenv("GITHUB_ACTIONS") == "true", reason="CI resource limits")
     def test_stack_lbpedges(self):
         max_iter = 10
         batch_size = 4
