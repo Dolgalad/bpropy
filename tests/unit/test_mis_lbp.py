@@ -2,6 +2,12 @@ import unittest
 import torch
 import time
 import numpy as np
+import pytest
+
+torch.manual_seed(0)
+torch.use_deterministic_algorithms(True)
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
 
 from bpropy.co.mis import MIS
 from bpropy.mrf.factor_graph import FactorGraph
