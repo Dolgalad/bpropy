@@ -146,6 +146,12 @@ METHOD_REGISTRY: Dict[str, MethodAdapter] = {
         greedy_scores_fn=_greedy_scores_factor_inference,
 
     ),
+    "hetero_factor_marginals": MethodAdapter(
+        forward_fn=_forward_factor_inference,
+        loss_spec_fn=_loss_spec_factor_inference,
+        greedy_scores_fn=_greedy_scores_factor_inference,
+
+    ),
 
     # Later:
     # "lbp": forward returns lbp_res, theta; greedy scores = mu_v[:,1] :contentReference[oaicite:8]{index=8}

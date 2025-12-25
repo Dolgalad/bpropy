@@ -43,10 +43,6 @@ def make_dataset(cfg: Dict[str, Any], split: str, yield_mode: str) -> MRFDataset
         preprocess_kwargs = preprocess_kwargs,
     )
 
-    print("in make_datasets : ")
-    print("ds_cfg.feature_mode = ", ds_cfg.feature_mode)
-    print("data_cfg.get('hetero') = ", data_cfg.get("hetero"))
-
     # prepare the preprocess function, if with_ss, with_lbp or with_nmf add the assignment as second argument
     if preprocess_kwargs["with_lbp"] or preprocess_kwargs["with_nmf"] or preprocess_kwargs["with_ss"]:
         preprocess_fn=lambda pb, y: problem_to_data(

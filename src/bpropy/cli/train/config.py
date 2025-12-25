@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import Any, Dict
+import warnings
 import argparse
 import os
 
@@ -163,3 +165,10 @@ def validate_config(cfg: Config) -> None:
     cfg.setdefault("eval", {})
     cfg["eval"].setdefault("enabled", True)
     cfg["eval"].setdefault("split", "test")  # final evaluation like your script writes test_eval.json
+
+    # Apply requirement overwrite
+    from .config_rules import apply_config_policies
+    apply_config_policies(cfg)
+
+
+
