@@ -85,7 +85,7 @@ def train_one_epoch(
     for data, y in CUDAPrefetcher(loader, device):
         optimizer.zero_grad(set_to_none=True)
         pred = adapter.forward_fn(model, data)
-        spec = adapter.loss_spec_fn(data, pred, y, cfg)
+        spec = adapter.loss_spec_fn(adapter, data, pred, y, cfg)
         
         if spec.backward_fn is not None:
             logged_loss = spec.backward_fn()
@@ -133,7 +133,7 @@ def validate_one_epoch(
         bar = Bar(f"[Val]   epoch {epoch}", max=len(loader))
         for pb, data, y in CUDAPrefetcher(loader, device):
             pred = adapter.forward_fn(model, data)
-            spec = adapter.loss_spec_fn(data, pred, y, cfg)
+            spec = adapter.loss_spec_fn(adapter, data, pred, y, cfg)
             
             # In eval, backward_fn should be None; if not, you can log NaN or skip loss
             loss = compute_loss_from_spec(spec, loss_registry=LOSS_REGISTRY)
@@ -189,8 +189,9 @@ def final_test_eval(
             t4 = time.perf_counter()
             
             #loss_name = cfg.get("eval", {}).get("loss-name") or cfg["loss"]["name"]
-            spec = adapter.loss_spec_fn(data, pred, y, cfg, loss_name_override=adapter.loss_name)
-            
+            #spec = adapter.loss_spec_fn(adatapter, data, pred, y, cfg, loss_name_override=adapter.loss_name)
+            spec = adapter.loss_spec_fn(adapter, data, pred, y, cfg)
+           
             # In eval, backward_fn should be None; if not, you can log NaN or skip loss
             loss = compute_loss_from_spec(spec, loss_registry=LOSS_REGISTRY)
             losses.append(float(loss.detach().cpu().item()))

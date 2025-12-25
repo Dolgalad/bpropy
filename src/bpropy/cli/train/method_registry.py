@@ -1,27 +1,28 @@
 from __future__ import annotations
 
-import os
-import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional
 
-import torch
 import numpy as np
+import torch
+
+
+# ----------------------------
+# Data structures
+# ----------------------------
 
 @dataclass
 class LossSpec:
     # Standard loss path:
     pred: Optional[torch.Tensor] = None
     target: Optional[torch.Tensor] = None
-    loss_name: Optional[str] = None          # e.g. "bce_logits", "ce", ...
+    loss_name: Optional[str] = None
     loss_kwargs: dict = field(default_factory=dict)
-    # Extra scalar terms (regularizers, Bethe, etc.)
-    extra_terms: dict = field(default_factory=dict)  # name->scalar tensor
+    extra_terms: dict = field(default_factory=dict)
 
     # Gradient-only path:
-    # If provided, training loop calls this and skips loss_fn(pred,target)
     backward_fn: Optional[Callable[[], torch.Tensor]] = None
-    # backward_fn should do .backward() internally and return a logging scalar
+
 
 @dataclass
 class MethodAdapter:
@@ -30,145 +31,236 @@ class MethodAdapter:
       - supervision loss input (prediction tensor)
       - scores to pass to pb.greedy(scores=...)
     """
-    forward_fn: Callable[[torch.nn.Module, Any], torch.Tensor]
-    loss_spec_fn: Callable[[Any,torch.Tensor,torch.Tensor,Any], LossSpec]
-    greedy_scores_fn: Callable[[Any, Any, torch.Tensor], np.ndarray]  # (pb, prediction)->scores
-    loss_name: Optional[str] = None
+    forward_fn: Callable[[torch.nn.Module, Any], Any]
+    loss_spec_fn: Callable[[Any, Any, torch.Tensor, Any, Optional[str]], LossSpec]
+    greedy_scores_fn: Callable[[Any, Any, Any], np.ndarray]
+    loss_name: Optional[str] = None  # optional adapter-level loss override
 
 
-# Variable Logits method (non-hetero graph) : for each variable node of the graph predict a logit value and compute loss wrt ground truth assignment
+# ----------------------------
+# Small helpers (homo + hetero safe)
+# ----------------------------
+
+def _num_vars(data: Any) -> int:
+    # HeteroDataBatch: variable store exists
+    if hasattr(data, "node_types") and ("variable" in getattr(data, "node_types", [])):
+        return int(data["variable"].num_nodes)
+    # Homo Data: bipartite mask, variables are bipartite==0
+    return int((data.bipartite == 0).sum().item())
+
+
+def _as_theta(pred: Any) -> torch.Tensor:
+    """
+    Normalize factor-logits prediction into a single flat tensor theta.
+    Supports:
+      - theta tensor
+      - dict with key "theta" or "variable" (fallback)
+    """
+    if isinstance(pred, dict):
+        if "theta" in pred:
+            return pred["theta"]
+        if "variable" in pred:
+            return pred["variable"]
+        raise KeyError(f"Cannot extract theta from dict keys={list(pred.keys())}")
+    if not torch.is_tensor(pred):
+        raise TypeError(f"Expected theta tensor/dict, got {type(pred)}")
+    return pred
+
+
+def _as_inference_tuple(pred: Any):
+    """
+    Normalize inference prediction into (inference_res, theta).
+    Supports:
+      - (inference_res, theta)
+      - dict with keys ("inference_res","theta") if you ever add that later
+    """
+    if isinstance(pred, tuple) and len(pred) == 2:
+        return pred[0], pred[1]
+    if isinstance(pred, dict):
+        if "inference_res" in pred and "theta" in pred:
+            return pred["inference_res"], pred["theta"]
+    raise TypeError(f"Expected (inference_res, theta), got {type(pred)} / {pred}")
+
+
+def _unary_scores_from_flat(vec: torch.Tensor, nv: int) -> np.ndarray:
+    """
+    vec is a flat vector whose first 2*nv entries correspond to unary factors
+    in (0/1) order; returns score for state=1.
+    """
+    return vec[: 2 * nv].reshape(-1, 2)[:, 1].detach().cpu().numpy()
+
+
+def _pick_loss_name(adapter: MethodAdapter, cfg: Dict[str, Any], loss_name_override: Optional[str]) -> str:
+    if loss_name_override is not None:
+        return loss_name_override
+    if adapter.loss_name is not None:
+        return adapter.loss_name
+    return cfg.get("loss", {}).get("name", "bce_logits")
+
+
+# ----------------------------
+# Forward functions
+# ----------------------------
+
 def _forward_var_logits(model: torch.nn.Module, data: Any) -> torch.Tensor:
-    return model(data)[data.bipartite==0]
+    out = model(data)
+    if isinstance(out, dict):  # hetero models
+        return out["variable"]
+    # If hetero data but tensor output, assume it's already variable logits
+    if hasattr(data, "node_types") and ("variable" in getattr(data, "node_types", [])):
+        return out
+    # homo: filter variable nodes
+    return out[data.bipartite == 0]
 
-def _loss_spec_var_logits(batch, pred, labels, cfg, phase="train", loss_name_override=None):
-    loss_name = loss_name_override or cfg.get("loss", {}).get("name", "bce_logits")
-    return LossSpec(pred=pred, 
-                    target=labels.to(pred.device, non_blocking=True).float(), 
-                    loss_name=loss_name
-                    )
+
+def _forward_factor_logits(model: torch.nn.Module, data: Any) -> torch.Tensor:
+    # Model returns flat theta
+    return model(data)
+
+
+def _forward_factor_inference(model: torch.nn.Module, data: Any):
+    # Model returns (inference_res, theta)
+    return model(data)
+
+
+def _forward_hybrid_theta(model: torch.nn.Module, data: Any) -> torch.Tensor:
+    # Train-time: no inference, just return theta
+    return model(data, inference="no_inference")
+
+
+# ----------------------------
+# Loss spec functions
+# ----------------------------
+
+def _loss_spec_var_logits(
+    adapter: MethodAdapter,
+    batch: Any,
+    pred: torch.Tensor,
+    labels: torch.Tensor,
+    cfg: Dict[str, Any],
+    loss_name_override: Optional[str] = None,
+) -> LossSpec:
+    loss_name = _pick_loss_name(adapter, cfg, loss_name_override)
+    return LossSpec(
+        pred=pred,
+        target=labels.to(pred.device, non_blocking=True).float(),
+        loss_name=loss_name,
+    )
+
+
+def _loss_spec_factor_logits(
+    adapter: MethodAdapter,
+    batch: Any,
+    pred_theta: Any,
+    labels: torch.Tensor,
+    cfg: Dict[str, Any],
+    loss_name_override: Optional[str] = None,
+) -> LossSpec:
+    loss_name = _pick_loss_name(adapter, cfg, loss_name_override)
+    theta = _as_theta(pred_theta)
+
+    target = batch.y_ss
+    if loss_name in ("mse", "l1"):
+        target = target.float()
+
+    return LossSpec(
+        pred=theta,
+        target=target,
+        loss_name=loss_name,
+        loss_kwargs={"data": batch, **cfg.get("loss", {}).get("args", {})},
+    )
+
+
+def _loss_spec_factor_inference(
+    adapter: MethodAdapter,
+    batch: Any,
+    pred: Any,
+    labels: torch.Tensor,
+    cfg: Dict[str, Any],
+    loss_name_override: Optional[str] = None,
+) -> LossSpec:
+    """
+    pred is (inference_res, theta). We decide which tensor to feed into the loss:
+      - if loss_name endswith "_logits": use theta
+      - else: use inference_res.mu
+    """
+    loss_name = _pick_loss_name(adapter, cfg, loss_name_override)
+    inference_res, theta = _as_inference_tuple(pred)
+
+    target = batch.y_ss
+    if loss_name in ("mse", "l1"):
+        target = target.float()
+
+    pred_used = theta if loss_name.endswith("_logits") else (inference_res, theta)
+
+    return LossSpec(
+        pred=pred_used,
+        target=target,
+        loss_name=loss_name,
+        loss_kwargs={"data": batch, **cfg.get("loss", {}).get("args", {})},
+    )
+
+
+# ----------------------------
+# Greedy scoring functions
+# ----------------------------
 
 def _greedy_scores_var_logits(pb: Any, data: Any, pred: torch.Tensor) -> np.ndarray:
     return pred.detach().cpu().numpy()
 
-# Variable Logits method (hetero graph) : for each variable node of the graph predict a logit value and compute loss wrt ground truth assignment
-def _forward_hetero_var_logits(model: torch.nn.Module, data: Any) -> torch.Tensor:
-    out = model(data)
-    if isinstance(out, dict):
-        return out["variable"]
-    return out
 
-# Factor Logits method (non-hetero graph) : for each variable (factor of size 1) and constraint nodes (factor of size > 1) predict 2**k log-probabilities
-def _forward_factor_logits(model: torch.nn.Module, data: Any) -> torch.Tensor:
-    theta = model(data)
-    return theta
-def _loss_spec_factor_logits(batch, pred_theta, labels, cfg, loss_name_override=None):
-    loss_name = loss_name_override or cfg.get("loss", {}).get("name", "bce_logits")
-
-    target = batch.y_ss
-    #target = labels.to(pred_theta.device, non_blocking=True)
-    # optionally cast depending on loss
-    if loss_name in ("mse", "l1"):
-        target = target.float()
-    return LossSpec(pred=pred_theta, target=target, loss_name=loss_name, loss_kwargs={"data": batch, **cfg["loss"].get("args",{})})
-def _greedy_scores_factor_logits(pb: Any, data: Any, pred: torch.Tensor):
-    # Hetero model might return dicts; we only need the flattened theta vector
-    if isinstance(pred, dict):
-        # If your hetero factor-logits model outputs a flat vector, keep that.
-        # Otherwise, you must define how to flatten; here we assume it provides "theta".
-        pred = pred.get("theta", pred.get("variable"))
-
-    # HeteroDataBatch: nv from variable store
-    if hasattr(data, "node_types") and ("variable" in data.node_types):
-        nv = int(data["variable"].num_nodes)
-    else:
-        # Homo Data: nv from bipartite mask (variable nodes are bipartite==0)
-        nv = int((data.bipartite == 0).sum().item())
-
-    #nv = (data.bipartite==0).sum().item()
-    return pred[:2*nv].reshape(-1, 2)[:,1].cpu().numpy()
-
-# Factor Marginal inference method (non-hetero graph) : for each variable (factor of size 1) and constraint nodes (factor of size > 1) predict 2**k probabilities
-def _forward_factor_inference(model: torch.nn.Module, data: Any) -> torch.Tensor:
-    inference_res, theta = model(data)
-    return inference_res, theta
-def _loss_spec_factor_inference(batch, pred, labels, cfg, loss_name_override=None):
-    loss_name = loss_name_override or cfg.get("loss", {}).get("name", "bce_logits")
-    target = batch.y_ss
-    #target = labels.to(pred_theta.device, non_blocking=True)
-    # optionally cast depending on loss
-    if loss_name in ("mse", "l1"):
-        target = target.float()
-    return LossSpec(pred=pred, target=target, loss_name=loss_name, loss_kwargs={"data": batch, **cfg["loss"].get("args",{})})
-def _greedy_scores_factor_inference(pb: Any, data: Any, pred: torch.Tensor):
-    # Hetero model might return dicts; we only need the flattened theta vector
-    if isinstance(pred, dict):
-        # If your hetero factor-logits model outputs a flat vector, keep that.
-        # Otherwise, you must define how to flatten; here we assume it provides "theta".
-        pred = pred.get("theta", pred.get("variable"))
-
-    # HeteroDataBatch: nv from variable store
-    if hasattr(data, "node_types") and ("variable" in data.node_types):
-        nv = int(data["variable"].num_nodes)
-    else:
-        # Homo Data: nv from bipartite mask (variable nodes are bipartite==0)
-        nv = int((data.bipartite == 0).sum().item())
-
-    inference, theta = pred
-    mu = inference.mu
-
-    #nv = (data.bipartite==0).sum().item()
-    return mu[:2*nv].reshape(-1, 2)[:,1].cpu().numpy()
-
-# hybrid training
-def _forward_hybrid_theta(model, data):
-    print("in forward_hybrid_theta")
-    return model(data, inference="no_inference")
+def _greedy_scores_factor_logits(pb: Any, data: Any, pred: Any) -> np.ndarray:
+    theta = _as_theta(pred)
+    nv = _num_vars(data)
+    return _unary_scores_from_flat(theta, nv)
 
 
+def _greedy_scores_factor_inference(pb: Any, data: Any, pred: Any) -> np.ndarray:
+    inference_res, _theta = _as_inference_tuple(pred)
+    nv = _num_vars(data)
+    return _unary_scores_from_flat(inference_res.mu, nv)
+
+
+# ----------------------------
+# Registry
+# ----------------------------
+
+_METHOD_VAR_LOGITS = MethodAdapter(
+    forward_fn=_forward_var_logits,
+    loss_spec_fn=_loss_spec_var_logits,
+    greedy_scores_fn=_greedy_scores_var_logits,
+)
+
+_METHOD_FACTOR_LOGITS = MethodAdapter(
+    forward_fn=_forward_factor_logits,
+    loss_spec_fn=_loss_spec_factor_logits,
+    greedy_scores_fn=_greedy_scores_factor_logits,
+)
+
+_METHOD_FACTOR_MARGINALS = MethodAdapter(
+    forward_fn=_forward_factor_inference,
+    loss_spec_fn=_loss_spec_factor_inference,
+    greedy_scores_fn=_greedy_scores_factor_inference,
+)
+
+_METHOD_HYBRID_FACTOR_LOGITS = MethodAdapter(
+    forward_fn=_forward_hybrid_theta,
+    loss_spec_fn=_loss_spec_factor_logits,
+    greedy_scores_fn=_greedy_scores_factor_logits,
+)
+
+# Keep old names as aliases for backwards compatibility.
 METHOD_REGISTRY: Dict[str, MethodAdapter] = {
-    "var_logits": MethodAdapter(
-        forward_fn=_forward_var_logits,
-        loss_spec_fn=_loss_spec_var_logits,
-        greedy_scores_fn=_greedy_scores_var_logits,
-    ),
-    "hetero_var_logits": MethodAdapter(
-        forward_fn=_forward_hetero_var_logits,
-        loss_spec_fn=_loss_spec_var_logits,
-        greedy_scores_fn=_greedy_scores_var_logits,
-    ),
-    "factor_logits": MethodAdapter(
-        forward_fn=_forward_factor_logits,
-        loss_spec_fn=_loss_spec_factor_logits,
-        greedy_scores_fn=_greedy_scores_factor_logits,
+    "var_logits": _METHOD_VAR_LOGITS,
+    "hetero_var_logits": _METHOD_VAR_LOGITS,
 
-    ),
-    "hetero_factor_logits": MethodAdapter(
-        forward_fn=_forward_factor_logits,
-        loss_spec_fn=_loss_spec_factor_logits,
-        greedy_scores_fn=_greedy_scores_factor_logits,
+    "factor_logits": _METHOD_FACTOR_LOGITS,
+    "hetero_factor_logits": _METHOD_FACTOR_LOGITS,
 
-    ),
-    "factor_marginals": MethodAdapter(
-        forward_fn=_forward_factor_inference,
-        loss_spec_fn=_loss_spec_factor_inference,
-        greedy_scores_fn=_greedy_scores_factor_inference,
+    "factor_marginals": _METHOD_FACTOR_MARGINALS,
+    "hetero_factor_marginals": _METHOD_FACTOR_MARGINALS,
+    "hetero_factor_marginals": _METHOD_FACTOR_MARGINALS,  # (typo-safe)
 
-    ),
-    "hybrid_factor_logits": MethodAdapter(
-        forward_fn=_forward_hybrid_theta,
-        loss_spec_fn=_loss_spec_factor_logits,
-        greedy_scores_fn=_greedy_scores_factor_logits,
-    ),
-
-    "hetero_factor_marginals": MethodAdapter(
-        forward_fn=_forward_factor_inference,
-        loss_spec_fn=_loss_spec_factor_inference,
-        greedy_scores_fn=_greedy_scores_factor_inference,
-
-    ),
-
-    # Later:
-    # "lbp": forward returns lbp_res, theta; greedy scores = mu_v[:,1] :contentReference[oaicite:8]{index=8}
-    # "factor_logits": greedy scores = logits[:2*nv].reshape(-1,2)[:,1].exp() :contentReference[oaicite:9]{index=9}
+    "hybrid_factor_logits": _METHOD_HYBRID_FACTOR_LOGITS,
 }
 

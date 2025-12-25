@@ -79,7 +79,9 @@ class Hetero_GCN_MRF_v4(torch.nn.Module):
         self.efc = EFCanonicalParam(hidden_dim, lambda in_channels, out_channels: MLP(in_channels, hidden_channels=[64, 64, out_channels], activation_layer=ELU, norm_layer=torch.nn.LayerNorm), factor_sizes=factor_sizes)
         if mapping_aggr=="gat":
             self.mapping = GATConv(hidden_dim, hidden_dim)
-    def forward(self, data, fg_data=None, fg_map=None):
+    def forward(self, data, fg_data=None, fg_map=None, inference: str | None = None):
+        inference = self.inference if inference is None else inference
+
         #x, edge_index = data.x, data.edge_index
         x = self.enc(data.x_dict)
 
@@ -158,12 +160,12 @@ class Hetero_GCN_MRF_v4(torch.nn.Module):
             # per-factor logsumexp of θ
             z_theta = torch_scatter.scatter_logsumexp(xp, m_idx)
             xp = xp - z_theta.repeat_interleave(m_stride)
-        if self.inference in (None, "none", "theta", "no_inference"):
+        if inference in (None, "none", "theta", "no_inference"):
             return xp
 
-        if self.inference == "loopy_belief_propagation":
+        if inference == "loopy_belief_propagation":
             v2f = xp.new_zeros(int(edge_data.lbp_edges.n_f2v_msg.sum().item()))
             #v2f = torch.zeros_like(xp)
             return loopy_belief_propagation(xp, v2f, edge_data.lbp_edges, max_iter=self.bp_max_iter, tol=self.bp_tol, damping=self.bp_damping), xp
-        if self.inference == "naive_mean_field":
+        if inference == "naive_mean_field":
             return naive_mean_field(xp, edge_data.nmf_edges, max_iter=self.bp_max_iter, tol=self.bp_tol, damping=self.bp_damping), xp

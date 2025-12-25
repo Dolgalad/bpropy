@@ -145,4 +145,24 @@ MODEL_RULES: list[ConfigRule] = [
     #    name="nmf-inference-requires-precompute.nmf",
     #),
 
+    # DEBUG
+    #_rule_force({"train.method": "factor_marginals"},
+    #            when=Eq("train.method", "hetero_factor_marginals"),
+    #            name="train-method-hetero-factor-marginals-removed"),
+    #_rule_force({"eval.method": "factor_marginals"},
+    #            when=Eq("eval.method", "hetero_factor_marginals"),
+    #            name="eval-method-hetero-factor-marginals-removed"),
+    #_rule_force({"train.method": "var_logits"},
+    #            when=Eq("train.method", "hetero_var_logits"),
+    #            name="train-method-hetero-var-logits-removed"),
+    #_rule_force({"eval.method": "var_logits"},
+    #            when=Eq("eval.method", "hetero_var_logits"),
+    #            name="eval-method-hetero-var-logits-removed"),
+    #_rule_force({"train.method": "factor_logits"},
+    #            when=Eq("train.method", "hetero_factor_logits"),
+    #            name="train-method-hetero-factor-logits-removed"),
+    #_rule_force({"eval.method": "factor_logits"},
+    #            when=Eq("eval.method", "hetero_factor_logits"),
+    #            name="eval-method-hetero-factor-logits-removed"),
+
 ]
