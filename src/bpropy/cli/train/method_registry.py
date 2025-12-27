@@ -316,8 +316,6 @@ def _decimation_backend_factor_marginals(pb, data, pred, cfg, device=None):
     # IMPORTANT: build fg from pb
     fg_builder = lambda pb: FactorGraph(pb)
 
-    print("gd.mode = ", mode)
-
     # IMPORTANT: “freeze” predicted theta for this instance
     def theta_builder(_pb, _fg, _device, _dtype):
         return pred_theta.to(device=_device, dtype=_dtype)
