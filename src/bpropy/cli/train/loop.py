@@ -151,7 +151,7 @@ def validate_one_epoch(
                         data=data,
                         **args,
                         )
-                eval_losses[name].append(eval_loss)
+                eval_losses[name].append(eval_loss.detach().float().cpu().item())
 
             scores = adapter.greedy_scores_fn(pb[0], data, pred)
             grd_sol = pb[0].greedy(scores=scores).x
@@ -228,7 +228,7 @@ def final_test_eval(
                         data=data,
                         **args,
                         )
-                eval_losses[name].append(eval_loss)
+                eval_losses[name].append(eval_loss.detach().float().cpu().item())
 
 
             gap = float(

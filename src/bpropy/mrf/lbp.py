@@ -15,10 +15,12 @@ class BPSolution:
 def loopy_belief_propagation(theta, v2f, edges, max_iter=100, tol=1e-6, damping=0.0):
     # strides
     dev = theta.device
+    edges = edges.to(dev)
     q_stride = torch.full((int(v2f.shape[0]/2),), 2, device=dev)
     q_idx = torch.arange(q_stride.size(0), device=dev).repeat_interleave(2)
     #m_stride = torch.tensor([2**len(list(g.neighbors(F))) for F in iter_factor_nodes(g)])
-    m_idx = torch.arange(edges.m_stride.size(0), device=theta.device).repeat_interleave(edges.m_stride)
+    repeats = edges.m_stride.to(device=theta.device, dtype=torch.long)
+    m_idx = torch.arange(repeats.size(0), device=theta.device).repeat_interleave(repeats)
     mu = torch.zeros(int(edges.n_ss.sum().item()), device=dev)
     
     nv = edges.n_vars.sum() #number_of_variables(g)
