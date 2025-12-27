@@ -7,6 +7,7 @@ import numpy as np
 import torch
 
 from bpropy.losses.regularizers import REGULARIZER_REGISTRY
+from bpropy.co.base_lp import LPProblem
 
 
 # ----------------------------
@@ -36,6 +37,8 @@ class MethodAdapter:
     forward_fn: Callable[[torch.nn.Module, Any], Any]
     loss_spec_fn: Callable[[Any, Any, torch.Tensor, Any, Optional[str]], LossSpec]
     greedy_scores_fn: Callable[[Any, Any, Any], np.ndarray]
+    decimation_backend_fn: Callable[LPProblem, Any, torch.Tensor, Any]
+    decimation_adapter_fn: Callable[LPProblem, Any]
     loss_name: Optional[str] = None  # optional adapter-level loss override
 
 
@@ -147,7 +150,6 @@ def _apply_regularizers(spec: LossSpec,
         r_name = r["name"]
         r_args = dict(r.get("args", {}))
         term = REGULARIZER_REGISTRY[r_name](adapter, batch, pred, labels, cfg, **r_args)
-        print("term = ", term, w * term)
         spec.extra_terms[f"reg/{r_name}"] = w * term 
     return spec
 
@@ -166,7 +168,7 @@ def _loss_spec_var_logits(
         target=labels.to(pred.device, non_blocking=True).float(),
         loss_name=loss_name,
     )
-    _apply_regularizers(spec, adapter, pred, labels, cfg)
+    _apply_regularizers(spec, adapter, batch, pred, labels, cfg)
     return spec
 
 
@@ -245,6 +247,126 @@ def _greedy_scores_factor_inference(pb: Any, data: Any, pred: Any) -> np.ndarray
     nv = _num_vars(data)
     return _unary_scores_from_flat(inference_res.mu, nv)
 
+# ----------------------------
+# Greedy decimation backends
+# ----------------------------
+from bpropy.gd.score_backend import ScoreBackend
+def _decimation_backend_var_logits(pb, data, pred, cfg, device=None):
+    backend = ScoreBackend()
+    backend.reset(pb)
+    backend.set_logits(pred)
+    return backend
+
+from bpropy.mrf.factor_graph import FactorGraph
+from bpropy.gd.factor_logit_backend import FactorLogitAggregationBackend
+from bpropy.gd.lbp_backend import LBPBackend
+from bpropy.gd.nmf_backend import NMFBackend
+def _decimation_backend_factor_logits(pb, data, pred_theta, cfg, device=None):
+    gd = cfg.get("eval", {}).get("greedy_decimation", {})
+    mode = gd.get("mode", "aggregate")
+    mode_args = gd.get("args", {})
+
+    # IMPORTANT: build fg from pb
+    fg_builder = lambda pb: FactorGraph(pb)
+
+    # IMPORTANT: “freeze” predicted theta for this instance
+    def theta_builder(_pb, _fg, _device, _dtype):
+        return pred_theta.to(device=_device, dtype=_dtype)
+
+    if mode == "unary":
+        return _decimation_backend_var_logits(pb, data, pred_theta, cfg, device=device)
+
+    if mode == "aggregate":
+        return FactorLogitAggregationBackend(
+            fg_builder=fg_builder,
+            theta=pred_theta.to(device),
+            neg_inf=gd.get("neg_inf", None),
+            data=data,
+        )
+
+    if mode == "loopy_belief_propagation":
+        return LBPBackend(
+            fg_builder=fg_builder,
+            theta_builder=theta_builder,
+            device=device,
+            dtype=pred_theta.dtype,
+            **mode_args,
+        )
+
+    if mode == "naive_mean_field":
+        return NMFBackend(
+            fg_builder=fg_builder,
+            theta_builder=theta_builder,
+            device=device,
+            dtype=pred_theta.dtype,
+            **mode_args,
+        )
+
+    raise ValueError(f"Unknown decimation mode: {mode}")
+
+def _decimation_backend_factor_marginals(pb, data, pred, cfg, device=None):
+    model_cfg = cfg.get("model", {})
+    model_args = model_cfg.get("args", {})
+    gd = cfg.get("eval", {}).get("greedy_decimation", {})
+    mode = gd.get("mode", model_args.get("inference", "aggregate"))
+    mode_args = gd.get("args", {})
+
+    inference, pred_theta = pred
+
+    # IMPORTANT: build fg from pb
+    fg_builder = lambda pb: FactorGraph(pb)
+
+    print("gd.mode = ", mode)
+
+    # IMPORTANT: “freeze” predicted theta for this instance
+    def theta_builder(_pb, _fg, _device, _dtype):
+        return pred_theta.to(device=_device, dtype=_dtype)
+
+    if mode == "unary":
+        return _decimation_backend_var_logits(pb, data, pred_theta, cfg, device=device)
+
+    if mode == "aggregate":
+        return FactorLogitAggregationBackend(
+            fg_builder=fg_builder,
+            theta=pred_theta.to(device),
+            neg_inf=gd.get("neg_inf", None),
+            data=data,
+        )
+
+    if mode == "loopy_belief_propagation":
+        return LBPBackend(
+            fg_builder=fg_builder,
+            theta_builder=theta_builder,
+            device=device,
+            dtype=pred_theta.dtype,
+            **mode_args,
+        )
+
+    if mode == "naive_mean_field":
+        return NMFBackend(
+            fg_builder=fg_builder,
+            theta_builder=theta_builder,
+            device=device,
+            dtype=pred_theta.dtype,
+            **mode_args,
+        )
+
+    raise ValueError(f"Unknown decimation mode: {mode}")
+
+# ----------------------------
+# Greedy decimation problem adapters
+# ----------------------------
+from bpropy.co.mis import MIS
+from bpropy.co.scp import SCP
+from bpropy.gd.mis_adapter import MISAdapter
+from bpropy.gd.scp_adapter import SCPAdapter
+def _decimation_adapter_default(pb: LPProblem, cfg: Any):
+    if isinstance(pb, MIS):
+        return MISAdapter()
+    if isinstance(pb, SCP):
+        return SCPAdapter()
+    raise Exception(f"unknown problem type :  {type(pb)}")
+
 
 # ----------------------------
 # Registry
@@ -254,24 +376,32 @@ _METHOD_VAR_LOGITS = MethodAdapter(
     forward_fn=_forward_var_logits,
     loss_spec_fn=_loss_spec_var_logits,
     greedy_scores_fn=_greedy_scores_var_logits,
+    decimation_backend_fn=_decimation_backend_var_logits,
+    decimation_adapter_fn=_decimation_adapter_default,
 )
 
 _METHOD_FACTOR_LOGITS = MethodAdapter(
     forward_fn=_forward_factor_logits,
     loss_spec_fn=_loss_spec_factor_logits,
     greedy_scores_fn=_greedy_scores_factor_logits,
+    decimation_backend_fn=_decimation_backend_factor_logits,
+    decimation_adapter_fn=_decimation_adapter_default,
 )
 
 _METHOD_FACTOR_MARGINALS = MethodAdapter(
     forward_fn=_forward_factor_inference,
     loss_spec_fn=_loss_spec_factor_inference,
     greedy_scores_fn=_greedy_scores_factor_inference,
+    decimation_backend_fn=_decimation_backend_factor_marginals,
+    decimation_adapter_fn=_decimation_adapter_default,
 )
 
 _METHOD_HYBRID_FACTOR_LOGITS = MethodAdapter(
     forward_fn=_forward_hybrid_theta,
     loss_spec_fn=_loss_spec_factor_logits,
     greedy_scores_fn=_greedy_scores_factor_logits,
+    decimation_backend_fn=_decimation_backend_factor_marginals,
+    decimation_adapter_fn=_decimation_adapter_default,
 )
 
 # Keep old names as aliases for backwards compatibility.

@@ -3,6 +3,8 @@ from dataclasses import dataclass
 import torch
 import torch_scatter
 
+from .registry import register_loss
+
 @dataclass
 class _InferenceLike:
     mu: torch.Tensor
@@ -386,7 +388,7 @@ def bethe_free_energy_from_beliefs(
 
     return F_g + v_term_g
 
-
+@register_loss("nll_bethe")
 def loss_nll_bethe(pred, target, *, data, reduction="mean", eps=1e-12):
     """
     Bethe-approximated negative log-likelihood:
@@ -483,18 +485,7 @@ def factor_logits_to_inference_like(
 
     raise ValueError(f"Unknown mu_v_mode={mu_v_mode!r}. Supported: 'unary'.")
 
-#def loss_nll_bethe_from_logits(
-#    pred, target, *, data, reduction="mean", eps=1e-12, mu_v_mode: str = "unary"
-#):
-#    """
-#    Bethe NLL where pred is (factor_logits, theta) instead of (inference, theta).
-#    Converts logits -> marginals, fabricates an inference-like object, then reuses loss_nll_bethe.
-#    """
-#    print(pred)
-#    factor_logits, theta = pred
-#    inf = factor_logits_to_inference_like(factor_logits, data=data, mu_v_mode=mu_v_mode)
-#    return loss_nll_bethe((inf, theta), target, data=data, reduction=reduction, eps=eps)
-
+@register_loss("nll_bethe_logits")
 def loss_nll_bethe_from_logits(
     pred, target, *, data, reduction="mean", eps=1e-12, mu_v_mode: str = "unary"
 ):

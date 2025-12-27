@@ -1,6 +1,8 @@
 import torch
 import torch_scatter
 
+from .registry import register_loss
+
 def _edge_unary_marginals_from_factor_beliefs_hetero(mu_f: torch.Tensor, data, eps: float = 1e-12):
     """
     Returns:
@@ -159,7 +161,7 @@ def _edge_unary_marginals_from_factor_beliefs_homo(mu_f: torch.Tensor, data, eps
     edge_marg = edge_marg / edge_marg.sum(dim=1, keepdim=True).clamp_min(eps)
     return vid_s, edge_marg
 
-
+@register_loss("local_consistency_l2")
 def loss_local_consistency_l2(mu_f: torch.Tensor, mu_v: torch.Tensor, data, eps: float = 1e-12, reduction="mean"):
     """
     L2 local-consistency penalty between variable marginals mu_v and factor-implied unary marginals.
@@ -186,7 +188,7 @@ def loss_local_consistency_l2(mu_f: torch.Tensor, mu_v: torch.Tensor, data, eps:
         return per_edge.sum()
     return per_edge.mean()
 
-
+@register_loss("local_consistency_kl")
 def loss_local_consistency_kl(mu_f: torch.Tensor, mu_v: torch.Tensor, data, eps: float = 1e-12, reduction="mean"):
     """
     KL local-consistency penalty: KL(edge_marg || mu_v[var]).

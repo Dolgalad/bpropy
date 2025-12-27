@@ -17,6 +17,8 @@ from .data import make_loaders
 from .logging import TrainLogger, make_run_paths
 from .metrics import EvalStats, _sync, gap_from_solution, write_test_eval_json
 
+from bpropy.gd.greedy_decimation import greedy_decimation
+
 # ---- Model registry ----
 from bpropy.models import MODEL_REGISTRY
 
@@ -103,7 +105,6 @@ def train_one_epoch(
 
         losses.append(loss_scalar)
 
-        print("np.mean(losses) = ", np.mean(losses))
         bar.next()
 
         steps += 1
@@ -124,6 +125,8 @@ def validate_one_epoch(
 ) -> Tuple[float, float]:
     model.eval()
     losses = []
+    eval_loss_names = [eval_loss_cfg["name"] for eval_loss_cfg in cfg.get("eval", {}).get("losses", [])]
+    eval_losses = {n: [] for n in eval_loss_names}
     gaps = []
     steps = 0
     max_steps = int(cfg["train"]["steps_per_val"])
@@ -138,6 +141,17 @@ def validate_one_epoch(
             # In eval, backward_fn should be None; if not, you can log NaN or skip loss
             loss = compute_loss_from_spec(spec, loss_registry=LOSS_REGISTRY)
             losses.append(float(loss.detach().cpu().item()))
+
+            for eval_loss_cfg in cfg.get("eval", {}).get("losses", []):
+                name = eval_loss_cfg["name"]
+                args = eval_loss_cfg.get("args", {})
+                eval_loss = LOSS_REGISTRY[name](
+                        pred,
+                        y,
+                        data=data,
+                        **args,
+                        )
+                eval_losses[name].append(eval_loss)
 
             scores = adapter.greedy_scores_fn(pb[0], data, pred)
             grd_sol = pb[0].greedy(scores=scores).x
@@ -156,7 +170,9 @@ def validate_one_epoch(
                 break
         bar.finish()
 
-    return (float(np.mean(losses)) if losses else 0.0, float(np.mean(gaps)) if gaps else 0.0)
+    return (float(np.mean(losses)) if losses else 0.0, 
+            float(np.mean(gaps)) if gaps else 0.0, 
+            {n:float(np.mean(eval_losses[n])) for n in eval_losses.keys()})
 
 
 def final_test_eval(
@@ -168,8 +184,10 @@ def final_test_eval(
     log_dir: str,
 ) -> str:
     model.eval()
-    losses, gaps = [], []
-    t_pred, t_grd, t_tot, t_pre, t_e2e = [], [], [], [], []
+    losses, gaps, dec_gaps = [], [], []
+    eval_loss_names = [eval_loss_cfg["name"] for eval_loss_cfg in cfg.get("eval", {}).get("losses", [])]
+    eval_losses = {n: [] for n in eval_loss_names}
+    t_pred, t_grd, t_tot, t_pre, t_e2e, t_gd = [], [], [], [], [], []
     maximize = bool(cfg.get("problem", {}).get("maximize", True))
 
     with torch.no_grad():
@@ -187,14 +205,31 @@ def final_test_eval(
             t3 = time.perf_counter()
             grd_sol = pb[0].greedy(scores=scores).x
             t4 = time.perf_counter()
+
+            # Greedy decimation
+            t5 = time.perf_counter()
+            backend = adapter.decimation_backend_fn(pb[0], data, pred, cfg, device=device)
+            padapter = adapter.decimation_adapter_fn(pb[0], cfg)
+            dec_sol = greedy_decimation(pb[0], backend, padapter)
+            t6 = time.perf_counter()
             
-            #loss_name = cfg.get("eval", {}).get("loss-name") or cfg["loss"]["name"]
-            #spec = adapter.loss_spec_fn(adatapter, data, pred, y, cfg, loss_name_override=adapter.loss_name)
             spec = adapter.loss_spec_fn(adapter, data, pred, y, cfg)
            
             # In eval, backward_fn should be None; if not, you can log NaN or skip loss
             loss = compute_loss_from_spec(spec, loss_registry=LOSS_REGISTRY)
             losses.append(float(loss.detach().cpu().item()))
+
+            for eval_loss_cfg in cfg.get("eval", {}).get("losses", []):
+                name = eval_loss_cfg["name"]
+                args = eval_loss_cfg.get("args", {})
+                eval_loss = LOSS_REGISTRY[name](
+                        pred,
+                        y,
+                        data=data,
+                        **args,
+                        )
+                eval_losses[name].append(eval_loss)
+
 
             gap = float(
                 gap_from_solution(
@@ -205,11 +240,22 @@ def final_test_eval(
                 )
             )
 
+            dec_gap = float(
+                gap_from_solution(
+                    y_true_sum=float(y.sum().item()),
+                    y_pred_sum=float(dec_sol.sum()),
+                    maximize=maximize,
+                    eps=1e-8,
+                )
+            )
+
             gaps.append(gap)
+            dec_gaps.append(dec_gap)
             t_pred.append(t2 - t1)
             t_grd.append(t4 - t3)
             t_tot.append(t4 - t0)
             t_pre.append(float(getattr(data, "preprocess_time_s", 0.0)))
+            t_gd.append(t6 - t5)
             t_e2e.append(t_pre[-1] + (t4 - t0))
 
             bar.next()
@@ -223,15 +269,24 @@ def final_test_eval(
             return float(a.mean()), 0.0
         return float(a.mean()), float(a.std(ddof=1))
 
+    eval_loss_stats = {}
+    for n, vals in eval_losses.items():
+        mean, std = ms(vals)
+        eval_loss_stats[n] = {"mean": ms(vals)[0], "std": ms(vals)[1]}
+
     stats = EvalStats(
         loss_mean=ms(losses)[0], loss_std=ms(losses)[1],
         gap_mean=ms(gaps)[0], gap_std=ms(gaps)[1],
+        dec_gap_mean=ms(dec_gaps)[0], dec_gap_std=ms(dec_gaps)[1],
         time_pred_mean=ms(t_pred)[0], time_pred_std=ms(t_pred)[1],
         time_greedy_mean=ms(t_grd)[0], time_greedy_std=ms(t_grd)[1],
         time_total_mean=ms(t_tot)[0], time_total_std=ms(t_tot)[1],
         time_preprocess_mean=ms(t_pre)[0], time_preprocess_std=ms(t_pre)[1],
         time_end_to_end_mean=ms(t_e2e)[0], time_end_to_end_std=ms(t_e2e)[1],
+        time_gd_mean=ms(t_gd)[0], time_gd_std=ms(t_gd)[1],
+
         count=len(losses),
+        eval_losses=eval_loss_stats,
     )
     out_path = write_test_eval_json(log_dir, stats, filename="test_eval.json")
     return out_path
@@ -281,10 +336,15 @@ def run_training(cfg: Dict[str, Any]) -> None:
 
     for epoch in range(st.epoch, epochs + 1):
         tr = train_one_epoch(cfg, adapter_train, model, optimizer, loaders.train_loader, device, epoch)
-        va, gap = validate_one_epoch(cfg, adapter_train, model, loaders.val_loader, device, epoch)
+        va, gap, eloss = validate_one_epoch(cfg, adapter_train, model, loaders.val_loader, device, epoch)
 
-        logger.add_scalars("loss", {"train": tr, "val": va, "gap": gap}, epoch)
-        print(f"Epoch {epoch:03d} | train {tr:.4f} | val {va:.4f} | gap {gap:.4f}")
+        logger.add_scalars("loss", {"train": tr, "val": va, "gap": gap, **eloss}, epoch)
+        epoch_out = f"Epoch {epoch:03d} | train {tr:.4f} | val {va:.4f} | gap {gap:.4f}"
+        if len(eloss):
+            eloss_out = " | ".join(f"{n} {eloss[n]:.4f}" for n in eloss.keys())
+            epoch_out += " | " + eloss_out
+        #print(f"Epoch {epoch:03d} | train {tr:.4f} | val {va:.4f} | gap {gap:.4f}")
+        print(epoch_out)
 
         # early stopping on gap (same “best_gap/epochs_bad” logic as your script) :contentReference[oaicite:12]{index=12}
         st.epoch = epoch

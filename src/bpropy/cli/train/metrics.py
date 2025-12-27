@@ -34,6 +34,8 @@ class EvalStats:
     loss_std: float
     gap_mean: float
     gap_std: float
+    dec_gap_mean: float
+    dec_gap_std: float
     time_pred_mean: float
     time_pred_std: float
     time_greedy_mean: float
@@ -44,19 +46,25 @@ class EvalStats:
     time_preprocess_std: float
     time_end_to_end_mean: float
     time_end_to_end_std: float
+    time_gd_mean: float
+    time_gd_std: float
     count: int
+    eval_losses: dict[str, float]
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "loss": {"mean": self.loss_mean, "std": self.loss_std},
             "gap": {"mean": self.gap_mean, "std": self.gap_std},
+            "dec_gap": {"mean": self.dec_gap_mean, "std": self.dec_gap_std},
             "time_pred_s": {"mean": self.time_pred_mean, "std": self.time_pred_std},
             "time_greedy_s": {"mean": self.time_greedy_mean, "std": self.time_greedy_std},
             "time_total_s": {"mean": self.time_total_mean, "std": self.time_total_std},
             "time_preprocess_s": {"mean": self.time_preprocess_mean, "std": self.time_preprocess_std},
             "time_end_to_end_s": {"mean": self.time_end_to_end_mean, "std": self.time_end_to_end_std},
+            "time_gd_s": {"mean": self.time_gd_mean, "std": self.time_gd_std},
 
             "count": self.count,
+            **self.eval_losses,
         }
 
 

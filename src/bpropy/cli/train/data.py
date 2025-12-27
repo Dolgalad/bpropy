@@ -31,7 +31,6 @@ def make_dataset(cfg: Dict[str, Any], split: str, yield_mode: str) -> MRFDataset
     yield_mode: "data" -> yields (data, y)
                "both" -> yields (pb, data, y)
     """
-    print("in make dataset split ", split)
     #data_cfg = cfg["data"]
     gt = cfg.get("problem", {}).get("ground_truth", {"solver": "greedy", "args": {}})
     solver = gt.get("solver", "greedy")
@@ -39,7 +38,6 @@ def make_dataset(cfg: Dict[str, Any], split: str, yield_mode: str) -> MRFDataset
     data_cfg_base = cfg["data"]
     split_over = data_cfg_base.get("splits", {}).get(split, {})
     data_cfg = _deep_merge(data_cfg_base, split_over)
-    print(data_cfg.get("precompute", {}))
 
     preprocess_kwargs = {
                 "hetero":bool(data_cfg.get("hetero", False)),
