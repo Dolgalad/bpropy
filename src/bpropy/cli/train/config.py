@@ -149,6 +149,7 @@ def validate_config(cfg: Config) -> None:
     cfg["model"].setdefault("init_from", None)
 
     cfg["loss"].setdefault("args", {})
+    cfg["loss"].setdefault("regularizers", [])
     cfg["train"].setdefault("steps_per_epoch", 10_000_000)
     cfg["train"].setdefault("steps_per_val", 10_000_000)
     cfg["train"].setdefault("amp", False)

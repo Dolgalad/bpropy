@@ -6,6 +6,8 @@ from typing import Any, Callable, Dict, Optional
 import numpy as np
 import torch
 
+from bpropy.losses.regularizers import REGULARIZER_REGISTRY
+
 
 # ----------------------------
 # Data structures
@@ -131,6 +133,24 @@ def _forward_hybrid_theta(model: torch.nn.Module, data: Any) -> torch.Tensor:
 # ----------------------------
 # Loss spec functions
 # ----------------------------
+def _apply_regularizers(spec: LossSpec, 
+                        adapter: MethodAdapter,
+                        batch: Any,
+                        pred: Any,
+                        labels: torch.Tensor,
+                        cfg: Dict[str,Any],
+                        ):
+    for r in cfg.get("loss", {}).get("regularizers", []):
+        w = float(r.get("weight", 0.0))
+        if w == 0.0:
+            continue
+        r_name = r["name"]
+        r_args = dict(r.get("args", {}))
+        term = REGULARIZER_REGISTRY[r_name](adapter, batch, pred, labels, cfg, **r_args)
+        print("term = ", term, w * term)
+        spec.extra_terms[f"reg/{r_name}"] = w * term 
+    return spec
+
 
 def _loss_spec_var_logits(
     adapter: MethodAdapter,
@@ -141,11 +161,13 @@ def _loss_spec_var_logits(
     loss_name_override: Optional[str] = None,
 ) -> LossSpec:
     loss_name = _pick_loss_name(adapter, cfg, loss_name_override)
-    return LossSpec(
+    spec = LossSpec(
         pred=pred,
         target=labels.to(pred.device, non_blocking=True).float(),
         loss_name=loss_name,
     )
+    _apply_regularizers(spec, adapter, pred, labels, cfg)
+    return spec
 
 
 def _loss_spec_factor_logits(
@@ -163,12 +185,14 @@ def _loss_spec_factor_logits(
     if loss_name in ("mse", "l1"):
         target = target.float()
 
-    return LossSpec(
+    spec = LossSpec(
         pred=theta,
         target=target,
         loss_name=loss_name,
         loss_kwargs={"data": batch, **cfg.get("loss", {}).get("args", {})},
     )
+    _apply_regularizers(spec, adapter, batch, pred_theta, labels, cfg)
+    return spec
 
 
 def _loss_spec_factor_inference(
@@ -193,13 +217,14 @@ def _loss_spec_factor_inference(
 
     pred_used = theta if loss_name.endswith("_logits") else (inference_res, theta)
 
-    return LossSpec(
+    spec = LossSpec(
         pred=pred_used,
         target=target,
         loss_name=loss_name,
         loss_kwargs={"data": batch, **cfg.get("loss", {}).get("args", {})},
     )
-
+    _apply_regularizers(spec, adapter, batch, pred, labels, cfg)
+    return spec
 
 # ----------------------------
 # Greedy scoring functions
