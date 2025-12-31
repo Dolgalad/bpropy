@@ -20,6 +20,7 @@ class EFCanonicalParam(Module):
         offsets = torch.cumsum(ss_len, dim=0) - ss_len                           # [F]
         SS_total = int(ss_len.sum().item())
         theta = x.new_empty(SS_total)
+        #theta = x.new_zeros(SS_total)
 
         # we’ll fill θ bucket-by-bucket (no per-factor loop)
         # build a lookup: arity -> index into self.mlps
@@ -27,6 +28,13 @@ class EFCanonicalParam(Module):
 
         # unique arities present in this batch (small set)
         uniq = torch.unique(fs, sorted=True)
+
+        present = set(torch.unique(fs).tolist())
+        supported = set(self.factor_sizes)
+        missing = sorted(int(s) for s in present if int(s) not in supported)
+        if missing:
+            raise ValueError(f"EFCanonicalParam: missing MLP(s) for factor arities {missing}. "
+                             f"Supported={self.factor_sizes}.")
 
         for s in uniq.tolist():  # loop over arities only (not over factors)
             if s not in arity2mlp:

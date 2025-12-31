@@ -188,6 +188,7 @@ class SCP(LPProblem, SerializableLPMixin):
         temperature: float = 1.0,
         rng: Optional[np.random.Generator] = None,
         use_costs: bool = True,
+        scores: Optional[np.ndarray] = None,
     ) -> SCPSolution:
         """
         Greedy Set Cover heuristic.
@@ -208,7 +209,7 @@ class SCP(LPProblem, SerializableLPMixin):
         -------
         sol : SCPSolution
         """
-        x = scp_greedy(self, policy=policy, temperature=temperature, rng=rng, use_costs=use_costs)
+        x = scp_greedy(self, policy=policy, temperature=temperature, rng=rng, use_costs=use_costs, scores=scores)
         return Solution(x=x, solver="greedy")
 
 LPProblem.register_vcgraph_type("SCP", SCP)
@@ -232,6 +233,7 @@ def scp_greedy(
     temperature: float = 1.0,
     rng: Optional[np.random.Generator] = None,
     use_costs: bool = True,
+    scores: Optional[np.ndarray] = None
 ) -> np.ndarray:
     """
     Classic greedy heuristic for Set Cover:
@@ -248,6 +250,12 @@ def scp_greedy(
 
     if policy == "sample" and rng is None:
         rng = np.random.default_rng()
+
+        # Optional override scores (static per set)
+    if scores is not None:
+        scores = np.asarray(scores, dtype=float).reshape(-1)
+        if scores.size != n:
+            raise ValueError(f"scores must have shape ({n},), got ({scores.size},)")
 
     # coverage state
     uncovered = np.ones(m, dtype=bool)
@@ -277,23 +285,26 @@ def scp_greedy(
             elems = np.asarray(pb.F[int(j)], dtype=int)
             if elems.size:
                 gains[k] = float(np.sum(uncovered[elems]))
-
-        if use_costs:
-            costs = np.asarray(pb.w, dtype=float).reshape(-1)
-            denom = np.maximum(costs[active_idx], 1e-12)
-            scores = gains / denom
-        else:
-            scores = gains
-
         # If all gains are 0, we're stuck
-        if np.max(scores) <= 0:
+        if np.max(gains) <= 0:
             break
 
+        if scores is not None:
+            step_scores = scores[active_idx]
+        else:
+            if use_costs:
+                costs = np.asarray(pb.w, dtype=float).reshape(-1)
+                denom = np.maximum(costs[active_idx], 1e-12)
+                step_scores = gains / denom
+            else:
+                step_scores = gains
+
+
         if policy == "argmax":
-            j = int(active_idx[np.argmax(scores)])
+            j = int(active_idx[np.argmax(step_scores)])
         elif policy == "sample":
             # sample proportional to exp(scores / temperature)
-            p = _softmax(scores, temperature=temperature)
+            p = _softmax(step_scores, temperature=temperature)
             j = int(rng.choice(active_idx, p=p))
         else:
             raise ValueError(f"Unknown policy={policy!r} (expected 'argmax' or 'sample')")

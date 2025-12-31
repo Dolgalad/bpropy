@@ -16,6 +16,7 @@ from .checkpoint import EpochState, load_checkpoint, save_checkpoint
 from .data import make_loaders
 from .logging import TrainLogger, make_run_paths
 from .metrics import EvalStats, _sync, gap_from_solution, write_test_eval_json
+from .schedulers import build_scheduler, _apply_lr_schedulers
 
 from bpropy.gd.greedy_decimation import greedy_decimation
 
@@ -27,6 +28,7 @@ from bpropy.losses import LOSS_REGISTRY
 
 # ---- Method registry ----
 from bpropy.cli.train.method_registry import METHOD_REGISTRY
+
 
 def build_model(cfg: Dict[str, Any], device: torch.device) -> torch.nn.Module:
     name = cfg["model"]["name"]
@@ -51,7 +53,60 @@ def build_optimizer(cfg: Dict[str, Any], model: torch.nn.Module) -> torch.optim.
         return torch.optim.Adam(model.parameters(), **args)
     if name == "sgd":
         return torch.optim.SGD(model.parameters(), **args)
+    if name == "adamw":
+        return torch.optim.AdamW(model.parameters(), **args)
+
     raise ValueError(f"Unknown optimizer '{name}'")
+
+#def build_scheduler(cfg: Dict[str, Any], optimizer):
+#    sch_cfg = cfg["train"]["scheduler"]
+#    if isinstance(sch_cfg, dict):
+#        name = sch_cfg["name"].lower()
+#        args = tuple(sch_cfg.get("args", ()))
+#        kwargs = dict(sch_cfg.get("kwargs", {}))
+#
+#        if name.lower() == "reducelronplateau":
+#            return torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, *args, **kwargs)
+#        if name.lower() == "cosineannealinglr":
+#            return torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, *args, **kwargs)
+#        if name.lower() == "cosineannealingwarmrestarts":
+#            return torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, *args, **kwargs)
+#        if name.lower() == "multiplicativelr":
+#            kwargs["lr_lambda"] = eval(kwargs["lr_lambda"])
+#            return torch.optim.lr_scheduler.MultiplicativeLR(optimizer, *args, **kwargs)
+#
+#    if isinstance(sch_cfg, list):
+#        schedulers = []
+#        for sch_k in sch_cfg:
+#            name = sch_k["name"].lower()
+#            args = tuple(sch_k.get("args", ()))
+#            kwargs = dict(sch_k.get("kwargs", {}))
+#            if name.lower() == "reducelronplateau":
+#                schedulers.append(torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, *args, **kwargs))
+#            if name.lower() == "cosineannealinglr":
+#                schedulers.append(torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, *args, **kwargs))
+#            if name.lower() == "cosineannealingwarmrestarts":
+#                schedulers.append(torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, *args, **kwargs))
+#            if name.lower() == "multiplicativelr":
+#                if "lr_lambda" in kwargs:
+#                    kwargs["lr_lambda"] = eval(kwargs["lr_lambda"])
+#                schedulers.append(torch.optim.lr_scheduler.MultiplicativeLR(optimizer, *args, **kwargs))
+#
+#        return schedulers
+#    raise ValueError(f"Unknown scheduler '{name}'")
+
+#def _apply_lr_schedulers(cfg: Dict[str, Any], schedulers, val):
+#    if isinstance(schedulers, list):
+#        for sch in schedulers:
+#            if isinstance(sch, torch.optim.lr_scheduler.ReduceLROnPlateau):
+#                sch.step(val)
+#            else:
+#                sch.step()
+#    else:
+#        if isinstance(schedulers, torch.optim.lr_scheduler.ReduceLROnPlateau):
+#            schedulers.step(val)
+#        else:
+#            schedulers.step()
 
 def compute_loss_from_spec(
     spec,
@@ -129,7 +184,7 @@ def validate_one_epoch(
     eval_losses = {n: [] for n in eval_loss_names}
     gaps = []
     steps = 0
-    max_steps = int(cfg["train"]["steps_per_val"])
+    max_steps = int(cfg["train"]["val_steps"])
     maximize = bool(cfg.get("problem", {}).get("maximize", True))
 
     with torch.no_grad():
@@ -160,7 +215,7 @@ def validate_one_epoch(
                 y_true_sum=float(y.sum().item()),
                 y_pred_sum=float(grd_sol.sum()),
                 maximize=maximize,
-                eps=0.0,  # match your epoch validation divide-by-y.sum() style :contentReference[oaicite:10]{index=10}
+                eps=1e-8,  # match your epoch validation divide-by-y.sum() style :contentReference[oaicite:10]{index=10}
             )
             gaps.append(float(gap))
 
@@ -319,6 +374,7 @@ def run_training(cfg: Dict[str, Any]) -> None:
     # model/opt/loss
     model = build_model(cfg, device)
     optimizer = build_optimizer(cfg, model)
+    scheduler = build_scheduler(cfg, optimizer)
 
     loss_name = cfg["loss"]["name"]
     if loss_name not in LOSS_REGISTRY:
@@ -328,7 +384,7 @@ def run_training(cfg: Dict[str, Any]) -> None:
     st = EpochState()
     resume_path = cfg.get("run", {}).get("resume")
     if resume_path:
-        st, _ = load_checkpoint(resume_path, model, optimizer, map_location=device)
+        st, _ = load_checkpoint(resume_path, model, optimizer, scheduler, map_location=device)
 
     # training loop
     epochs = int(cfg["train"]["epochs"])
@@ -338,17 +394,29 @@ def run_training(cfg: Dict[str, Any]) -> None:
         tr = train_one_epoch(cfg, adapter_train, model, optimizer, loaders.train_loader, device, epoch)
         va, gap, eloss = validate_one_epoch(cfg, adapter_train, model, loaders.val_loader, device, epoch)
 
-        logger.add_scalars("loss", {"train": tr, "val": va, "gap": gap, **eloss}, epoch)
+        logger.add_scalars("loss", {"train": tr, "val": va}, epoch)
+        logger.add_scalars("lr", {f"pg{k}":pg["lr"] for k,pg in enumerate(optimizer.param_groups)}, epoch)
+        logger.add_scalars("gap", {"val": gap}, epoch)
         epoch_out = f"Epoch {epoch:03d} | train {tr:.4f} | val {va:.4f} | gap {gap:.4f}"
         if len(eloss):
             eloss_out = " | ".join(f"{n} {eloss[n]:.4f}" for n in eloss.keys())
             epoch_out += " | " + eloss_out
-        #print(f"Epoch {epoch:03d} | train {tr:.4f} | val {va:.4f} | gap {gap:.4f}")
+            logger.add_scalars("extra_loss", eloss, epoch)
         print(epoch_out)
+
+        # create dictionary of metrics
+        metrics_dict = {
+                "train/loss": tr,
+                "val/loss": va,
+                "val/gap": gap,
+                **eloss
+                }
+        # schedule step
+        _apply_lr_schedulers(cfg, scheduler, epoch, metrics_dict[cfg["train"].get("scheduler", {}).get("metric", "val/gap")])
 
         # early stopping on gap (same “best_gap/epochs_bad” logic as your script) :contentReference[oaicite:12]{index=12}
         st.epoch = epoch
-        improved = gap < st.best_gap
+        improved = metrics_dict[cfg["train"].get("early_stop", {}).get("metric", "val/gap")] < st.best_gap
         if improved:
             st.best_gap = gap
             st.best_epoch = epoch
@@ -358,18 +426,19 @@ def run_training(cfg: Dict[str, Any]) -> None:
 
         # checkpoints
         last_path = os.path.join(paths.ckpt_dir, "last.pt")
-        save_checkpoint(last_path, st, model, optimizer)
+        save_checkpoint(last_path, st, model, optimizer, scheduler)
 
         if improved and cfg["train"]["checkpoint"].get("save_best", True):
             best_path = os.path.join(paths.ckpt_dir, "best.pt")
-            save_checkpoint(best_path, st, model, optimizer)
+            print("Saving new best checkpoint")
+            save_checkpoint(best_path, st, model, optimizer, scheduler)
 
         if st.epochs_bad >= patience:
             print(f"[early-stop] No gap improvement for {st.epochs_bad} epochs (patience={patience}).")
             break
 
     # final eval: load best if present, then evaluate test split and write test_eval.json :contentReference[oaicite:13]{index=13}
-    best_path = os.path.join(paths.ckpt_dir, "best.pt")
+    best_path = os.path.join(paths.ckpt_dir, "last.pt")
     if os.path.exists(best_path):
         print(f"[eval] Loading best checkpoint from {best_path}")
         load_checkpoint(best_path, model, optimizer=None, map_location=device)

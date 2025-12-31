@@ -43,10 +43,11 @@ def get_features(pb, solver="cbc", solution=None):
     else:
         sol = solution
 
+
     nfeat = variable_features(pb, sol)
 
     # constraint features
-    n_constr = len(pb.constraints())
+    n_constr = pb.linear_constraints_matrix()[0].shape[0]
 
     # edge features
     efeat = np.ones(2 * int(sum(c.A.sum() for c in pb.constraints())))

@@ -148,6 +148,7 @@ class SCPAdapter:
         else:
             eff = scores
 
+
         j = int(active_idx[np.argmax(eff[active_idx])])
 
         # Commit: choose set j

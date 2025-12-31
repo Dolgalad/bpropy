@@ -32,6 +32,8 @@ def loopy_belief_propagation(theta, v2f, edges, max_iter=100, tol=1e-6, damping=
     qbar = torch.empty_like(v2f)
     mufbar = torch.empty_like(theta)
 
+    vmar_p = torch.full((2 * nv,), 0.5, dtype=theta.dtype, device=dev)  # uniform fallback
+
     for T in range(max_iter):
         #t0 = time.time()
 

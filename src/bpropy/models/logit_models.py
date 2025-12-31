@@ -2,7 +2,7 @@
 import torch
 from torch.nn import ELU
 from torchvision.ops import MLP
-from torch_geometric.nn import HeteroDictLinear, to_hetero
+from torch_geometric.nn import HeteroDictLinear, to_hetero, SAGEConv, GraphConv
 from torch_geometric.nn.models import GCN, GAT
 from torch_geometric.data import Data
 import torch_scatter
@@ -53,7 +53,7 @@ class HeteroGCNVarLogits(torch.nn.Module):
     one logit per node in the 'variable' store.
     """
     def __init__(self, in_variable_dim=10, in_constraint_dim=4, n_layers=4, hidden_dim=64, dropout_p=0.25,
-                 jk="lstm", norm="LayerNorm", act="elu", gnn_f="GAT",
+                 jk="lstm", norm="LayerNorm", act="elu", gnn_f="GCN",
                  readout_hidden=(64, 64)):
         super().__init__()
         Conv = dict(GCN=GCN, GAT=GAT)[gnn_f]
@@ -68,7 +68,7 @@ class HeteroGCNVarLogits(torch.nn.Module):
                               (['variable','constraint'],
                                [('variable','v2c','constraint'),
                                 ('constraint','c2v','variable')]),
-                              aggr="sum")
+                              aggr="mean")
         self.readout = MLP(hidden_dim, hidden_channels=list(readout_hidden)+[1],
                            activation_layer=ELU, norm_layer=torch.nn.LayerNorm)
 
@@ -79,8 +79,70 @@ class HeteroGCNVarLogits(torch.nn.Module):
         logits = self.readout(x_dict["variable"]).squeeze(-1)  # [Nv]
         return logits
 
+class _BaseBipartiteGNN(torch.nn.Module):
+    def __init__(self, hidden_dim: int, n_layers: int = 4, dropout_p: float = 0.25, conv="SAGE"):
+        super().__init__()
+        Conv = {"SAGE": SAGEConv, "GraphConv": GraphConv}[conv]
+        self.convs = torch.nn.ModuleList()
+        self.acts = torch.nn.ModuleList()
+        self.drop = torch.nn.Dropout(dropout_p)
+
+        for _ in range(n_layers):
+            # (-1, -1) enables bipartite (src, dst) dims inference
+            self.convs.append(Conv((-1, -1), hidden_dim))
+            self.acts.append(ELU())
+
+    def forward(self, x, edge_index):
+        # x may be Tensor or tuple(Tensor, Tensor) in hetero mode
+        for conv, act in zip(self.convs, self.acts):
+            x = conv(x, edge_index)
+            x = act(x)
+            x = self.drop(x)
+        return x
+
+
+class HeteroGCNVarLogits_v2(torch.nn.Module):
+    def __init__(
+        self,
+        in_variable_dim=10,
+        in_constraint_dim=4,
+        n_layers=4,
+        hidden_dim=64,
+        dropout_p=0.25,
+        readout_hidden=(64, 64),
+        conv="GraphConv",          # "SAGE" or "GraphConv"
+        aggr="mean",          # "mean" is typically stabler than "sum"
+    ):
+        super().__init__()
+        self.enc = HeteroDictLinear(
+            {"variable": in_variable_dim, "constraint": in_constraint_dim},
+            hidden_dim,
+        )
+
+        base = _BaseBipartiteGNN(hidden_dim, n_layers=n_layers, dropout_p=dropout_p, conv=conv)
+
+        self.conv = to_hetero(
+            base,
+            (["variable", "constraint"],
+             [("variable", "v2c", "constraint"),
+              ("constraint", "c2v", "variable")]),
+            aggr=aggr,
+        )
+
+        self.readout = MLP(
+            hidden_dim,
+            hidden_channels=list(readout_hidden) + [1],
+            activation_layer=ELU,
+            norm_layer=torch.nn.LayerNorm,
+        )
+
+    def forward(self, data):
+        x_dict = self.enc(data.x_dict)
+        x_dict = self.conv(x_dict, data.edge_index_dict)
+        return self.readout(x_dict["variable"]).squeeze(-1)
+
 class HeteroGCNFactorLogits(torch.nn.Module):
-    def __init__(self, in_variable_dim=10, in_constraint_dim=4, n_layers=4, hidden_dim=64, dropout_p=0.25, normalize=False, factor_sizes=[1,2], jk="lstm", norm="LayerNorm", act="elu", mapping_aggr="mean", gnn_f="GAT", add_self_loops=False, normalize_theta=False):
+    def __init__(self, in_variable_dim=10, in_constraint_dim=4, n_layers=4, hidden_dim=64, dropout_p=0.25, normalize=False, factor_sizes=[1,2], jk="lstm", norm="LayerNorm", act="elu", mapping_aggr="mean", gnn_f="GCN", add_self_loops=False, normalize_theta=False):
         super().__init__()
         self.conv = eval(gnn_f)(hidden_dim, hidden_dim, n_layers, out_channels=hidden_dim, dropout=dropout_p, act=act, norm=norm, jk=jk, add_self_loops=add_self_loops)
         # debug
