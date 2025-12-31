@@ -9,6 +9,34 @@ import torch_scatter
 from .registry import LOSS_REGISTRY, register_loss
 
 
+def _flat_factor_sizes_in_ss_order(data, device):
+    # Homo: already a single authoritative tensor
+    if hasattr(data, "factor_sizes") and torch.is_tensor(data.factor_sizes):
+        return data.factor_sizes.to(device=device, dtype=torch.long)
+
+    # Hetero: build factor list = unary variables + constraint factors,
+    # then sort by (batch_id, factor_size) to match your SS convention.
+    if hasattr(data, "node_types") and ("variable" in data.node_types) and ("constraint" in data.node_types):
+        nv = int(data["variable"].num_nodes)
+        nc = int(data["constraint"].num_nodes)
+
+        fs_var = torch.ones(nv, device=device, dtype=torch.long)
+        fs_con = data["constraint"].factor_sizes.to(device=device, dtype=torch.long)
+        fs = torch.cat([fs_var, fs_con], dim=0)
+
+        b_var = data["variable"].batch.to(device=device, dtype=torch.long)  # [nv]
+        b_con = data["constraint"].batch.to(device=device, dtype=torch.long)  # [nc]
+        b = torch.cat([b_var, b_con], dim=0)
+
+        # Stable lex sort by (batch, factor_size).
+        # Do stable sort by secondary key first, then primary.
+        idx = torch.arange(fs.numel(), device=device)
+        idx = idx[torch.argsort(fs[idx], stable=True)]
+        idx = idx[torch.argsort(b[idx], stable=True)]
+
+        return fs[idx]
+
+    raise AttributeError("Cannot infer factor sizes order from data.")
 
 
 # ---- Simple Binary Cross-Entropy with logits ----
@@ -24,10 +52,7 @@ def _factor_strides_from_factor_sizes(data, scores):
     device = scores.device
     # HeteroData / HeteroDataBatch case
     if hasattr(data, "node_types") and ("variable" in data.node_types) and ("constraint" in data.node_types):
-        nv = int(data["variable"].num_nodes)
-        var_sizes = torch.ones(nv, device=device, dtype=torch.long)  # all unary, binary vars
-        con_sizes = data["constraint"].factor_sizes.to(device=device, dtype=torch.long)  # [nc]
-        fs = torch.cat([var_sizes, con_sizes], dim=0)  # variables first, then constraints
+        fs = _flat_factor_sizes_in_ss_order(data, scores.device)
         return (1 << fs)
     fs = data.factor_sizes.to(device=device, dtype=torch.long)  # [n_nodes]
     strides = (1 << fs)
@@ -61,10 +86,7 @@ def _extract_unary_y_ss(data, device: torch.device) -> torch.Tensor:
 
     # Factor sizes in the same order as y_ss blocks
     if hasattr(data, "node_types") and ("variable" in data.node_types) and ("constraint" in data.node_types):
-        nv = int(data["variable"].num_nodes)
-        var_sizes = torch.ones(nv, device=device, dtype=torch.long)
-        con_sizes = data["constraint"].factor_sizes.to(device=device, dtype=torch.long)
-        fs = torch.cat([var_sizes, con_sizes], dim=0)
+        fs = _flat_factor_sizes_in_ss_order(data, device)
     else:
         fs = data.factor_sizes.to(device=device, dtype=torch.long)
 
