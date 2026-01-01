@@ -257,7 +257,7 @@ class MRFDataset(Dataset):
     
         data_path, meta_path = _cache_paths(self.processed_dir, self.split, stem, cache_key)
     
-        torch.save(data, data_path)
+        #torch.save(data, data_path)
         meta = {
             "cache_key": cache_key,
             "prob_type": prob_type,
@@ -267,8 +267,10 @@ class MRFDataset(Dataset):
             "created": time.time(),
             **preprocess_meta,
         }
-        with open(meta_path, "w") as f:
-            json.dump(meta, f, indent=2)
+
+        self._atomic_save(data_path, meta_path, data, meta)
+        #with open(meta_path, "w") as f:
+        #    json.dump(meta, f, indent=2)
 
     def _atomic_save(self, data_path, meta_path, data, meta):
         tmp_data = data_path + ".tmp"
@@ -285,6 +287,13 @@ class MRFDataset(Dataset):
         stem = self.stems[index]
         man = _read_manifest(stem)
         prob_type = _infer_type(man)
+
+        cache_key = _hash_for_cache(man, None, self.cfg, stem, preprocess_kwargs=self.cfg.preprocess_kwargs)
+
+        data_path, meta_path = _cache_paths(
+            self.processed_dir, self.split, stem, cache_key
+        )
+        lock_path = data_path + ".lock"
 
         #cache_key = _hash_for_cache(man, None, self.cfg, stem, preprocess_kwargs=self.cfg.preprocess_kwargs)
 
