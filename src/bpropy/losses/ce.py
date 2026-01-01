@@ -44,6 +44,44 @@ def _flat_factor_sizes_in_ss_order(data, device):
 def loss_bce_logits(logits: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     return F.binary_cross_entropy_with_logits(logits, y.float())
 
+@register_loss("focal_bce_logits")
+def loss_focal_bce_logits(
+    logits: torch.Tensor,
+    y: torch.Tensor,
+    gamma: float = 2.0,
+    alpha: float | None = None,
+    ) -> torch.Tensor:
+    """
+    Focal Binary Cross-Entropy loss operating on logits.
+
+    Args:
+        logits: Tensor of shape [N]
+        y: Binary labels {0,1}, shape [N]
+        gamma: Focusing parameter (gamma=2 is common)
+        alpha: Optional class balancing factor.
+            If provided, alpha is weight for positive class.
+            Negative class weight = 1 - alpha.
+    """
+    y = y.float()
+
+    # Standard BCE per element (no reduction)
+    bce = F.binary_cross_entropy_with_logits(logits, y, reduction="none")
+
+    # p_t = P(correct class)
+    p = torch.sigmoid(logits)
+    p_t = p * y + (1.0 - p) * (1.0 - y)
+
+    # Focal modulation
+    focal_factor = (1.0 - p_t).pow(gamma)
+
+    loss = focal_factor * bce                                                                                                   
+                                                                                                                                
+    # Optional alpha balancing                                                                                                  
+    if alpha is not None:                                                                                                       
+        alpha_t = alpha * y + (1.0 - alpha) * (1.0 - y)                                                                         
+        loss = alpha_t * loss                                                                                                   
+                                                                                                                                
+    return loss.mean()
 # ---- Factor Cross-Entropy with logits ----
 def _factor_strides_from_factor_sizes(data, scores):
     """

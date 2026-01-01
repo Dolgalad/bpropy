@@ -115,8 +115,18 @@ def problem_to_data(pb,
         # features
         nn = nfeat.shape[1] - cfeat.shape[1]
         x = np.concatenate((nfeat, np.pad(cfeat, ((0,0), (0,nn)))), axis=0)
+
+
         data.x = torch.from_numpy(x).to(torch.float32)
         data.e = torch.from_numpy(efeat).to(torch.float32)
+
+        from torch_geometric.transforms import AddRandomWalkPE
+
+        pe_dim = 16          # number of steps / dimensions
+        transform = AddRandomWalkPE(walk_length=pe_dim, attr_name='rwpe')
+
+        data = transform(data)                 # adds data.rwpe with shape [num_nodes, pe_dim]
+        data.x = torch.cat([data.x, data.rwpe], dim=-1)
 
         # problem type tags (survive batching)
         data.problem_type_name = name

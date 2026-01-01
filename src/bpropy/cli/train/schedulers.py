@@ -42,6 +42,9 @@ def _build_one_scheduler(name: str, optimizer, args=(), kwargs=None):
 def build_scheduler(cfg: Dict[str, Any], optimizer):
     sch_cfg = cfg["train"]["scheduler"]
 
+    if sch_cfg is None:
+        return None
+
     # -------- nested form (dict) --------
     if isinstance(sch_cfg, dict):
         name = sch_cfg["name"].lower()
@@ -118,7 +121,11 @@ def build_scheduler(cfg: Dict[str, Any], optimizer):
 
     raise ValueError("train.scheduler must be a dict or list")
 
-def _apply_lr_schedulers(cfg: Dict[str, Any], schedulers, epoch, val):
+def _apply_lr_schedulers(cfg: Dict[str, Any], schedulers, epoch, metrics):
+    if schedulers is None:
+        return 
+    val = metrics[cfg["train"].get("scheduler", {}).get("metric", "val/gap")]
+
     if isinstance(schedulers, list):
         for sch in schedulers:
             if isinstance(sch, torch.optim.lr_scheduler.ReduceLROnPlateau):
@@ -137,11 +144,15 @@ def _apply_lr_schedulers(cfg: Dict[str, Any], schedulers, epoch, val):
             schedulers.step()
 
 def _get_scheduler_state_dict(schedulers):
+    if schedulers is None:
+        return 
     if isinstance(schedulers, list):
         return [_get_scheduler_state_dict(sch) for sch in schedulers]
     return schedulers.state_dict()
 
 def _set_scheduler_state_dict(schedulers, state_dict):
+    if schedulers is None:
+        return 
     if isinstance(schedulers, list):
         for sch,sd in zip(schedulers, state_dict):
             _set_scheduler_state_dict(sch, sd)

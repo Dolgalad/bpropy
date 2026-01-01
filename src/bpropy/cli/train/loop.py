@@ -210,8 +210,19 @@ def validate_one_epoch(
 
             scores = adapter.greedy_scores_fn(pb[0], data, pred)
             grd_sol = pb[0].greedy(scores=scores).x
-            print("scores  = ", scores)
-            print("grd_sol = ", grd_sol)
+
+            _0_idx, _1_idx = (y == 0).cpu().numpy(), (y == 1).cpu().numpy()
+
+            _0_scores_mean, _0_scores_std, _1_scores_mean, _1_scores_std = (
+                    np.mean( scores[_0_idx] ),
+                    np.std( scores[_0_idx] ),
+                    np.mean( scores[_1_idx] ),
+                    np.std( scores[_1_idx] ),
+
+                    )
+
+            print("0 mean, std : ", _0_scores_mean, _0_scores_std)
+            print("1 mean, std : ", _1_scores_mean, _1_scores_std)
 
             gap = gap_from_solution(
                 y_true_sum=float(y.sum().item()),
@@ -414,7 +425,7 @@ def run_training(cfg: Dict[str, Any]) -> None:
                 **eloss
                 }
         # schedule step
-        _apply_lr_schedulers(cfg, scheduler, epoch, metrics_dict[cfg["train"].get("scheduler", {}).get("metric", "val/gap")])
+        _apply_lr_schedulers(cfg, scheduler, epoch, metrics_dict)
 
         # early stopping on gap (same “best_gap/epochs_bad” logic as your script) :contentReference[oaicite:12]{index=12}
         st.epoch = epoch

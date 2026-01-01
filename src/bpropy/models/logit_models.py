@@ -1,9 +1,10 @@
 # mrf_models_var_logits.py
 import torch
+import torch.nn.functional as F
 from torch.nn import ELU
 from torchvision.ops import MLP
 from torch_geometric.nn import HeteroDictLinear, to_hetero, SAGEConv, GraphConv
-from torch_geometric.nn.models import GCN, GAT
+from torch_geometric.nn.models import GCN, GAT, GraphSAGE
 from torch_geometric.data import Data
 import torch_scatter
 
@@ -21,12 +22,20 @@ class GCNVarLogits(torch.nn.Module):
                  jk="lstm", norm="LayerNorm", act="elu", gnn_f="GCN",
                  readout_hidden=(64, 64)):
         super().__init__()
-        Conv = dict(GCN=GCN, GAT=GAT)[gnn_f]
+        Conv = dict(GCN=GCN, GAT=GAT, SAGE=GraphSAGE)[gnn_f]
         self.conv = Conv(in_dim, hidden_dim, n_layers,
                          out_channels=hidden_dim, dropout=dropout_p,
                          act=act, norm=norm, jk=jk)
+        if norm is None:
+            norm_layer = None
+        elif norm == "LayerNorm":
+            norm_layer = torch.nn.LayerNorm
+        elif norm == "BatchNorm":
+            norm_layer = torch.nn.BatchNorm1d
+        else:
+            norm_layer = None
         self.readout = MLP(hidden_dim, hidden_channels=list(readout_hidden)+[1],
-                           activation_layer=ELU, norm_layer=torch.nn.LayerNorm)
+                           activation_layer=ELU, norm_layer=norm_layer)
 
     def _var_idx(self, data):
         if hasattr(data, "var_node_mask"):
@@ -43,6 +52,7 @@ class GCNVarLogits(torch.nn.Module):
     def forward(self, data):
         x = self.conv(data.x, data.edge_index)   # [N, hidden_dim]
         vidx = self._var_idx(data)               # [K]
+
         logits = self.readout(x[vidx]).squeeze(-1)  # [K]
         return logits
 
@@ -236,3 +246,103 @@ class HeteroGCNFactorLogits(torch.nn.Module):
             xp = xp - z_theta.repeat_interleave(m_stride)
             return xp
 
+
+class ResidualSAGEVarLogits(torch.nn.Module):
+    """
+    Homogeneous graph -> one logit per variable node, with:
+    logit_v = base(x_v) + delta(h_v)
+
+    - base(x): MLP on raw node features (strong per-node baseline)
+    - h: stacked SAGEConv with residual connections + LayerNorm
+    - delta(h): small MLP correction head
+
+    Matches GCNVarLogits' variable indexing conventions.
+    """
+
+    def __init__(
+        self,
+        in_dim: int,
+        n_layers: int = 4,
+        hidden_dim: int = 128,
+        dropout_p: float = 0.25,
+        sage_aggr: str = "mean",          # "mean", "max", "lstm", ...
+        use_layernorm: bool = True,
+        base_hidden=(128, 128),
+        delta_hidden=(128, 64),
+        init_base_scale: float = 1.0,     # can reduce if base dominates, e.g. 0.5
+        init_delta_scale: float = 1.0,    # can reduce if delta too noisy, e.g. 0.5
+        ):
+        super().__init__()
+        assert n_layers >= 1
+
+        # Baseline: logits from raw features only
+        self.base_mlp = MLP(
+            in_dim,
+            hidden_channels=list(base_hidden) + [1],
+            activation_layer=ELU,
+            norm_layer=torch.nn.LayerNorm,
+            )
+
+        # GNN trunk: SAGEConv stack
+        self.input_proj = (
+            torch.nn.Linear(in_dim, hidden_dim) if in_dim != hidden_dim else torch.nn.Identity()
+            )
+        self.convs = torch.nn.ModuleList(
+            [SAGEConv(hidden_dim, hidden_dim, aggr=sage_aggr) for _ in range(n_layers)]
+            )
+        self.norms = torch.nn.ModuleList(
+            [torch.nn.LayerNorm(hidden_dim) for _ in range(n_layers)]
+            ) if use_layernorm else None
+        self.dropout_p = dropout_p
+
+        # Delta head: correction logits from contextual embeddings
+        self.delta_mlp = MLP(
+            hidden_dim,
+            hidden_channels=list(delta_hidden) + [1],
+            activation_layer=ELU,
+            norm_layer=torch.nn.LayerNorm,
+            )
+
+        # Optional learnable scales for stability / easy ablation
+        self.base_scale = torch.nn.Parameter(torch.tensor(float(init_base_scale)))
+        self.delta_scale = torch.nn.Parameter(torch.tensor(float(init_delta_scale)))
+
+    def _var_idx(self, data):
+        if hasattr(data, "var_node_mask"):
+            return data.var_node_mask.nonzero(as_tuple=False).view(-1)
+        if hasattr(data, "var_index"):
+            return data.var_index.long()
+        if hasattr(data, "var_idx"):
+            return data.var_idx.long()
+        if hasattr(data, "num_vars"):
+            return torch.arange(int(data.num_vars), device=data.x.device)
+        return torch.arange(data.num_nodes, device=data.x.device)
+
+    def forward(self, data):
+        x_raw = data.x
+        edge_index = data.edge_index
+
+        vidx = self._var_idx(data)
+
+        # Base logits from raw features (no message passing)
+        base_logits = self.base_mlp(x_raw[vidx]).squeeze(-1)
+
+        # GNN trunk (residual SAGE)
+        h = self.input_proj(x_raw)
+        for i, conv in enumerate(self.convs):
+            h_in = h
+            h = conv(h, edge_index)
+            if self.norms is not None:
+                h = self.norms[i](h)
+                h = F.elu(h)
+                h = F.dropout(h, p=self.dropout_p, training=self.training)
+
+        # Residual connection (prevents over-smoothing / preserves identity)
+        h = h + h_in
+
+        # Delta correction from contextual embeddings
+        delta_logits = self.delta_mlp(h[vidx]).squeeze(-1)
+
+        # Residual prediction
+        logits = self.base_scale * base_logits + self.delta_scale * delta_logits
+        return logits
