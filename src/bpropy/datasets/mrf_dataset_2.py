@@ -3,6 +3,8 @@ import inspect
 import os, json, hashlib, time
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional, Tuple, Union
+from contextlib import contextmanager
+import fcntl
 
 import torch
 from torch.utils.data import Dataset
@@ -20,6 +22,28 @@ def time_f(func, *args, **kwargs):
     t0 = time.time()
     r = func(*args, **kwargs)
     return time.time() - t0, r
+
+
+@contextmanager
+def file_lock(lock_path: str, timeout_s: float = 300.0, poll_s: float = 0.05):
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o664)
+    try:
+        t0 = time.time()
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.time() - t0 > timeout_s:
+                    raise TimeoutError(f"Timeout acquiring lock: {lock_path}")
+                time.sleep(poll_s)
+        yield
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
 
 
 @dataclass
@@ -52,7 +76,6 @@ def _read_manifest(stem: str) -> dict:
 def _infer_type(man: dict) -> str:
     # Adjust if you have explicit tag in manifest
     if "problem" in man:
-        print(man)
         return man["problem"].lower()
     # heuristic fallback
     if "C" in man and "n" in man and "m" in man:
@@ -199,17 +222,19 @@ class MRFDataset(Dataset):
             self.processed_dir, self.split, stem, cache_key
         )
 
+
         if not (os.path.exists(data_path) and os.path.exists(meta_path)):
-            return None
+            return None,None
 
         try:
             meta = json.load(open(meta_path, "r"))
             # cache_key match is now implicit in filename, but keep check for safety
             if meta.get("cache_key") != cache_key:
-                return None
-            return torch.load(data_path)
-        except Exception:
-            return None
+                return None,None
+            return torch.load(data_path, weights_only=False), meta
+        except Exception as e:
+            print("in load_from_cache ", e)
+            return None,None
 
 
     #def _save_to_cache(self, stem: str, cache_key: str, data: Data, prob_type: str) -> None:
@@ -227,6 +252,7 @@ class MRFDataset(Dataset):
     #        json.dump(meta, f, indent=2)
     def _save_to_cache(self, stem: str, data: Data, prob_type: str, preprocess_meta: dict = {}) -> None:
         man = _read_manifest(stem)
+
         cache_key = _hash_for_cache(man, None, self.cfg, stem, preprocess_kwargs=self.cfg.preprocess_kwargs)
     
         data_path, meta_path = _cache_paths(self.processed_dir, self.split, stem, cache_key)
@@ -244,6 +270,16 @@ class MRFDataset(Dataset):
         with open(meta_path, "w") as f:
             json.dump(meta, f, indent=2)
 
+    def _atomic_save(self, data_path, meta_path, data, meta):
+        tmp_data = data_path + ".tmp"
+        tmp_meta = meta_path + ".tmp"
+    
+        torch.save(data, tmp_data)
+        with open(tmp_meta, "w") as f:
+            json.dump(meta, f, indent=2)
+    
+        os.replace(tmp_data, data_path)
+        os.replace(tmp_meta, meta_path)
 
     def _get_item(self, index: int) -> Tuple[Optional[ProblemT], Optional[Data], Optional[object]]:
         stem = self.stems[index]
@@ -254,10 +290,10 @@ class MRFDataset(Dataset):
 
         data = None
         if not self.cfg.refresh:
-            #data = self._load_from_cache(stem, cache_key)
-            data = self._load_from_cache(stem)
-            data.preprocess_time_s = float(man.get("preprocess_time_s", 0.0))
-            data.preprocess_cached = True
+            data,meta = self._load_from_cache(stem)
+            if data is not None:
+                data.preprocess_time_s = float(meta.get("preprocess_time_s", 0.0))
+                data.preprocess_cached = True
 
 
         pb = None
@@ -267,30 +303,37 @@ class MRFDataset(Dataset):
             pb = _load_problem_by_type(stem, prob_type)
 
         if data is None:
-            # inspect the preprocess function, if it takes two arguments pass the labels
-            sig = inspect.signature(self.preprocess)
-            params = sig.parameters
-            required = [
-                p for p in params.values()
-                if p.default is inspect._empty
-                and p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
-            ]
+            with file_lock(lock_path):
+                if not self.cfg.refresh:
+                    data, meta = self._load_from_cache(stem)
+                    if data is not None:
+                        data.preprocess_time_s = float(meta.get("preprocess_time_s", 0.0))
+                        data.preprocess_cached = True
+                if data is None:
+                    # inspect the preprocess function, if it takes two arguments pass the labels
+                    sig = inspect.signature(self.preprocess)
+                    params = sig.parameters
+                    required = [
+                        p for p in params.values()
+                        if p.default is inspect._empty
+                        and p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+                    ]
 
-            if len(required) == 1:
-                t_preprocess, data = time_f(self.preprocess, pb)
-            elif len(required) == 2:
-                t_preprocess = time.time()
-                assignment = _load_assignment_from_stem(pb, stem, solver=self.cfg.assignment_solver)
-                data = self.preprocess(pb, assignment)
-                t_preprocess = time.time() - t_preprocess
-            else:
-                raise Exception(f"Preprocess function should admit 1 or 2 arguments. Found {len(required)}")
+                    if len(required) == 1:
+                        t_preprocess, data = time_f(self.preprocess, pb)
+                    elif len(required) == 2:
+                        t_preprocess = time.time()
+                        assignment = _load_assignment_from_stem(pb, stem, solver=self.cfg.assignment_solver)
+                        data = self.preprocess(pb, assignment)
+                        t_preprocess = time.time() - t_preprocess
+                    else:
+                        raise Exception(f"Preprocess function should admit 1 or 2 arguments. Found {len(required)}")
 
-            #self._save_to_cache(stem, cache_key, data, prob_type)
-            meta = {"preprocess_time_s": t_preprocess}
-            self._save_to_cache(stem, data, prob_type, meta)
-            data.preprocess_time_s = float(t_preprocess)
-            data.preprocess_cached = False
+                    #self._save_to_cache(stem, cache_key, data, prob_type)
+                    meta = {"preprocess_time_s": t_preprocess}
+                    self._save_to_cache(stem, data, prob_type, meta)
+                    data.preprocess_time_s = float(t_preprocess)
+                    data.preprocess_cached = False
 
 
         if self.cfg.return_assignment:

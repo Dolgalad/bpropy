@@ -51,9 +51,11 @@ class GCNVarLogits(torch.nn.Module):
 
     def forward(self, data):
         x = self.conv(data.x, data.edge_index)   # [N, hidden_dim]
-        vidx = self._var_idx(data)               # [K]
+        #vidx = self._var_idx(data)               # [K]
 
-        logits = self.readout(x[vidx]).squeeze(-1)  # [K]
+        #logits = self.readout(x[vidx]).squeeze(-1)  # [K]
+        logits = self.readout(x).squeeze(-1)  # [K]
+
         return logits
 
 
@@ -293,6 +295,10 @@ class ResidualSAGEVarLogits(torch.nn.Module):
         self.norms = torch.nn.ModuleList(
             [torch.nn.LayerNorm(hidden_dim) for _ in range(n_layers)]
             ) if use_layernorm else None
+        #self.norms = torch.nn.ModuleList(
+        #    [torch.nn.BatchNorm1d(hidden_dim) for _ in range(n_layers)]
+        #    ) if use_layernorm else None
+
         self.dropout_p = dropout_p
 
         # Delta head: correction logits from contextual embeddings
@@ -330,7 +336,7 @@ class ResidualSAGEVarLogits(torch.nn.Module):
         # GNN trunk (residual SAGE)
         h = self.input_proj(x_raw)
         for i, conv in enumerate(self.convs):
-            h_in = h
+            h_in = h.clone()
             h = conv(h, edge_index)
             if self.norms is not None:
                 h = self.norms[i](h)

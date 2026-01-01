@@ -33,7 +33,7 @@
 
     "feature_mode": "EB",
     "hetero": false,
-    "refresh": true,
+    "refresh": false,
 
     "precompute": {
       "lbp": false,
@@ -41,7 +41,7 @@
     },
 
     "loader": {
-      "batch_size": 1,
+      "batch_size": 10,
       "num_workers": 2,
       "prefetch": 2,
       "pin_memory": true
@@ -57,8 +57,8 @@
   },
 
   "model": {
-    "name": "ResidualSAGEVarLogits",
-    "args": { "in_dim": 26, "hidden_dim": 64, "n_layers": 4 , "use_layernorm": true, "sage_aggr": "max"},
+    "name": "GCNVarLogits",
+    "args": { "in_dim": 44, "hidden_dim": 64, "n_layers": 4 , "dropout_p": 0.05},
     "init_from": null
   },
 
@@ -68,13 +68,13 @@
   },
 
   "train": {
-    "epochs": 100,
-    "steps_per_epoch": 10,
-    "val_steps": 10,
+    "epochs": 100000,
+    "steps_per_epoch": 200000,
+    "val_steps": 200000,
 
     "optimizer": {
       "name": "adamw",
-      "args": { "lr": 0.00001, "weight_decay": 0.0 }
+      "args": { "lr": 0.0001, "weight_decay": 0.0 }
     },
     "scheduler": null,
     "grad_clip_norm": 1.0,

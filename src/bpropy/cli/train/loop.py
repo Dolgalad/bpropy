@@ -221,8 +221,8 @@ def validate_one_epoch(
 
                     )
 
-            print("0 mean, std : ", _0_scores_mean, _0_scores_std)
-            print("1 mean, std : ", _1_scores_mean, _1_scores_std)
+            #print("0 mean, std : ", _0_scores_mean, _0_scores_std)
+            #print("1 mean, std : ", _1_scores_mean, _1_scores_std)
 
             gap = gap_from_solution(
                 y_true_sum=float(y.sum().item()),
