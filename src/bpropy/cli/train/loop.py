@@ -210,6 +210,8 @@ def validate_one_epoch(
 
             scores = adapter.greedy_scores_fn(pb[0], data, pred)
             grd_sol = pb[0].greedy(scores=scores).x
+            print("scores  = ", scores)
+            print("grd_sol = ", grd_sol)
 
             gap = gap_from_solution(
                 y_true_sum=float(y.sum().item()),
