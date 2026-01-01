@@ -334,11 +334,11 @@ class ResidualSAGEVarLogits(torch.nn.Module):
             h = conv(h, edge_index)
             if self.norms is not None:
                 h = self.norms[i](h)
-                h = F.elu(h)
-                h = F.dropout(h, p=self.dropout_p, training=self.training)
+            h = F.elu(h)
+            h = F.dropout(h, p=self.dropout_p, training=self.training)
 
-        # Residual connection (prevents over-smoothing / preserves identity)
-        h = h + h_in
+            # Residual connection (prevents over-smoothing / preserves identity)
+            h = h + h_in
 
         # Delta correction from contextual embeddings
         delta_logits = self.delta_mlp(h[vidx]).squeeze(-1)

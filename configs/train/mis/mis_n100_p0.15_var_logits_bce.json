@@ -58,7 +58,7 @@
 
   "model": {
     "name": "ResidualSAGEVarLogits",
-    "args": { "in_dim": 26, "hidden_dim": 64, "n_layers": 4 , "use_layernorm": false},
+    "args": { "in_dim": 26, "hidden_dim": 64, "n_layers": 4 , "use_layernorm": true, "sage_aggr": "max"},
     "init_from": null
   },
 
