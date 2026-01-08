@@ -62,6 +62,12 @@ def build_full_parser(defaults: Dict[str, Any]) -> argparse.ArgumentParser:
     p.add_argument("--lr", type=float, dest="lr", default=argparse.SUPPRESS)
     p.add_argument("--weight-decay", type=float, dest="weight_decay", default=argparse.SUPPRESS)
     p.add_argument("--resume", dest="resume", default=argparse.SUPPRESS)
+    p.add_argument(
+        "--init-from",
+        type=str,
+        default=None,
+        help="Path to checkpoint to initialize model weights from (model only, no optimizer/scheduler)"
+    )
 
     return p
 

@@ -15,7 +15,7 @@
   },
 
   "run": {
-    "name": "mis_n100_p0.15_var_logits_bce",
+    "name": "mis_n100_p0.15_var_logits_bce3",
     "output_dir": "runs",
     "resume": null,
     "save_dirname": "checkpoints",
@@ -41,7 +41,7 @@
     },
 
     "loader": {
-      "batch_size": 10,
+      "batch_size": 1,
       "num_workers": 2,
       "prefetch": 2,
       "pin_memory": true
@@ -58,23 +58,30 @@
 
   "model": {
     "name": "GCNVarLogits",
-    "args": { "in_dim": 44, "hidden_dim": 64, "n_layers": 4 , "dropout_p": 0.05},
+    "args": { "in_dim": 54, "hidden_dim": 64, "n_layers": 4 , "dropout_p": 0.25, "norm": null},
     "init_from": null
   },
 
   "loss": {
-    "name": "bce_logits",
-    "args": {}
+    "name": "focal_bce_logits",
+    "args": {},
+    "regularizers": [
+      {
+        "name": "entropy_bernoulli",
+        "weight": 0.0,
+        "kwargs": { "reduction": "mean", "eps": 1e-12 }
+      }
+    ]
   },
 
   "train": {
     "epochs": 100000,
-    "steps_per_epoch": 200000,
+    "steps_per_epoch": 500000,
     "val_steps": 200000,
 
     "optimizer": {
       "name": "adamw",
-      "args": { "lr": 0.0001, "weight_decay": 0.0 }
+      "args": { "lr": 0.00001, "weight_decay": 0.0 }
     },
     "scheduler": null,
     "grad_clip_norm": 1.0,
@@ -84,7 +91,7 @@
       "enabled": true,
       "metric": "val/gap",
       "mode": "min",
-      "patience": 100,
+      "patience": 1000,
       "min_delta": 0.0
     },
 

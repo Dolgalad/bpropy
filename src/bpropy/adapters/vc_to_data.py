@@ -136,6 +136,8 @@ def problem_to_data(pb,
         data = transform(data)                 # adds data.rwpe with shape [num_nodes, pe_dim]
         data.x = torch.cat([data.x, data.lape, ndegs], dim=-1)
 
+        data.x = torch.cat([data.x, torch.randn(data.x.shape[0], 10)], dim=-1)
+
         # problem type tags (survive batching)
         data.problem_type_name = name
         data.problem_type_code = torch.tensor([NAME2CODE[name]], dtype=torch.long)

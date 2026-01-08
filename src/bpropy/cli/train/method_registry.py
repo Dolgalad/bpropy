@@ -233,6 +233,7 @@ def _loss_spec_factor_inference(
 # ----------------------------
 
 def _greedy_scores_var_logits(pb: Any, data: Any, pred: torch.Tensor) -> np.ndarray:
+    return torch.sigmoid(pred).cpu().numpy()
     return pred.detach().cpu().numpy()
 
 

@@ -172,6 +172,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     paths = make_run_paths(cfg)
     ckpt_path = _pick_checkpoint_path(cfg, paths, args)
+    print("checkpoint path = ", ckpt_path)
 
     stats = run_test(cfg, ckpt_path)
     print(json.dumps(stats, indent=2, sort_keys=True))

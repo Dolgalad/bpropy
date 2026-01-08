@@ -2,7 +2,7 @@
 import inspect
 import os, json, hashlib, time
 from dataclasses import dataclass, field
-from typing import Callable, List, Optional, Tuple, Union
+from typing import Callable, List, Optional, Tuple, Union, Dict, Any
 from contextlib import contextmanager
 import fcntl
 
@@ -214,7 +214,7 @@ class MRFDataset(Dataset):
     #        return data
     #    except Exception:
     #        return None
-    def _load_from_cache(self, stem: str) -> Optional[Data]:
+    def _load_from_cache(self, stem: str) -> Tuple[Optional[Data], Optional[Dict[str, Any]]]:
         man = _read_manifest(stem)
         cache_key = _hash_for_cache(man, None, self.cfg, stem, preprocess_kwargs=self.cfg.preprocess_kwargs)
 

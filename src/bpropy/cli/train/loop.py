@@ -38,6 +38,7 @@ def build_model(cfg: Dict[str, Any], device: torch.device) -> torch.nn.Module:
 
     init_from = cfg["model"].get("init_from")
     if init_from:
+        print("Loading from ", init_from)
         # load model weights only
         ckpt = torch.load(init_from, map_location=device)
         model.load_state_dict(ckpt["model_state_dict"])
@@ -139,6 +140,9 @@ def train_one_epoch(
     max_steps = int(cfg["train"]["steps_per_epoch"])
 
     bar = Bar(f"[Train] epoch {epoch}", max=len(loader))
+
+    score_deltas = []
+
     for data, y in CUDAPrefetcher(loader, device):
         optimizer.zero_grad(set_to_none=True)
         pred = adapter.forward_fn(model, data)
@@ -158,6 +162,19 @@ def train_one_epoch(
 
         optimizer.step()
 
+        #scores = model(data)[data.bipartite == 0].detach().cpu().numpy()
+        #_0_idx, _1_idx = (y == 0).cpu().numpy(), (y == 1).cpu().numpy()
+
+        #_0_scores_mean, _0_scores_std, _1_scores_mean, _1_scores_std = (
+        #        np.mean( scores[_0_idx] ),
+        #        np.std( scores[_0_idx] ),
+        #        np.mean( scores[_1_idx] ),
+        #        np.std( scores[_1_idx] ),
+
+        #        )
+        #score_deltas.append(np.mean(scores[_1_idx]) - np.mean(scores[_0_idx]))
+
+
         losses.append(loss_scalar)
 
         bar.next()
@@ -166,6 +183,8 @@ def train_one_epoch(
         if steps >= max_steps:
             break
     bar.finish()
+
+    print("train_score_deltas = ", np.mean(score_deltas))
 
     return float(np.mean(losses)) if losses else 0.0
 
@@ -186,6 +205,12 @@ def validate_one_epoch(
     steps = 0
     max_steps = int(cfg["train"]["val_steps"])
     maximize = bool(cfg.get("problem", {}).get("maximize", True))
+
+
+    sum_true, sum_pred = 0.0, 0.0
+
+
+    score_deltas = []
 
     with torch.no_grad():
         bar = Bar(f"[Val]   epoch {epoch}", max=len(loader))
@@ -224,23 +249,41 @@ def validate_one_epoch(
             #print("0 mean, std : ", _0_scores_mean, _0_scores_std)
             #print("1 mean, std : ", _1_scores_mean, _1_scores_std)
 
+            score_deltas.append(np.mean(scores[_1_idx]) - np.mean(scores[_0_idx]))
+            print("grd sum = ", grd_sol.sum())
+
             gap = gap_from_solution(
                 y_true_sum=float(y.sum().item()),
                 y_pred_sum=float(grd_sol.sum()),
                 maximize=maximize,
                 eps=1e-8,  # match your epoch validation divide-by-y.sum() style :contentReference[oaicite:10]{index=10}
             )
+            #print("gap       : ", gap)
+
             gaps.append(float(gap))
+            #sum_true += y.sum().item()
+            #sum_pred += grd_sol.sum()
 
             bar.next()
             steps += 1
             if steps >= max_steps:
                 break
         bar.finish()
+    #gap = gap_from_solution(
+    #            y_true_sum=sum_true,
+    #            y_pred_sum=sum_pred,
+    #            maximize=maximize,
+    #            eps=1e-8,  # match your epoch validation divide-by-y.sum() style :contentReference[oaicite:10]{index=10}
+    #        )
+    #return (float(np.mean(losses)) if losses else 0.0, 
+    #        float(gap) if gap else 0.0, 
+    #        {n:float(np.mean(eval_losses[n])) for n in eval_losses.keys()})
+    eld = {n:float(np.mean(eval_losses[n])) for n in eval_losses.keys()}
+    eld["score_delta"] = np.mean(score_deltas)
 
     return (float(np.mean(losses)) if losses else 0.0, 
             float(np.mean(gaps)) if gaps else 0.0, 
-            {n:float(np.mean(eval_losses[n])) for n in eval_losses.keys()})
+            eld)
 
 
 def final_test_eval(
@@ -316,6 +359,8 @@ def final_test_eval(
                     eps=1e-8,
                 )
             )
+
+            print(f"gap : {gap}, dec_gap : {dec_gap}")
 
             gaps.append(gap)
             dec_gaps.append(dec_gap)
@@ -451,7 +496,7 @@ def run_training(cfg: Dict[str, Any]) -> None:
             break
 
     # final eval: load best if present, then evaluate test split and write test_eval.json :contentReference[oaicite:13]{index=13}
-    best_path = os.path.join(paths.ckpt_dir, "last.pt")
+    best_path = os.path.join(paths.ckpt_dir, "best.pt")
     if os.path.exists(best_path):
         print(f"[eval] Loading best checkpoint from {best_path}")
         load_checkpoint(best_path, model, optimizer=None, map_location=device)

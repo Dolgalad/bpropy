@@ -92,6 +92,8 @@ def merge_cli_overrides(cfg: Config, args: argparse.Namespace) -> Config:
     if "resume" in d:
         cfg.setdefault("run", {})
         cfg["run"]["resume"] = d["resume"]
+    if "init_from" in d:
+        cfg["model"]["init_from"] = d["init_from"]
 
     # optimizer args (flattened flags)
     if "lr" in d:
