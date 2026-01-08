@@ -149,7 +149,7 @@ def problem_to_data(pb,
         data.feature_mode = feature_mode
 
         # approximate factor graph
-        if fg_approx is not None:
+        if len(fg_approx):
             fg_true = FactorGraph(pb)
             # Build approximate FG + mapping from original node indices -> approx factor-node indices
             # Expect fg_map shape [n_map, 2], where [:,0] indexes nodes in `data.x` (post-VC),
