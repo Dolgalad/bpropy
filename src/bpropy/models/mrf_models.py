@@ -33,32 +33,29 @@ class GCN_MRF_v4(torch.nn.Module):
 
         x = self.conv(x, edge_index)
 
-        if not fg_data is None:
+        if hasattr(data, "fg_map"):
             # mapping
             if self.mapping_aggr=="mean":
-                x = torch_scatter.scatter_mean(x[fg_map[:,0]], fg_map[:,1],dim=0)
+                x = torch_scatter.scatter_mean(x[data.fg_map[:,0]], data.fg_map[:,1],dim=0)
             if self.mapping_aggr=="max":
-                x,_ = torch_scatter.scatter_max(x[fg_map[:,0]], fg_map[:,1],dim=0)
+                x,_ = torch_scatter.scatter_max(x[data.fg_map[:,0]], data.fg_map[:,1],dim=0)
             if self.mapping_aggr=="gat":
-                M = fg_map#[:,[1,0]]
+                M = data.fg_map#[:,[1,0]]
                 if M[:,1].max() >= x.shape[0]:
                     x = torch.nn.functional.pad(x, (0,0,0,M.max() - x.shape[0]+1), "constant", 0)
                 x = self.mapping(x, M.T)
 
-            edge_data = fg_data
-        else:
-            edge_data = data
 
+        x = self.efc(x, data)
 
-        x = self.efc(x, edge_data)
         if inference in (None, "none", "theta", "no_inference"):
             return x
         if self.normalize_theta:
             x = (x - x.min()) / (x.max() - x.min())
         if inference == "loopy_belief_propagation":
-            return loopy_belief_propagation(x, torch.zeros_like(x), edge_data.lbp_edges, max_iter=self.bp_max_iter, tol=self.bp_tol, damping=self.bp_damping), x
+            return loopy_belief_propagation(x, torch.zeros_like(x), data.lbp_edges, max_iter=self.bp_max_iter, tol=self.bp_tol, damping=self.bp_damping), x
         if inference == "naive_mean_field":
-            return naive_mean_field(x, edge_data.nmf_edges, max_iter=self.bp_max_iter, tol=self.bp_tol, damping=self.bp_damping), x
+            return naive_mean_field(x, data.nmf_edges, max_iter=self.bp_max_iter, tol=self.bp_tol, damping=self.bp_damping), x
 
 class Hetero_GCN_MRF_v4(torch.nn.Module):
     def __init__(self, in_variable_dim=10, in_constraint_dim=4, n_layers=4, hidden_dim=64, dropout_p=0.25, normalize=False, bp_max_iter=10, bp_tol=1e-6, bp_damping=0.5, factor_sizes=[1,2], jk="lstm", norm="LayerNorm", act="elu", inference="loopy_belief_propagation", mapping_aggr="mean", normalize_theta=False, gnn_f="GAT", add_self_loops=False):

@@ -28,6 +28,9 @@ from bpropy.datasets.mis_features import get_features as mis_features
 from bpropy.datasets.scp_features import get_features as scp_features
 from bpropy.datasets.types import FeatureExtractionResult
 
+# Factor Graph approximations
+from bpropy.mrf.factor_graph_approx import APPROX_BUILDERS
+
 # ---- problem registry / tags -------------------------------------------------
 
 NAME2CODE = {"MIS": 0, "SCP": 1}
@@ -92,7 +95,9 @@ def problem_to_data(pb,
                with_ss: bool = False,
                y: Optional[torch.Tensor] = None,
                hetero: bool = False,
-               feature_mode: str = None) -> Union[Data, HeteroData]:
+               feature_mode: str = None,
+               fg_approx: Optional[dict] = None
+) -> Union[Data, HeteroData]:
     """
     Build a VCGraph from `pb` and convert to a PyG (Data|HeteroData),
     attaching optional LBP/NMF wiring and problem type tags.
@@ -143,24 +148,37 @@ def problem_to_data(pb,
         data.problem_type_code = torch.tensor([NAME2CODE[name]], dtype=torch.long)
         data.feature_mode = feature_mode
 
+        # approximate factor graph
+        if fg_approx is not None:
+            fg_true = FactorGraph(pb)
+            # Build approximate FG + mapping from original node indices -> approx factor-node indices
+            # Expect fg_map shape [n_map, 2], where [:,0] indexes nodes in `data.x` (post-VC),
+            # and [:,1] indexes nodes/factors in the approx FG embedding space.
+            fg_approx, fg_map, fg_factor_sizes = APPROX_BUILDERS[fg_approx.get("method")](pb=pb, vcg=vcg, fg_true=fg_true, approx=fg_approx)
+        
+            data.fg_map = fg_map.to(torch.long)
+            data.factor_sizes = fg_factor_sizes
+
+            fg = fg_approx
+        else:
+            if with_lbp or with_nmf or (with_ss and (y is not None)):
+                fg = FactorGraph(pb)
+
         # optional wiring via the right factor-graph class
         if with_lbp or with_nmf:
-            fg = FactorGraph(pb)
-            #if name == "MIS":
-            #    fg = MISFactorGraph(pb)
-            #else:
-            #    fg = SCPFactorGraph(pb)
+            #fg = FactorGraph(pb)
+
             if with_lbp:
-                data.lbp_edges = LBPEdges(fg)                                  # exactly how you attach today :contentReference[oaicite:13]{index=13} :contentReference[oaicite:14]{index=14}
+                data.lbp_edges = LBPEdges(fg)                                  
             if with_nmf:
-                data.nmf_edges = NMFEdges(fg)                                  # NMFEdges has batching/slicing utilities already :contentReference[oaicite:15]{index=15}
+                data.nmf_edges = NMFEdges(fg)                                  
             if y is not None:
                 data.y = y
                 if with_ss:
                     data.y_ss = torch.from_numpy(x2ss(y.astype(int), fg)).to(torch.float32)
         else:
             if with_ss and (y is not None):
-                fg = FactorGraph(pb)
+                #fg = FactorGraph(pb)
                 data.y_ss = torch.from_numpy(x2ss(y.astype(int), fg)).to(torch.float32)
 
         return data

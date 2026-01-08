@@ -45,7 +45,9 @@ def make_dataset(cfg: Dict[str, Any], split: str, yield_mode: str) -> MRFDataset
                 "with_lbp":bool(data_cfg.get("precompute", {}).get("lbp", False)),
                 "with_nmf":bool(data_cfg.get("precompute", {}).get("nmf", False)),
                 "with_ss":bool(data_cfg.get("precompute", {}).get("ss", False)),
+                "fg_approx": dict(data_cfg.get("precompute", {}).get("fg_approx",{}))
             }
+
 
     ds_cfg = MRFDatasetConfig(
         feature_mode=data_cfg["feature_mode"],
