@@ -19,6 +19,7 @@ def _maybe_batch_custom_edges(data_batch, originals):
     After Batch.from_data_list, PyG leaves unknown attrs (like lbp_edges/nmf_edges)
     as lists. Use the class-provided .batch(...) to merge them back.
     """
+
     # LBP
     if hasattr(data_batch, "lbp_edges") and isinstance(data_batch.lbp_edges, (list, tuple)):
         lbs = [getattr(d, "lbp_edges", None) for d in originals]
@@ -33,6 +34,31 @@ def _maybe_batch_custom_edges(data_batch, originals):
         if nms:
             data_batch.nmf_edges = NMFEdges.batch(nms)
 
+def _maybe_batch_fg_map(data_batch, originals):
+    if not (hasattr(data_batch, "fg_map") and isinstance(data_batch.fg_map, (list, tuple))):
+        return
+
+    maps = []
+    node_off = 0
+    fac_off = 0
+
+    for d in originals:
+        fg_map = getattr(d, "fg_map", None)
+        if fg_map is not None:
+            fg_map = torch.as_tensor(fg_map, dtype=torch.long).clone()
+            fg_map[:, 0] += node_off
+            fg_map[:, 1] += fac_off
+            maps.append(fg_map)
+
+        node_off += int(d.num_nodes)
+        fac_sizes = getattr(d, "factor_sizes", None)
+        if fac_sizes is None:
+            raise ValueError("Need d.fg_factor_sizes to offset fg_map col1.")
+        fac_off += int(fac_sizes.numel())
+
+    data_batch.fg_map = torch.cat(maps, dim=0) if maps else None
+
+
 def mrf_collate(batch: List):
     first = batch[0]
 
@@ -41,6 +67,7 @@ def mrf_collate(batch: List):
         pbs, graphs, assigns = zip(*batch)
         data_batch = Batch.from_data_list(list(graphs))
         _maybe_batch_custom_edges(data_batch, graphs)
+        _maybe_batch_fg_map(data_batch, graphs)
         # keep y as you prefer (flat cat per-variable); or return the list if you need idxs
         y = torch.cat([torch.as_tensor(a) for a in assigns], dim=0)
         return list(pbs), data_batch, y
@@ -50,6 +77,11 @@ def mrf_collate(batch: List):
         graphs, assigns = zip(*batch)
         data_batch = Batch.from_data_list(list(graphs))
         _maybe_batch_custom_edges(data_batch, graphs)
+        _maybe_batch_fg_map(data_batch, graphs)
+        if getattr(data_batch, "fg_map", None) is not None:
+            assert int(data_batch.fg_map[:,0].max()) < int(data_batch.num_nodes)
+            assert int(data_batch.fg_map[:,1].max()) < int(data_batch.factor_sizes.numel())
+
         y = torch.cat([torch.as_tensor(a) for a in assigns], dim=0)
         return data_batch, y
 
@@ -57,6 +89,8 @@ def mrf_collate(batch: List):
     if isinstance(first, GraphTypes):
         data_batch = Batch.from_data_list(batch)
         _maybe_batch_custom_edges(data_batch, batch)
+        _maybe_batch_fg_map(data_batch, graphs)
+
         return data_batch
 
     # (problem, assignment) — no graphs in either slot
@@ -72,6 +106,8 @@ def mrf_collate(batch: List):
         pbs, graphs = zip(*batch)
         data_batch = Batch.from_data_list(list(graphs))
         _maybe_batch_custom_edges(data_batch, graphs)
+        _maybe_batch_fg_map(data_batch, graphs)
+
         return list(pbs), data_batch
 
     # problems only or anything else → pass through

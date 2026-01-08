@@ -64,21 +64,37 @@ def _build_fg_from_pair_scopes(n_vars: int, pair_scopes: Sequence[Pair]) -> Fact
     return fg
 
 
+#def _unary_factor_node_by_var(fg: FactorGraph) -> Dict[int, int]:
+#    out: Dict[int, int] = {}
+#    for F in fg.iter_factors():
+#        scope = tuple(map(int, fg.factor_variables(F)))
+#        if len(scope) == 1:
+#            out[int(scope[0])] = int(F)
+#    return out
+#
+#
+#def _pair_factor_node_by_scope(fg: FactorGraph) -> Dict[Pair, int]:
+#    out: Dict[Pair, int] = {}
+#    for F in fg.iter_factors():
+#        scope = tuple(map(int, fg.factor_variables(F)))
+#        if len(scope) == 2:
+#            out[_sorted_pair(scope[0], scope[1])] = int(F)
+#    return out
 def _unary_factor_node_by_var(fg: FactorGraph) -> Dict[int, int]:
     out: Dict[int, int] = {}
-    for F in fg.iter_factors():
+    for iF, F in enumerate(fg.iter_factors()):
         scope = tuple(map(int, fg.factor_variables(F)))
         if len(scope) == 1:
-            out[int(scope[0])] = int(F)
+            out[int(scope[0])] = int(iF)   # <-- iF, not F
     return out
 
 
 def _pair_factor_node_by_scope(fg: FactorGraph) -> Dict[Pair, int]:
     out: Dict[Pair, int] = {}
-    for F in fg.iter_factors():
+    for iF, F in enumerate(fg.iter_factors()):
         scope = tuple(map(int, fg.factor_variables(F)))
         if len(scope) == 2:
-            out[_sorted_pair(scope[0], scope[1])] = int(F)
+            out[_sorted_pair(scope[0], scope[1])] = int(iF)  # <-- iF, not F
     return out
 
 

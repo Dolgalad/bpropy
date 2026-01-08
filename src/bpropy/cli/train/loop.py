@@ -361,6 +361,7 @@ def final_test_eval(
             )
 
             print(f"gap : {gap}, dec_gap : {dec_gap}")
+            print("\t", float(y.sum().item()), float(dec_sol.sum()))
 
             gaps.append(gap)
             dec_gaps.append(dec_gap)

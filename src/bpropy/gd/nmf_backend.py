@@ -79,7 +79,6 @@ class NMFBackend:
             mu = torch.nan_to_num(mu, nan=0.0)
 
             self._mu = mu
-
         return self._mu
 
     def update(self, evidence: Evidence) -> None:

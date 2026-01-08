@@ -268,18 +268,25 @@ def _decimation_backend_factor_logits(pb, data, pred_theta, cfg, device=None):
     mode_args = gd.get("args", {})
 
     # IMPORTANT: build fg from pb
-    fg_builder = lambda pb: FactorGraph(pb)
+    #fg_builder = lambda pb: FactorGraph(pb)
 
     # IMPORTANT: “freeze” predicted theta for this instance
     def theta_builder(_pb, _fg, _device, _dtype):
         return pred_theta.to(device=_device, dtype=_dtype)
+
+    def fg_builder(pb, mode):
+        if mode == "lbp":
+            return data.lbp_edges
+        if mode == "nmf":
+            return data.nmf_edges
+        return FactorGraph(pb)
 
     if mode == "unary":
         return _decimation_backend_var_logits(pb, data, pred_theta, cfg, device=device)
 
     if mode == "aggregate":
         return FactorLogitAggregationBackend(
-            fg_builder=fg_builder,
+            fg_builder=lambda pb: fg_builder(pb, "other"),
             theta=pred_theta.to(device),
             neg_inf=gd.get("neg_inf", None),
             data=data,
@@ -287,7 +294,7 @@ def _decimation_backend_factor_logits(pb, data, pred_theta, cfg, device=None):
 
     if mode == "loopy_belief_propagation":
         return LBPBackend(
-            fg_builder=fg_builder,
+            fg_builder=lambda pb: fg_builder(pb,"lbp"),
             theta_builder=theta_builder,
             device=device,
             dtype=pred_theta.dtype,
@@ -296,7 +303,7 @@ def _decimation_backend_factor_logits(pb, data, pred_theta, cfg, device=None):
 
     if mode == "naive_mean_field":
         return NMFBackend(
-            fg_builder=fg_builder,
+            fg_builder=lambda pb: fg_builder(pb, "nmf"),
             theta_builder=theta_builder,
             device=device,
             dtype=pred_theta.dtype,
@@ -315,7 +322,16 @@ def _decimation_backend_factor_marginals(pb, data, pred, cfg, device=None):
     inference, pred_theta = pred
 
     # IMPORTANT: build fg from pb
-    fg_builder = lambda pb: FactorGraph(pb)
+    def fg_builder(pb, cfg):
+        fg_approx_cfg = cfg.get("data",{}).get("precompute", {}).get("fg_approx", None)
+        if fg_approx_cfg is not None:
+            from bpropy.mrf.factor_graph_approx import APPROX_BUILDERS
+            from bpropy.graphs.vc_graph import VCGraph
+            vcg = VCGraph(pb)  # builds from pb.constraints(...) which now reflect mutations. :contentReference[oaicite:2]{index=2}
+            fg_true = FactorGraph(pb)
+            fg_approx,_,_ = APPROX_BUILDERS[fg_approx_cfg.get("method")](pb=pb, vcg=vcg, fg_true=fg_true, approx=fg_approx_cfg)
+            return fg_approx
+        return FactorGraph(pb)
 
     # IMPORTANT: “freeze” predicted theta for this instance
     def theta_builder(_pb, _fg, _device, _dtype):
@@ -334,7 +350,7 @@ def _decimation_backend_factor_marginals(pb, data, pred, cfg, device=None):
 
     if mode == "loopy_belief_propagation":
         return LBPBackend(
-            fg_builder=fg_builder,
+            fg_builder=lambda pb: fg_builder(pb,cfg),
             theta_builder=theta_builder,
             device=device,
             dtype=pred_theta.dtype,
@@ -343,7 +359,7 @@ def _decimation_backend_factor_marginals(pb, data, pred, cfg, device=None):
 
     if mode == "naive_mean_field":
         return NMFBackend(
-            fg_builder=fg_builder,
+            fg_builder=lambda pb: fg_builder(pb, cfg),
             theta_builder=theta_builder,
             device=device,
             dtype=pred_theta.dtype,

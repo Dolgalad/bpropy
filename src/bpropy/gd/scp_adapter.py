@@ -148,26 +148,58 @@ class SCPAdapter:
         else:
             eff = scores
 
+        # entropy
+        entropy = -eff * np.log(eff) - (1.0 - eff) * np.log(1.0 - eff)
+
 
         j = int(active_idx[np.argmax(eff[active_idx])])
+        jj = int(active_idx[np.argmin(entropy[active_idx])])
+        jj_val = np.argmax(mu_np[jj])
+
 
         # Commit: choose set j
-        evidence = {j: 1}
-        self.x[j] = 1
-        self.active_sets[j] = False
+        #evidence = {j: 1}
+        #self.x[j] = 1
+        #self.active_sets[j] = False
+        evidence = {jj: jj_val}
+        self.x[jj] = int(jj_val)
+        self.active_sets[jj] = False
 
         # Update coverage
         newly = []
-        for i in self.S[j]:
-            i = int(i)
-            if self.uncovered[i]:
-                self.uncovered[i] = False
-                newly.append(i)
+        if jj_val == 1:
+            for i in self.S[jj]:
+                i = int(i)
+                if self.uncovered[i]:
+                    self.uncovered[i] = False
+                    newly.append(i)
+        else:
+            # check for items covered by S[j] covered by only 1 active set
+            active_idx = np.flatnonzero(self.active_sets)
+            for a in self.S[jj]:
+                a = int(a)
+                if self.uncovered[a]:
+                    sets_covering_a = []
+                    for s_idx in active_idx:
+                        if a in self.S[s_idx]:
+                            sets_covering_a.append(s_idx)
+                    if len(sets_covering_a)==1:
+                        s_idx = int(sets_covering_a[0])
+                        self.uncovered[a] = False
+                        newly.append(a)
+                        evidence[s_idx] = 1
+                        self.x[s_idx] = 1
+                        self.active_sets[s_idx] = False
+                        for ii in self.S[s_idx]:
+                            ii = int(ii)
+                            if self.uncovered[ii]:
+                                self.uncovered[ii] = False
+                                newly.append(ii)
 
         info = {
-            "chosen": j,
-            "mu1": float(scores[j]),
-            "cost": float(self.cost[j]),
+            "chosen": jj,
+            "mu1": float(scores[jj]),
+            "cost": float(self.cost[jj]),
             "newly_covered": newly,
             "n_uncovered": int(self.uncovered.sum()),
         }
