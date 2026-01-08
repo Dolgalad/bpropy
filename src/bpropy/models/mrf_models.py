@@ -45,8 +45,8 @@ class GCN_MRF_v4(torch.nn.Module):
                     x = torch.nn.functional.pad(x, (0,0,0,M.max() - x.shape[0]+1), "constant", 0)
                 x = self.mapping(x, M.T)
 
-
         x = self.efc(x, data)
+
 
         if inference in (None, "none", "theta", "no_inference"):
             return x

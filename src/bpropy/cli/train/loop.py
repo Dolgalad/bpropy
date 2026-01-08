@@ -250,7 +250,6 @@ def validate_one_epoch(
             #print("1 mean, std : ", _1_scores_mean, _1_scores_std)
 
             score_deltas.append(np.mean(scores[_1_idx]) - np.mean(scores[_0_idx]))
-            print("grd sum = ", grd_sol.sum())
 
             gap = gap_from_solution(
                 y_true_sum=float(y.sum().item()),
