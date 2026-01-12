@@ -56,6 +56,18 @@ def loss_nll_grad_only(
     # --- gradient-only trick: detach mu_ss ---
     delta = mu_ss.detach() - y_ss  # ensures d/dtheta = mu_ss - y_ss
 
+    if hasattr(data, "fg_map"):
+        val = (theta * delta).sum()
+        if reduction == "none":
+            # optional: per-graph via data.ptr or data.batch if theta is node-aligned (often it isn't)
+            return val.unsqueeze(0)
+        if reduction == "sum":
+            return val
+        if reduction == "mean":
+            # mean over graphs if available, else leave as sum
+            B = int(getattr(data, "num_graphs", 1))
+            return val / max(B, 1)
+
     # --- produce per-graph losses (like your Bethe NLL does) ---
     strides, f_batch = _factor_strides_hetero_or_homo(data, device=device)
     nF = int(strides.numel())

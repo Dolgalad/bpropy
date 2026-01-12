@@ -83,7 +83,7 @@
 
     "optimizer": {
       "name": "adamw",
-      "args": { "lr": 0.00001, "weight_decay": 0.0 }
+      "args": { "lr": 0.001, "weight_decay": 1e-4 }
     },
     "scheduler": null,
     "grad_clip_norm": 1.0,

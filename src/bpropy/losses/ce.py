@@ -265,16 +265,6 @@ def loss_factor_ce_from_marginals_factor_sizes(pred, target, *, data, reduction=
 
     p_t = _p_true_from_marginals(mu, strides, y_ss, eps)
     ce = -p_t.log()
-    if y_ss.reshape(-1,2)[:,1].sum()!=sum(y.sum() for y in data.y):
-        print("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
-    
-        print("in loss_factor_ce_from_marginals_factor_sizes ")
-        print("\ty_ss.shape = ", y_ss.shape)
-        print("\tp_t.shape = ", p_t.shape)
-        print("\tce.shape = ", ce.shape)
-        print("\tmu.shape = ", mu.shape)
-        exit()
-
     return ce.mean() if reduction == "mean" else ce.sum() if reduction == "sum" else ce
 
 @register_loss("ffce")

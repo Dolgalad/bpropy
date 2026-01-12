@@ -220,7 +220,8 @@ def validate_one_epoch(
 
     with torch.no_grad():
         bar = Bar(f"[Val]   epoch {epoch}", max=len(loader))
-        for pb, data, y in CUDAPrefetcher(loader, device):
+        for pbs, data, y in CUDAPrefetcher(loader, device):
+            nv_offset = 0
             pred = adapter.forward_fn(model, data)
             spec = adapter.loss_spec_fn(adapter, data, pred, y, cfg)
             
@@ -239,8 +240,9 @@ def validate_one_epoch(
                         )
                 eval_losses[name].append(eval_loss.detach().float().cpu().item())
 
-            scores = adapter.greedy_scores_fn(pb[0], data, pred)
-            grd_sol = pb[0].greedy(scores=scores).x
+            #scores = adapter.greedy_scores_fn(pb[0], data, pred)
+            #grd_sol = pb[0].greedy(scores=scores).x
+            scores = adapter.greedy_scores_fn(pbs, data, pred)
 
             _0_idx, _1_idx = (y == 0).cpu().numpy(), (y == 1).cpu().numpy()
 
@@ -255,14 +257,18 @@ def validate_one_epoch(
 
             score_deltas.append(np.mean(scores[_1_idx]) - np.mean(scores[_0_idx]))
 
-            gap = gap_from_solution(
-                y_true_sum=float(y.sum().item()),
-                y_pred_sum=float(grd_sol.sum()),
-                maximize=maximize,
-                eps=1e-8,  # match your epoch validation divide-by-y.sum() style :contentReference[oaicite:10]{index=10}
-            )
+            for pb in pbs:
+                grd_sol = pb.greedy(scores=scores[nv_offset:nv_offset+pb.nv()]).x
 
-            gaps.append(float(gap))
+                gap = gap_from_solution(
+                    y_true_sum=float(y[nv_offset:nv_offset+pb.nv()].sum().item()),
+                    y_pred_sum=float(grd_sol.sum()),
+                    maximize=maximize,
+                    eps=1e-8,  # match your epoch validation divide-by-y.sum() style :contentReference[oaicite:10]{index=10}
+                )
+
+                gaps.append(float(gap))
+                nv_offset += pb.nv()
             #sum_true += y.sum().item()
             #sum_pred += grd_sol.sum()
 

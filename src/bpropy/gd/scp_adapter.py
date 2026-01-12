@@ -149,8 +149,7 @@ class SCPAdapter:
             eff = scores
 
         # entropy
-        entropy = -eff * np.log(eff) - (1.0 - eff) * np.log(1.0 - eff)
-
+        entropy = -eff * np.log(eff+1e-12) - (1.0 - eff) * np.log(1.0 - eff+1e-12)
 
         #jj = int(active_idx[np.argmax(eff[active_idx])])
         #jj_val = 1

@@ -102,7 +102,7 @@ def make_loaders(cfg: Dict[str, Any], splits=["train","val","test"]) -> DataBund
         ds_val = make_dataset(cfg, cfg["data"]["val_split"], yield_mode="both")
         val_loader = DataLoader(
             ds_val,
-            batch_size=1,
+            batch_size=int(dl.get("val_batch_size",1)),
             shuffle=False,
             num_workers=int(dl["num_workers"]),
             pin_memory=bool(dl["pin_memory"]),

@@ -246,6 +246,7 @@ def _greedy_scores_factor_logits(pb: Any, data: Any, pred: Any) -> np.ndarray:
 def _greedy_scores_factor_inference(pb: Any, data: Any, pred: Any) -> np.ndarray:
     inference_res, _theta = _as_inference_tuple(pred)
     nv = _num_vars(data)
+    return inference_res.mu_v.reshape(-1,2)[:,1].detach().cpu().numpy()
     return _unary_scores_from_flat(inference_res.mu, nv)
 
 # ----------------------------

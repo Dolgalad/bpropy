@@ -44,6 +44,7 @@
 
     "loader": {
       "batch_size": 32,
+      "val_batch_size": 32,
       "num_workers": 2,
       "prefetch": 2,
       "pin_memory": true

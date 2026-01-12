@@ -54,6 +54,9 @@ def loopy_belief_propagation(theta, v2f, edges, max_iter=100, tol=1e-6, damping=
         delta = torch_scatter.scatter_logsumexp(qbar, q_idx).repeat_interleave(2)
         new_v2f = qbar - delta
 
+        u_v2f = (new_v2f - v2f).abs().max()
+
+
         # damping on messages
         v2f = (1-damping)*new_v2f + damping*v2f
         
@@ -81,7 +84,7 @@ def loopy_belief_propagation(theta, v2f, edges, max_iter=100, tol=1e-6, damping=
 
         #vmar = torch.zeros_like(vmar).scatter_add_(0, edges.vm_edges[:,0], r[edges.vm_edges[:,1]])
 
-        if u < tol:
+        if u < tol or u_v2f < tol:
             break
     return BPSolution(mu, u, T, mu_v=vmar_p)
 
