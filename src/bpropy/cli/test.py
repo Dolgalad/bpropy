@@ -121,7 +121,7 @@ def run_test(cfg: Dict[str, Any], checkpoint_path: str) -> Dict[str, Any]:
     paths = make_run_paths(cfg)
 
     # data loaders
-    loaders = make_loaders(cfg)
+    loaders = make_loaders(cfg, splits=["test"])
 
     # method adapter for eval (match training logic) 
     method_name = cfg.get("train", {}).get("method", "var_logits")

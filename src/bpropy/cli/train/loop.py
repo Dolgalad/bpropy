@@ -123,7 +123,24 @@ def compute_loss_from_spec(
         base = base + sum(spec.extra_terms.values())
     return base
 
+def _warmup_lr(cfg, optimizer, global_step: int):
+    w = cfg.get("train", {}).get("warmup", None)
+    if not w or not w.get("enabled", False):
+        return
 
+    warmup_steps = int(w.get("steps", 0))
+    if warmup_steps <= 0 or global_step >= warmup_steps:
+        return
+
+    start_factor = float(w.get("start_factor", 0.05))
+    # linear ramp: start_factor -> 1.0
+    t = (global_step + 1) / warmup_steps
+    factor = start_factor + t * (1.0 - start_factor)
+
+    # apply factor to each param group base lr
+    # best practice: store base_lrs once at start of training
+    for pg, base_lr in zip(optimizer.param_groups, optimizer._base_lrs):
+        pg["lr"] = base_lr * factor
 
 def train_one_epoch(
     cfg: Dict[str, Any],
@@ -133,6 +150,7 @@ def train_one_epoch(
     loader,
     device: torch.device,
     epoch: int,
+    global_step: int,
 ) -> float:
     model.train()
     losses = []
@@ -160,19 +178,9 @@ def train_one_epoch(
         if clip:
             torch.nn.utils.clip_grad_norm_(model.parameters(), float(clip))
 
+        _warmup_lr(cfg, optimizer, global_step + steps)
+
         optimizer.step()
-
-        #scores = model(data)[data.bipartite == 0].detach().cpu().numpy()
-        #_0_idx, _1_idx = (y == 0).cpu().numpy(), (y == 1).cpu().numpy()
-
-        #_0_scores_mean, _0_scores_std, _1_scores_mean, _1_scores_std = (
-        #        np.mean( scores[_0_idx] ),
-        #        np.std( scores[_0_idx] ),
-        #        np.mean( scores[_1_idx] ),
-        #        np.std( scores[_1_idx] ),
-
-        #        )
-        #score_deltas.append(np.mean(scores[_1_idx]) - np.mean(scores[_0_idx]))
 
 
         losses.append(loss_scalar)
@@ -184,9 +192,7 @@ def train_one_epoch(
             break
     bar.finish()
 
-    print("train_score_deltas = ", np.mean(score_deltas))
-
-    return float(np.mean(losses)) if losses else 0.0
+    return float(np.mean(losses)) if losses else 0.0, steps
 
 
 def validate_one_epoch(
@@ -246,8 +252,6 @@ def validate_one_epoch(
 
                     )
 
-            #print("0 mean, std : ", _0_scores_mean, _0_scores_std)
-            #print("1 mean, std : ", _1_scores_mean, _1_scores_std)
 
             score_deltas.append(np.mean(scores[_1_idx]) - np.mean(scores[_0_idx]))
 
@@ -257,7 +261,6 @@ def validate_one_epoch(
                 maximize=maximize,
                 eps=1e-8,  # match your epoch validation divide-by-y.sum() style :contentReference[oaicite:10]{index=10}
             )
-            #print("gap       : ", gap)
 
             gaps.append(float(gap))
             #sum_true += y.sum().item()
@@ -372,6 +375,7 @@ def final_test_eval(
             t_e2e.append(t_pre[-1] + (t4 - t0))
 
             bar.next()
+
         bar.finish()
 
     def ms(x):
@@ -432,6 +436,8 @@ def run_training(cfg: Dict[str, Any]) -> None:
     # model/opt/loss
     model = build_model(cfg, device)
     optimizer = build_optimizer(cfg, model)
+    optimizer._base_lrs = [pg["lr"] for pg in optimizer.param_groups]
+
     scheduler = build_scheduler(cfg, optimizer)
 
     loss_name = cfg["loss"]["name"]
@@ -447,9 +453,12 @@ def run_training(cfg: Dict[str, Any]) -> None:
     # training loop
     epochs = int(cfg["train"]["epochs"])
     patience = int(cfg["train"].get("early_stop", {}).get("patience", 20))
+    global_step = 0
+    warmup_steps = int(cfg.get("train", {}).get("warmup",{}).get("steps", 0))
 
     for epoch in range(st.epoch, epochs + 1):
-        tr = train_one_epoch(cfg, adapter_train, model, optimizer, loaders.train_loader, device, epoch)
+        tr, tr_steps = train_one_epoch(cfg, adapter_train, model, optimizer, loaders.train_loader, device, epoch, global_step)
+        global_step += tr_steps
         va, gap, eloss = validate_one_epoch(cfg, adapter_train, model, loaders.val_loader, device, epoch)
 
         logger.add_scalars("loss", {"train": tr, "val": va}, epoch)
@@ -470,7 +479,10 @@ def run_training(cfg: Dict[str, Any]) -> None:
                 **eloss
                 }
         # schedule step
-        _apply_lr_schedulers(cfg, scheduler, epoch, metrics_dict)
+        if global_step < warmup_steps:
+            pass
+        else:
+            _apply_lr_schedulers(cfg, scheduler, epoch, metrics_dict)
 
         # early stopping on gap (same “best_gap/epochs_bad” logic as your script) :contentReference[oaicite:12]{index=12}
         st.epoch = epoch

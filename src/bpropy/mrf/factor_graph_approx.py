@@ -216,6 +216,7 @@ def build_tree_cover(*, pb, vcg, fg_true: FactorGraph, approx: dict) -> BuilderO
     keep_pairs = {_sorted_pair(int(u), int(v)) for (u, v) in tree.edges()}
 
     pair_scopes = sorted(keep_pairs)  # canonical
+
     fg_apx = _build_fg_from_pair_scopes(n_vars, pair_scopes)
 
     fg_map = _build_vc_to_apx_map(vcg=vcg, fg_apx=fg_apx, keep_pairs=set(pair_scopes))

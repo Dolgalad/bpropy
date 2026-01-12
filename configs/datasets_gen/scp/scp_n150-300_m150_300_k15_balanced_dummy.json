@@ -1,0 +1,20 @@
+{
+  "problem": "scp",
+  "output_dir": "datasets/problems/scp/scp_n150-300_m150-300_k15_balanced_dummy",
+  "total": 100,
+  "splits": [80, 10, 10],
+
+  "seed": 0,
+  "n_items": "150:300",
+  "n_sets": "150:300",
+  "k": "15",
+  "balanced": true,
+
+  "solve": "scg3",
+  "relax": false,
+
+  "threshold_bytes": 8000,
+  "resume": true,
+  "metadata": true
+}
+

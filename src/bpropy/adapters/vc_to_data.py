@@ -103,6 +103,7 @@ def problem_to_data(pb,
     attaching optional LBP/NMF wiring and problem type tags.
 
     Mirrors the logic in mis_to_data/scp_to_data, but unified.  """
+
     name = _infer_problem_name(pb)
 
     # 1) Extract features (may mutate `pb` by adding constraints)
@@ -176,6 +177,9 @@ def problem_to_data(pb,
                 data.y = y
                 if with_ss:
                     data.y_ss = torch.from_numpy(x2ss(y.astype(int), fg)).to(torch.float32)
+                    #print("in problem_to_data")
+                    #print("\ty.sum() = ", y.sum())
+                    #print("\ty_ss[:2*nv].reshape(-1,2)[:,1].sum() = ", data.y_ss[:2*pb.nv()].reshape(-1,2)[:,1].sum())
         else:
             if with_ss and (y is not None):
                 #fg = FactorGraph(pb)

@@ -79,46 +79,50 @@ def make_dataset(cfg: Dict[str, Any], split: str, yield_mode: str) -> MRFDataset
     )
 
 
-def make_loaders(cfg: Dict[str, Any]) -> DataBundle:
+def make_loaders(cfg: Dict[str, Any], splits=["train","val","test"]) -> DataBundle:
     dl = cfg["data"]["loader"]
+    train_loader, val_loader, test_loader = None, None, None
 
     # train yields (data, y)
-    ds_train = make_dataset(cfg, cfg["data"]["split"], yield_mode="data")
-    train_loader = DataLoader(
-        ds_train,
-        batch_size=int(dl["batch_size"]),
-        shuffle=True,
-        num_workers=int(dl["num_workers"]),
-        pin_memory=bool(dl["pin_memory"]),
-        persistent_workers=bool(dl["persistent_workers"]),
-        prefetch_factor=int(dl["prefetch_factor"]),
-        collate_fn=mrf_collate,
-    )
+    if "train" in splits:
+        ds_train = make_dataset(cfg, cfg["data"]["split"], yield_mode="data")
+        train_loader = DataLoader(
+            ds_train,
+            batch_size=int(dl["batch_size"]),
+            shuffle=True,
+            num_workers=int(dl["num_workers"]),
+            pin_memory=bool(dl["pin_memory"]),
+            persistent_workers=bool(dl["persistent_workers"]),
+            prefetch_factor=int(dl["prefetch_factor"]),
+            collate_fn=mrf_collate,
+        )
 
     # val/test yield (pb, data, y) for greedy-gap evaluation
-    ds_val = make_dataset(cfg, cfg["data"]["val_split"], yield_mode="both")
-    val_loader = DataLoader(
-        ds_val,
-        batch_size=1,
-        shuffle=False,
-        num_workers=int(dl["num_workers"]),
-        pin_memory=bool(dl["pin_memory"]),
-        persistent_workers=bool(dl["persistent_workers"]),
-        prefetch_factor=int(dl["prefetch_factor"]),
-        collate_fn=mrf_collate,
-    )
+    if "val" in splits:
+        ds_val = make_dataset(cfg, cfg["data"]["val_split"], yield_mode="both")
+        val_loader = DataLoader(
+            ds_val,
+            batch_size=1,
+            shuffle=False,
+            num_workers=int(dl["num_workers"]),
+            pin_memory=bool(dl["pin_memory"]),
+            persistent_workers=bool(dl["persistent_workers"]),
+            prefetch_factor=int(dl["prefetch_factor"]),
+            collate_fn=mrf_collate,
+        )
 
-    ds_test = make_dataset(cfg, cfg["data"]["test_split"], yield_mode="both")
-    test_loader = DataLoader(
-        ds_test,
-        batch_size=1,
-        shuffle=False,
-        num_workers=int(dl["num_workers"]),
-        pin_memory=bool(dl["pin_memory"]),
-        persistent_workers=bool(dl["persistent_workers"]),
-        prefetch_factor=int(dl["prefetch_factor"]),
-        collate_fn=mrf_collate,
-    )
+    if "test" in splits:
+        ds_test = make_dataset(cfg, cfg["data"]["test_split"], yield_mode="both")
+        test_loader = DataLoader(
+            ds_test,
+            batch_size=1,
+            shuffle=False,
+            num_workers=int(dl["num_workers"]),
+            pin_memory=bool(dl["pin_memory"]),
+            persistent_workers=bool(dl["persistent_workers"]),
+            prefetch_factor=int(dl["prefetch_factor"]),
+            collate_fn=mrf_collate,
+        )
 
     return DataBundle(train_loader=train_loader, val_loader=val_loader, test_loader=test_loader)
 

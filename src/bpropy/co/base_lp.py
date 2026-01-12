@@ -44,6 +44,10 @@ class LPProblem(ABC):
     def nv(self) -> int:
         """Number of decision variables."""
 
+    def nc(self) -> int:
+        """Number of constraints"""
+        return self.linear_constraints_matrix()[0].shape[0]
+
     @abstractmethod
     def linear_constraints_matrix(self) -> Tuple[object, np.ndarray, np.ndarray]:
         """

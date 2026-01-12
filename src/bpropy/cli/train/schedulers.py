@@ -13,6 +13,7 @@ def _build_one_scheduler(name: str, optimizer, args=(), kwargs=None):
         "cosineannealingwarmrestart": "cosineannealingwarmrestarts",
         "cosineannealingwarmrestarts": "cosineannealingwarmrestarts",
         "cosineannealinglr": "cosineannealinglr",
+        "cosineannealing": "cosineannealinglr",
         "reducelronplateau": "reducelronplateau",
         "multiplicativelr": "multiplicativelr",
         "constantlr": "constantlr",

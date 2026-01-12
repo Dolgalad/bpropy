@@ -152,7 +152,8 @@ class SCPAdapter:
         entropy = -eff * np.log(eff) - (1.0 - eff) * np.log(1.0 - eff)
 
 
-        j = int(active_idx[np.argmax(eff[active_idx])])
+        #jj = int(active_idx[np.argmax(eff[active_idx])])
+        #jj_val = 1
         jj = int(active_idx[np.argmin(entropy[active_idx])])
         jj_val = np.argmax(mu_np[jj])
 
