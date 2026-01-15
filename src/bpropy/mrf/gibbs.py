@@ -4,6 +4,75 @@ from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple, Union
 import numpy as np
 
+from typing import Callable, Iterable, List, Optional, Tuple, Union
+import numpy as np
+
+
+TempSchedule = Union[
+    float,
+    Callable[[int], float],
+    List[Tuple[int, float]],  # [(sweep0, T0), (sweep1, T1), ...] piecewise-constant
+]
+
+
+def make_temperature_schedule(
+    *,
+    kind: str = "constant",
+    T0: float = 1.0,
+    T1: float = 1.0,
+    total_sweeps: int = 1,
+    decay: float = 0.99,
+    floor: float = 1e-3,
+) -> Callable[[int], float]:
+    """
+    Returns temp(sweep) -> T.
+
+    kind:
+      - "constant": always T0
+      - "linear": linearly from T0 to T1 over total_sweeps
+      - "exp": T = max(floor, T0 * decay**sweep)
+    """
+    if kind == "constant":
+        return lambda s: float(T0)
+
+    if kind == "linear":
+        total = max(int(total_sweeps), 1)
+        def temp(s: int) -> float:
+            a = min(max(s, 0), total - 1) / (total - 1 if total > 1 else 1)
+            return float((1 - a) * T0 + a * T1)
+        return temp
+
+    if kind == "exp":
+        def temp(s: int) -> float:
+            return float(max(floor, T0 * (decay ** max(s, 0))))
+        return temp
+
+    raise ValueError(f"Unknown schedule kind: {kind}")
+
+
+def piecewise_temperature(points: List[Tuple[int, float]]) -> Callable[[int], float]:
+    """
+    points = [(0, 5.0), (100, 2.0), (500, 1.0)]
+    means:
+      sweeps [0..99]   -> 5.0
+      sweeps [100..499]-> 2.0
+      sweeps [500..]   -> 1.0
+    """
+    pts = sorted((int(s), float(T)) for s, T in points)
+
+    def temp(sweep: int) -> float:
+        s = int(sweep)
+        T = pts[0][1]
+        for sw, Tv in pts:
+            if s >= sw:
+                T = Tv
+            else:
+                break
+        return float(T)
+
+    return temp
+
+
 
 # ---------------------------
 # Utilities
@@ -173,6 +242,8 @@ def block_gibbs_sample(
     rng = np.random.default_rng(seed)
     n = fg.nv()  # :contentReference[oaicite:7]{index=7}
 
+    temp_fn = make_temperature_schedule(kind="exp", T0=5.0, decay=0.9995, floor=1.0)
+
     # Prepare theta slices per factor
     theta_flat = _theta_as_flat(theta)
     fac_slices, total_needed = _build_factor_slices(fg)
@@ -231,12 +302,15 @@ def block_gibbs_sample(
             # Within a color class, variables share no factor => independent conditional updates.
             # We still update sequentially (safe and simple).
             for i in block:
-                logp0 = local_log_score_var(i, 0)
-                logp1 = local_log_score_var(i, 1)
-                x[i] = _sample_from_logp(rng, np.array([logp0, logp1], dtype=np.float64))
-        print("sweep ", sweep)
+                #logp0 = local_log_score_var(i, 0)
+                #logp1 = local_log_score_var(i, 1)
+                #x[i] = _sample_from_logp(rng, np.array([logp0, logp1], dtype=np.float64))
+                T = temp_fn(sweep)        # > 0
+                invT = 1.0 / max(T, 1e-12)
+                logp = invT * np.array([local_log_score_var(i, 0), local_log_score_var(i, 1)], dtype=np.float64)
+                x[i] = _sample_from_logp(rng, logp)
         if pb is not None:
-            print("sweep ", sweep, " ", np.dot(pb.w, x), " ", pb.check_solution(x))
+            print("sweep ", sweep, " ", np.dot(pb.w, x), " ", pb.check_solution(x), " ", T)
 
         if sweep >= burn_in_sweeps and ((sweep - burn_in_sweeps) % thinning == 0):
             samples[kept] = x
