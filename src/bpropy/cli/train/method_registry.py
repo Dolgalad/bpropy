@@ -115,6 +115,7 @@ def _forward_var_logits(model: torch.nn.Module, data: Any) -> torch.Tensor:
     if hasattr(data, "node_types") and ("variable" in getattr(data, "node_types", [])):
         return out
     # homo: filter variable nodes
+    print("in _forward_var_logits: using .bipartite")
     return out[data.bipartite == 0]
 
 
@@ -377,10 +378,16 @@ from bpropy.co.scp import SCP
 from bpropy.gd.mis_adapter import MISAdapter
 from bpropy.gd.scp_adapter import SCPAdapter
 def _decimation_adapter_default(pb: LPProblem, cfg: Any):
+    gd_cfg = cfg.get("eval", {}).get("greedy_decimation", {}).get("adapter", {})
+    print(gd_cfg)
     if isinstance(pb, MIS):
         return MISAdapter()
     if isinstance(pb, SCP):
-        return SCPAdapter()
+        return SCPAdapter(pick_mode=gd_cfg.get("pick_mode", "min_entropy"),
+                          value_mode=gd_cfg.get("value_mode", "argmax"),
+                          j_temperature=gd_cfg.get("j_temperature", 1.0),
+                          seed=gd_cfg.get("seed", None)
+                          )
     raise Exception(f"unknown problem type :  {type(pb)}")
 
 

@@ -27,11 +27,22 @@ class GCN_MRF_v4(torch.nn.Module):
         if mapping_aggr=="gat":
             self.mapping = GATConv(hidden_dim, hidden_dim)
     def forward(self, data, fg_data=None, fg_map=None, inference: str | None = None):
+        #print("in GCN_MRF_v4.forward")
         inference = self.inference if inference is None else inference
 
         x, edge_index = data.x, data.edge_index
+        #print("\tmean(x) = ", torch.mean(x, dim=0))
+        #print("\tstd(x)  = ", torch.std(x, dim=0))
+
+        from torch_geometric.transforms import AddSelfLoops
+        transform = AddSelfLoops(attr='edge_weight', fill_value=1.0)
+        data = transform(data)
 
         x = self.conv(x, edge_index)
+        #print("\tafter conv")
+        #print("\tmean(x_conv) = ", torch.mean(x, dim=0))
+        #print("\tstd(x_conv)  = ", torch.std(x, dim=0))
+
 
         if hasattr(data, "fg_map"):
             # mapping
@@ -44,6 +55,9 @@ class GCN_MRF_v4(torch.nn.Module):
                 if M[:,1].max() >= x.shape[0]:
                     x = torch.nn.functional.pad(x, (0,0,0,M.max() - x.shape[0]+1), "constant", 0)
                 x = self.mapping(x, M.T)
+        #print("\tafter mapping")
+        #print("\tmean(x_conv) = ", torch.mean(x, dim=0))
+        #print("\tstd(x_conv)  = ", torch.std(x, dim=0))
 
         x = self.efc(x, data)
 

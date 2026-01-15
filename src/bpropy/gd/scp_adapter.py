@@ -88,8 +88,18 @@ class SCPAdapter:
       - stop when all elements are covered; remaining sets become 0 in solution()
     """
 
-    def __init__(self, normalize_by_cost: bool = True):
+    def __init__(self, 
+                 normalize_by_cost: bool = True,
+                 pick_mode: str = "min_entropy", # "min_entropy" | "softmax_eff" | "softmax_neg_entropy" | "max_eff"
+                 value_mode: str = "argmax"    , # "argmax" | "sample" | "add"
+                 j_temperature: float = 1.0,
+                 seed: Optional[int] = None,
+    ):
         self.normalize_by_cost = normalize_by_cost
+        self.pick_mode = pick_mode
+        self.value_mode = value_mode
+        self.j_temperature = j_temperature
+        self.rng = np.random.default_rng(seed)
 
         self.pb: Any = None
         self.S: List[np.ndarray] = []
@@ -149,13 +159,45 @@ class SCPAdapter:
             eff = scores
 
         # entropy
-        entropy = -eff * np.log(eff+1e-12) - (1.0 - eff) * np.log(1.0 - eff+1e-12)
+        p = np.clip(eff, 1e-12, 1.0 - 1e-12)
+        entropy = -p * np.log(p) - (1.0 - p) * np.log(1.0 - p)
 
-        #jj = int(active_idx[np.argmax(eff[active_idx])])
-        #jj_val = 1
-        jj = int(active_idx[np.argmin(entropy[active_idx])])
-        jj_val = np.argmax(mu_np[jj])
+        # pick variable index
+        active_idx = np.flatnonzero(self.active_sets)
 
+        if self.pick_mode == "min_entropy":
+            jj = int(active_idx[np.argmin(entropy[active_idx])])
+
+        if self.pick_mode == "max_eff":
+            jj = int(active_idx[np.argmax(eff[active_idx])])
+
+        
+        elif self.pick_mode == "softmax_eff":
+            logits = np.log(np.clip(eff[active_idx], 1e-12, None))
+            local = _sample_softmax(self.rng, logits, temperature=self.j_temperature)
+            jj = int(active_idx[local])
+        
+        elif self.pick_mode == "softmax_neg_entropy":
+            logits = -entropy[active_idx]
+            local = _sample_softmax(self.rng, logits, temperature=self.j_temperature)
+            jj = int(active_idx[local])
+        
+        else:
+            raise ValueError(f"Unknown pick_mode={self.pick_mode}")
+        
+        # --- pick jj_val ---
+        if self.value_mode == "argmax":
+            jj_val = int(np.argmax(mu_np[jj]))
+        elif self.value_mode == "sample":
+            p = mu_np[jj].astype(float)
+            p = np.nan_to_num(p, nan=0.0, posinf=0.0, neginf=0.0)
+            p = np.clip(p, 0.0, None)
+            p = p / p.sum() if p.sum() > 0 else np.array([0.5, 0.5])
+            jj_val = int(self.rng.choice(2, p=p))
+        elif self.value_mode == "add":
+            jj_val = 1
+        else:
+            raise ValueError(f"Unknown value_mode={self.value_mode}")
 
         # Commit: choose set j
         #evidence = {j: 1}
@@ -195,14 +237,32 @@ class SCPAdapter:
                             if self.uncovered[ii]:
                                 self.uncovered[ii] = False
                                 newly.append(ii)
+        # --- NEW: deactivate sets that cannot cover anything new anymore ---
+        # Any active set that has zero uncovered elements left is useless.
+        if newly:
+            touched_sets = set()
+            for i in newly:
+                for s_idx in self.C[int(i)]:   # sets that contain element i
+                    if self.active_sets[int(s_idx)]:
+                        touched_sets.add(int(s_idx))
+
+            for s_idx in touched_sets:
+                # check if this set still covers at least one uncovered element
+                elems = self.S[s_idx]
+                if elems.size == 0 or (not self.uncovered[elems].any()):
+                    self.active_sets[s_idx] = False
+                    if self.x[s_idx] < 0:
+                        self.x[s_idx] = 0
 
         info = {
             "chosen": jj,
+            "value": jj_val,
             "mu1": float(scores[jj]),
             "cost": float(self.cost[jj]),
             "newly_covered": newly,
             "n_uncovered": int(self.uncovered.sum()),
         }
+        print(info)
         return evidence, info
 
     def solution(self) -> np.ndarray:
@@ -213,4 +273,10 @@ class SCPAdapter:
         return x
 
 
+def _sample_softmax(rng: np.random.Generator, logits: np.ndarray, temperature: float = 1.0) -> int:
+    z = logits / max(temperature, 1e-12)
+    z = z - np.max(z)              # stability
+    p = np.exp(z)
+    p = p / np.sum(p)
+    return int(rng.choice(len(p), p=p))
 

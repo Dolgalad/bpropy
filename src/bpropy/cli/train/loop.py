@@ -165,7 +165,10 @@ def train_one_epoch(
         optimizer.zero_grad(set_to_none=True)
         pred = adapter.forward_fn(model, data)
         spec = adapter.loss_spec_fn(adapter, data, pred, y, cfg)
-        
+        if epoch == 1 and steps == 0:
+            from bpropy.debug_audit import audit_batch
+            #audit_batch(data, pred = pred, cfg=cfg, strict=True)
+       
         if spec.backward_fn is not None:
             logged_loss = spec.backward_fn()
             loss_scalar = float(logged_loss.detach().cpu().item()) if torch.is_tensor(logged_loss) else float(logged_loss)
@@ -329,7 +332,23 @@ def final_test_eval(
             t5 = time.perf_counter()
             backend = adapter.decimation_backend_fn(pb[0], data, pred, cfg, device=device)
             padapter = adapter.decimation_adapter_fn(pb[0], cfg)
-            dec_sol = greedy_decimation(pb[0], backend, padapter)
+            best_val = None
+            dec_sol = None
+            n_samples = cfg.get("eval", {}).get("greedy_decimation", {}).get("adapter", {}).get("n_samples", 1)
+            for _ in range(n_samples):
+                _dec_sol = greedy_decimation(pb[0], backend, padapter)
+                dec_val = float(np.dot(pb[0].w, _dec_sol))
+                print("sample val ", dec_val)
+                if best_val is None:
+                    best_val = dec_val
+                    dec_sol = _dec_sol
+                else:
+                    if maximize and (best_val < dec_val):
+                        best_val = dec_val
+                        dec_sol = _dec_sol
+                    if (not maximize) and (best_val > dec_val):
+                        best_val = dec_val
+                        dec_sol = _dec_sol
             t6 = time.perf_counter()
             
             spec = adapter.loss_spec_fn(adapter, data, pred, y, cfg)

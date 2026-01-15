@@ -308,6 +308,8 @@ def scp_greedy(
             j = int(rng.choice(active_idx, p=p))
         else:
             raise ValueError(f"Unknown policy={policy!r} (expected 'argmax' or 'sample')")
+        #print(f"selected j={j} val={np.max(step_scores)}")
+        #print("\tnewly covered = ", sum(uncovered[int(a)] for a in pb.F[j]))
 
         # select set j
         x[j] = 1.0
@@ -316,6 +318,19 @@ def scp_greedy(
         # mark covered
         for a in pb.F[j]:
             uncovered[int(a)] = False
+        # remove all sets that don't cover anything new
+        gains = np.zeros(active_idx.size, dtype=float)
+        for k, j in enumerate(active_idx):
+            elems = np.asarray(pb.F[int(j)], dtype=int)
+            if elems.size:
+                gains[k] = float(np.sum(uncovered[elems]))
+        # If all gains are 0, we're stuck
+        if np.max(gains) <= 0:
+            break
+        for aidx, g in zip(active_idx, gains):
+            if g==0 and active_sets[aidx]:
+                active_sets[aidx] = False
+                x[aidx] = 0.0
 
     return x
 

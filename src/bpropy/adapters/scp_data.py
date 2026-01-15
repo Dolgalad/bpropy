@@ -9,7 +9,7 @@ from bpropy.utils.graph_utils import get_edge_index
 from bpropy.vc_graph import VCGraph
 from bpropy.co.scp import SCP, adjacency_matrix_to_sets
 
-from bpropy.mrf.scp_factor_graph import SCPFactorGraph
+from bpropy.mrf.factor_graph import FactorGraph
 from bpropy.mrf.lbp_edges import LBPEdges
 from bpropy.mrf.nmf_edges import NMFEdges
 from bpropy.mrf.sufficient_statistics import x2ss
@@ -56,11 +56,11 @@ def scp_to_data(pb, with_lbp_edges=False, with_nmf_edges=False, y=None):
                 factor_sizes=factor_sizes,
                 neighbors=neighbors,
                 )
-    data.x=torch.from_numpy(x).to(dtype=torch.float32),
-    data.e=torch.from_numpy(efeat).to(dtype=torch.float32),
+    data.x=torch.from_numpy(x).to(dtype=torch.float32)
+    data.e=torch.from_numpy(efeat).to(dtype=torch.float32)
 
     if with_lbp_edges or with_nmf_edges:
-        fg = SCPFactorGraph(pb)
+        fg = FactorGraph(pb)
         if with_lbp_edges:
             data.lbp_edges = LBPEdges(fg)
         if with_nmf_edges:
@@ -134,7 +134,7 @@ def mis_to_hetero_data(pb, feature_category="EB", with_lbp_edges=False, with_nmf
         #data.e=torch.from_numpy(efeat).to(dtype=torch.float32), # not used for now
 
     if with_lbp_edges or with_nmf_edges:
-        fg = MISFactorGraph(pb)
+        fg = FactorGraph(pb)
         if with_lbp_edges:
             data.lbp_edges = LBPEdges(fg)
         if with_nmf_edges:
