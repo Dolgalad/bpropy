@@ -88,6 +88,33 @@ class GCN_MRF_v5(torch.nn.Module):
             print("ss ahep  = ", data.y_ss.shape)
             #_x = torch.cat((unary_theta, pairwise_theta), dim=0)
 
+            #################################
+            # pairwise factor count
+            n_pair = int((data.factor_sizes == 2).sum().item())  # or nf - NV if guaranteed
+            # but easiest if your factor ordering is unary first then pairwise:
+            n_pair = int(data.factor_sizes.numel() - NV)
+            
+            # --- VAR endpoints for pairwise factors ---
+            var_fg_map = data.fg_map[(data.fg_map[:,0] < NV) & (data.fg_map[:,1] >= NV)]
+            pair_idx = var_fg_map[:,1] - NV                      # <-- reindex to [0..n_pair-1]
+            var_x_pairwise = concat_group_by(x[var_fg_map[:,0]], pair_idx).flatten(start_dim=1)
+            
+            # --- CONSTRAINT embedding aggregated per pairwise factor ---
+            constr_fg_map = data.fg_map[(data.fg_map[:,0] >= NV) & (data.fg_map[:,1] >= NV)]
+            pair_idx_c = constr_fg_map[:,1] - NV                 # <-- reindex too
+            
+            constr_x_pairwise, _ = torch_scatter.scatter_max(
+                x[constr_fg_map[:,0]],
+                pair_idx_c,
+                dim=0,
+                dim_size=n_pair                                  # <-- important: force size
+            )
+            
+            x_pairwise = torch.cat((var_x_pairwise, constr_x_pairwise), dim=1)  # [n_pair, 3H]
+            pairwise_theta = self.mlp_pairwise(x_pairwise).flatten()                  # [n_pair, 4]
+            print("1111 _x shape = ", pairwise_theta.shape)
+            print("1111 ss ahep  = ", data.y_ss.shape)
+
 
             # mapping
             if self.mapping_aggr=="mean":
