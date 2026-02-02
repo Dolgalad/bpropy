@@ -275,11 +275,66 @@ class SCPAdapter:
         }
         return evidence, info
 
+    def _prune_nonexclusive_coverers(self, x: np.ndarray, S: List[np.ndarray], n_elems: int) -> np.ndarray:
+        """
+        Remove redundant selected sets: any selected set that does NOT exclusively cover
+        at least one element in the *current* selected cover.
+    
+        This is done safely via iterative pruning:
+          - maintain coverage counts per element under current x==1
+          - remove a set j if all elements it covers have count >= 2 (i.e., it covers nothing uniquely)
+          - repeat until no more sets can be removed
+    
+        Returns a new x (does not modify input).
+        """
+        x = np.asarray(x, dtype=int).copy()
+        if x.ndim != 1:
+            x = x.reshape(-1)
+    
+        selected = np.flatnonzero(x == 1)
+        if selected.size == 0 or n_elems <= 0:
+            return x
+    
+        # coverage counts
+        cover_count = np.zeros(int(n_elems), dtype=int)
+        for j in selected:
+            elems = S[int(j)]
+            if elems.size:
+                cover_count[elems] += 1
+    
+        in_sol = np.zeros_like(x, dtype=bool)
+        in_sol[selected] = True
+    
+        changed = True
+        while changed:
+            changed = False
+            current = np.flatnonzero(in_sol)
+            for j in current:
+                elems = S[int(j)]
+                if elems.size == 0:
+                    in_sol[int(j)] = False
+                    x[int(j)] = 0
+                    changed = True
+                    continue
+    
+                if np.all(cover_count[elems] >= 2):
+                    in_sol[int(j)] = False
+                    x[int(j)] = 0
+                    cover_count[elems] -= 1
+                    changed = True
+    
+        return x
+
     def solution(self) -> np.ndarray:
         """Undecided -> 0, and also set any remaining active sets to 0."""
         assert self.x is not None
         x = self.x.copy()
         x[x < 0] = 0
+
+        if self.S and self.C:
+            print("pruning")
+            x = self._prune_nonexclusive_coverers(x, self.S, n_elems=len(self.C))
+
         return x
 
 

@@ -154,8 +154,13 @@ def _build_vc_to_apx_map(
                 # Shouldn't happen if fg_apx was built from keep_pairs, but be safe.
                 continue
             rows.append((int(c), int(Fp)))
-
-    return torch.as_tensor(rows, dtype=torch.long)
+    for i,p in enumerate(keep_pairs):
+        Fp = apx_pair.get(p, None)
+        #print("\t", Fp, p)
+        rows.append((int(p[0]), int(Fp)))
+        rows.append((int(p[1]), int(Fp)))
+    r = torch.as_tensor(rows, dtype=torch.long)
+    return r
 
 
 # ---------------------------------------------------------------------

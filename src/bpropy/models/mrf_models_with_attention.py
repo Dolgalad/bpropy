@@ -1,0 +1,117 @@
+import torch
+import torch_scatter
+import torch.nn.functional as F
+from torch.nn import ReLU, ELU, Dropout, BatchNorm1d, GELU
+from torch_geometric.nn.conv import GATConv
+from torch_geometric.utils import to_dense_batch
+from torch_geometric.nn import GCNConv, Sequential, LayerNorm, to_hetero, HeteroDictLinear
+from torch_geometric.nn.models import GCN, GAT
+from torch_geometric.data import Data
+from torchvision.ops import MLP
+
+from bpropy.mrf.lbp import loopy_belief_propagation
+from bpropy.mrf.naive_mean_field import naive_mean_field
+from bpropy.models.efcanonicalparam import EFCanonicalParam
+
+def concat_group_by(x: torch.Tensor, index: torch.Tensor) -> torch.Tensor:
+    index_count = torch.bincount(index)
+    fill_count = index_count.max() - index_count
+    fill_zeros = torch.zeros_like(x[0], device=x.device).repeat(fill_count.sum(), *([1]*(len(x.shape)-1)))
+    fill_index = torch.arange(0, fill_count.shape[0], device=x.device).repeat_interleave(fill_count)
+    index_ = torch.cat([index, fill_index], dim=0)
+    x_ = torch.cat([x, fill_zeros], dim=0)
+    x_ = x_[torch.argsort(index_, stable=True)].view(index_count.shape[0], index_count.max(), *x.shape[1:])
+    return x_
+
+class GCN_MRF_v5(torch.nn.Module):
+    def __init__(self, in_dim, n_layers=4, hidden_dim=64, dropout_p=0.25, normalize=False, bp_max_iter=10, bp_tol=1e-6, bp_damping=0.5, factor_sizes=[1,2], jk="lstm", norm="LayerNorm", act="elu", inference="loopy_belief_propagation", mapping_aggr="mean", normalize_theta=False, gnn_f="GCN"):
+        super().__init__()
+        self.inference = inference 
+        self.bp_max_iter = bp_max_iter
+        self.bp_tol = bp_tol
+        self.bp_damping = bp_damping
+        self.conv = eval(gnn_f)(in_dim, hidden_dim, n_layers, out_channels=hidden_dim, dropout=dropout_p, act=act, norm=norm, jk=jk)
+        self.mapping_aggr=mapping_aggr
+        self.normalize_theta = normalize_theta
+
+        self.efc = EFCanonicalParam(hidden_dim, lambda in_channels, out_channels: MLP(in_channels, hidden_channels=[64, 64, out_channels], activation_layer=GELU, norm_layer=torch.nn.LayerNorm), factor_sizes=factor_sizes)
+        self.mlp_unary = MLP(hidden_dim, hidden_channels=[64, 64, 2], activation_layer=GELU, norm_layer=torch.nn.LayerNorm)
+        self.mlp_pairwise = MLP(3*hidden_dim, hidden_channels=[64, 64, 4], activation_layer=GELU, norm_layer=torch.nn.LayerNorm)
+
+        if mapping_aggr=="gat":
+            self.mapping = GATConv(hidden_dim, hidden_dim)
+    def forward(self, data, fg_data=None, fg_map=None, inference: str | None = None):
+        #print("in GCN_MRF_v4.forward")
+        inference = self.inference if inference is None else inference
+
+        x, edge_index = data.x, data.edge_index
+        #print("\tmean(x) = ", torch.mean(x, dim=0))
+        #print("\tstd(x)  = ", torch.std(x, dim=0))
+
+        from torch_geometric.transforms import AddSelfLoops
+        transform = AddSelfLoops(attr='edge_weight', fill_value=1.0)
+        data = transform(data)
+
+        x = self.conv(x, edge_index)
+
+        if hasattr(data, "fg_map"):
+            print("creating the stacked triplets (x_i, x_j, aggr( x_c for each constraint)")
+            NV = (data.bipartite==0).sum().item()
+            print("NV = ", NV)
+            print(data)
+            print(data.fg_map[data.fg_map[:,1]==0, 0])
+            print(data.fg_map[data.fg_map[:,1]==NV, 0])
+            print(data.fg_map[data.fg_map[:,1]==NV+1, 0])
+            print(data.fg_map[data.fg_map[:,1]==NV+2, 0])
+            print(data.fg_map[data.fg_map[:,1]==NV+3, 0])
+
+            y = concat_group_by(x[data.fg_map[:,0]], data.fg_map[:,1])
+
+            # build input tensor of unary variable embeddings, same as the original
+            x_unary = x[:NV, :]
+            # build input tensor for pairwise factors
+            # first stack the two variable embeddings
+            var_fg_map = data.fg_map[(data.fg_map[:,0] < NV) & (data.fg_map[:,1] >= NV), :]
+            var_x_pairwise = concat_group_by(x[var_fg_map[:,0]], var_fg_map[:,1]).flatten(start_dim=1)
+            # second aggregate the constraint embeddings
+            constr_fg_map = data.fg_map[(data.fg_map[:,0] >= NV) & (data.fg_map[:,1]>=NV),:]
+            constr_x_pairwise,_ = torch_scatter.scatter_max(x[constr_fg_map[:,0]], constr_fg_map[:,1], dim=0)
+            print(constr_x_pairwise.shape)
+            print(var_x_pairwise.shape)
+
+            x_pairwise = torch.cat((var_x_pairwise, constr_x_pairwise), dim=1)
+            print(x_pairwise.shape)
+
+            #unary_theta = self.mlp_unary(x_unary).flatten()
+            _x = self.mlp_pairwise(x_pairwise).flatten()
+            print("_x shape = ", _x.shape)
+            print("ss ahep  = ", data.y_ss.shape)
+            #_x = torch.cat((unary_theta, pairwise_theta), dim=0)
+
+
+            # mapping
+            if self.mapping_aggr=="mean":
+                x = torch_scatter.scatter_mean(x[data.fg_map[:,0]], data.fg_map[:,1],dim=0)
+            if self.mapping_aggr=="max":
+                x,_ = torch_scatter.scatter_max(x[data.fg_map[:,0]], data.fg_map[:,1],dim=0)
+            if self.mapping_aggr=="gat":
+                M = data.fg_map#[:,[1,0]]
+                if M[:,1].max() >= x.shape[0]:
+                    x = torch.nn.functional.pad(x, (0,0,0,M.max() - x.shape[0]+1), "constant", 0)
+                x = self.mapping(x, M.T)
+
+            print(_x.shape[0] - data.y_ss.shape[0])
+            print(x.shape)
+
+        x = self.efc(x, data)
+        print("after efc ", x.shape)
+
+
+        if inference in (None, "none", "theta", "no_inference"):
+            return x
+        if self.normalize_theta:
+            x = (x - x.min()) / (x.max() - x.min())
+        if inference == "loopy_belief_propagation":
+            return loopy_belief_propagation(x, torch.zeros_like(x), data.lbp_edges, max_iter=self.bp_max_iter, tol=self.bp_tol, damping=self.bp_damping), x
+        if inference == "naive_mean_field":
+            return naive_mean_field(x, data.nmf_edges, max_iter=self.bp_max_iter, tol=self.bp_tol, damping=self.bp_damping), x

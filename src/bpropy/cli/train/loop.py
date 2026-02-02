@@ -312,9 +312,12 @@ def final_test_eval(
     t_pred, t_grd, t_tot, t_pre, t_e2e, t_gd = [], [], [], [], [], []
     maximize = bool(cfg.get("problem", {}).get("maximize", True))
 
+    c = 0
+
     with torch.no_grad():
         bar = Bar("[Test]          ", max=len(loader))
         for pb, data, y in CUDAPrefetcher(loader, device):
+            print("data.fg_map shape : ", data.fg_map.shape, data.fg_map[:,1].max())
             _sync(device)
             t0 = time.perf_counter()
 
@@ -400,6 +403,10 @@ def final_test_eval(
             t_e2e.append(t_pre[-1] + (t4 - t0))
 
             bar.next()
+
+            #c += 1 
+            #if c >= 10:
+            #    break
 
         bar.finish()
 
