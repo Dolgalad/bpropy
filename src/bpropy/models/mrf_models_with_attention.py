@@ -22,7 +22,55 @@ def concat_group_by(x: torch.Tensor, index: torch.Tensor) -> torch.Tensor:
     x_ = torch.cat([x, fill_zeros], dim=0)
     x_ = x_[torch.argsort(index_, stable=True)].view(index_count.shape[0], index_count.max(), *x.shape[1:])
     return x_
+def segment_arange(lengths: torch.Tensor) -> torch.Tensor:
+    total = int(lengths.sum().item())
+    if total == 0:
+        return torch.empty((0,), device=lengths.device, dtype=torch.long)
+    end = torch.cumsum(lengths, 0)                 # [B]
+    start = end - lengths                          # [B]
+    base = torch.repeat_interleave(start, lengths) # [total]
+    return torch.arange(total, device=lengths.device) - base
 
+def count_pairwise_per_graph(edges) -> torch.Tensor:
+    # factor_batch: [sum(n_factors)] -> graph id for each factor
+    B = int(edges.n_factors.numel())
+    factor_batch = torch.repeat_interleave(
+        torch.arange(B, device=edges.device, dtype=torch.long),
+        edges.n_factors.to(torch.long),
+    )
+    is_pair = (edges.m_stride.to(torch.long) == 4).to(torch.long)  # size=2
+    n_pair = torch.zeros(B, device=edges.device, dtype=torch.long)
+    n_pair.scatter_add_(0, factor_batch, is_pair)
+    return n_pair
+
+def interleave_theta(unary_theta: torch.Tensor, pair_theta: torch.Tensor, edges) -> torch.Tensor:
+    # Flatten the predicted blocks
+    unary_flat = unary_theta.reshape(-1)   # [2*sum(n_vars)]
+    pair_flat  = pair_theta.reshape(-1)    # [4*sum(n_pair)]
+
+    n_vars = edges.n_vars.to(torch.long)          # [B]
+    n_pair = count_pairwise_per_graph(edges)      # [B]
+
+    u_len = 2 * n_vars                             # [B]
+    p_len = 4 * n_pair                             # [B]
+    out_len = u_len + p_len                        # [B]
+    out_ptr = torch.cumsum(out_len, 0) - out_len   # [B]
+
+    # Build destination indices for unary part (first within each graph)
+    u_local = segment_arange(u_len)                                  # [sum u_len]
+    u_base  = torch.repeat_interleave(out_ptr, u_len)                # [sum u_len]
+    out_u_idx = u_base + u_local                                     # [sum u_len]
+
+    # Build destination indices for pairwise part (after unary within each graph)
+    p_local = segment_arange(p_len)                                  # [sum p_len]
+    p_base  = torch.repeat_interleave(out_ptr + u_len, p_len)        # [sum p_len]
+    out_p_idx = p_base + p_local                                     # [sum p_len]
+
+    # Scatter into final theta vector
+    theta_flat = unary_flat.new_empty(int(out_len.sum().item()))
+    theta_flat[out_u_idx] = unary_flat
+    theta_flat[out_p_idx] = pair_flat
+    return theta_flat
 def debug_tensor(x, name, filename=None):
     if filename:
         with open(filename, "a") as f:
@@ -66,76 +114,76 @@ class GCN_MRF_v5(torch.nn.Module):
         data = transform(data)
 
         x = self.conv(x, edge_index)
-        debug_tensor(x, "x", filename="debug.log")
+        #debug_tensor(x, "x", filename="debug.log")
 
         if hasattr(data, "fg_map"):
-            NV = (data.bipartite==0).sum().item()
+            m_stride = data.lbp_edges.m_stride.to(torch.long)
+            is_unary = (m_stride == 2)
+            is_pair = (m_stride == 4)
 
-            ## build input tensor of unary variable embeddings, same as the original
-            x_unary = x[:NV, :]
-            debug_tensor(x_unary, "x_unary", filename="debug.log")
+            unary_id_of_factor = torch.cumsum(is_unary.to(torch.long), 0) - 1
+            pair_id_of_factor = torch.cumsum(is_pair.to(torch.long), 0) - 1
 
-            #################################
-            # pairwise factor count
-            n_pair = int((data.factor_sizes == 2).sum().item())  # or nf - NV if guaranteed
-            # but easiest if your factor ordering is unary first then pairwise:
-            n = int(data.factor_sizes.numel() - NV)
+            n_unary = int(is_unary.sum().item())
+            n_pair = int(is_pair.sum().item())
+
+            node_idx  = data.fg_map[:, 0]
+            factor_idx = data.fg_map[:, 1].to(torch.long)
             
-            # --- VAR endpoints for pairwise factors ---
-            var_fg_map = data.fg_map[(data.fg_map[:,0] < NV) & (data.fg_map[:,1] >= NV)]
-            pair_idx = var_fg_map[:,1] - NV                      # <-- reindex to [0..n_pair-1]
-            var_x_pairwise = concat_group_by(x[var_fg_map[:,0]], pair_idx).flatten(start_dim=1)
+            src_is_var = (data.bipartite[node_idx] == 0)
+            src_is_con = ~src_is_var
             
-            # --- CONSTRAINT embedding aggregated per pairwise factor ---
-            constr_fg_map = data.fg_map[(data.fg_map[:,0] >= NV) & (data.fg_map[:,1] >= NV)]
-            pair_idx_c = constr_fg_map[:,1] - NV                 # <-- reindex too
-            
-            constr_x_pairwise, _ = torch_scatter.scatter_max(
-                x[constr_fg_map[:,0]],
-                pair_idx_c,
+            factor_is_unary = is_unary[factor_idx]
+            factor_is_pair  = is_pair[factor_idx]
+
+            mask_var_unary = src_is_var & factor_is_unary
+            mask_con_unary = src_is_con & factor_is_unary
+            mask_var_pair  = src_is_var & factor_is_pair
+            mask_con_pair  = src_is_con & factor_is_pair
+
+            unary_id_e = unary_id_of_factor[factor_idx]   # [E]
+            pair_id_e  = pair_id_of_factor[factor_idx]    # [E]
+
+            # variable endpoint per unary factor (usually exactly 1)
+            var_x_unary = torch_scatter.scatter_max(
+                x[node_idx[mask_var_unary]],
+                unary_id_e[mask_var_unary],
                 dim=0,
-                dim_size=n_pair                                  # <-- important: force size
-            )
+                dim_size=n_unary
+            )[0]                                           # [n_unary, H]
             
-            x_pairwise = torch.cat((var_x_pairwise, constr_x_pairwise), dim=1)  # [n_pair, 3H]
-            debug_tensor(x_pairwise, "x_pairwise", filename="debug.log")
-            pairwise_theta = self.mlp_pairwise(x_pairwise)                  # [n_pair, 4]
-            debug_tensor(pairwise_theta, "pairwise_theta", filename="debug.log")
-            pairwise_theta = pairwise_theta.flatten()
-
-            # unary params (2 per variable)
-            unary_theta = self.mlp_unary(x_unary)          # shape: [2*NV]
-            debug_tensor(unary_theta, "unary_theta", filename="debug.log")
-            p1_unary = torch.softmax(unary_theta, dim=1)[:,1]
-            debug_tensor(p1_unary, "p1_unary", filename="debug.log")
-
-            unary_theta = unary_theta.flatten()
-           
-            # pairwise params already computed (4 per pairwise factor)
-            #pairwise_theta = self.mlp_pairwise(x_pairwise).flatten() # shape: [4*n_pair]
+            ## constraint endpoint aggregated per unary factor (maybe 0/1/many depending on your FG design)
+            #con_x_unary = torch_scatter.scatter_max(
+            #    x[node_idx[mask_con_unary]],
+            #    unary_id_e[mask_con_unary],
+            #    dim=0,
+            #    dim_size=n_unary
+            #)[0]                                           # [n_unary, H]
             
-            x = torch.cat([unary_theta, pairwise_theta], dim=0)
+            #x_unary_f = torch.cat([var_x_unary, con_x_unary], dim=1)  # [n_unary, 2H]
+            x_unary_f = var_x_unary
+
+            # gather var endpoints for pair factors
+            var_nodes = x[node_idx[mask_var_pair]]             # [E_var_pair, H]
+            pid       = pair_id_e[mask_var_pair]               # [E_var_pair]
             
-            #print("theta_flat", theta_flat.shape, "y_ss", data.y_ss.shape)
-            #print("diff", theta_flat.shape[0] - data.y_ss.shape[0])
+            var_x_pair = concat_group_by(var_nodes, pid).flatten(start_dim=1)  # [n_pair, 2H]
+            con_x_pair = torch_scatter.scatter_max(
+                x[node_idx[mask_con_pair]],
+                pair_id_e[mask_con_pair],
+                dim=0,
+                dim_size=n_pair
+            )[0]                                                # [n_pair, H]
+
+            x_pair_f = torch.cat([var_x_pair, con_x_pair], dim=1)
+
+            x = interleave_theta(self.mlp_unary(x_unary_f), self.mlp_pairwise(x_pair_f), data.lbp_edges)
 
 
-            # mapping
-            #if self.mapping_aggr=="mean":
-            #    x = torch_scatter.scatter_mean(x[data.fg_map[:,0]], data.fg_map[:,1],dim=0)
-            #if self.mapping_aggr=="max":
-            #    x,_ = torch_scatter.scatter_max(x[data.fg_map[:,0]], data.fg_map[:,1],dim=0)
-            #if self.mapping_aggr=="gat":
-            #    M = data.fg_map#[:,[1,0]]
-            #    if M[:,1].max() >= x.shape[0]:
-            #        x = torch.nn.functional.pad(x, (0,0,0,M.max() - x.shape[0]+1), "constant", 0)
-            #    x = self.mapping(x, M.T)
 
-            #print(_x.shape[0] - data.y_ss.shape[0])
-            #print(x.shape)
 
-        #x = self.efc(x, data)
-        #print("after efc ", x.shape)
+
+
 
 
         if inference in (None, "none", "theta", "no_inference"):
@@ -144,7 +192,7 @@ class GCN_MRF_v5(torch.nn.Module):
             x = (x - x.min()) / (x.max() - x.min())
         if inference == "loopy_belief_propagation":
             lbp_res = loopy_belief_propagation(x, torch.zeros_like(x), data.lbp_edges, max_iter=self.bp_max_iter, tol=self.bp_tol, damping=self.bp_damping)
-            debug_tensor(lbp_res.mu_v.reshape(NV,2), "mu_v (reshaped)", filename="debug.log")
+            #debug_tensor(lbp_res.mu_v.reshape(NV,2), "mu_v (reshaped)", filename="debug.log")
             return lbp_res, x
         if inference == "naive_mean_field":
             return naive_mean_field(x, data.nmf_edges, max_iter=self.bp_max_iter, tol=self.bp_tol, damping=self.bp_damping), x

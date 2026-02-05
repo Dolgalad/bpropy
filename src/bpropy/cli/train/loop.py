@@ -154,12 +154,14 @@ def train_one_epoch(
 ) -> float:
     model.train()
     losses = []
+    score_deltas = []
     steps = 0
     max_steps = int(cfg["train"]["steps_per_epoch"])
 
     bar = Bar(f"[Train] epoch {epoch}", max=len(loader))
 
     score_deltas = []
+    theta_deltas = []
 
     for data, y in CUDAPrefetcher(loader, device):
         optimizer.zero_grad(set_to_none=True)
@@ -208,6 +210,8 @@ def train_one_epoch(
                 np.std( scores[_1_idx] ),
 
                 )
+        _0_theta_mean = pred[1][data.y_ss == 0].mean().item()
+        _1_theta_mean = pred[1][data.y_ss == 1].mean().item()
 
         #print("scores[y==1].mean - scores[y==0].mean = ", _1_scores_mean - _0_scores_mean)
         #print("scores[y==0].mean = ", _0_scores_mean )
@@ -216,11 +220,15 @@ def train_one_epoch(
         #print("mu_v[:,0].mean = " , mu_v[:,0].mean())
         #print("mu_v[:,1].mean = " , mu_v[:,1].mean())
 
+        score_deltas.append(_1_scores_mean - _0_scores_mean)
+        theta_deltas.append(_1_theta_mean - _0_theta_mean)
+
         if torch.any(mu_v < 0):
             print("negative probabilities")
             break
 
         bar.next()
+        bar.suffix = f" loss: {np.mean(losses):.3f} sgap: {np.mean(score_deltas):.3f} tgap: {np.mean(theta_deltas):.3f}"
 
         steps += 1
         if steps >= max_steps:

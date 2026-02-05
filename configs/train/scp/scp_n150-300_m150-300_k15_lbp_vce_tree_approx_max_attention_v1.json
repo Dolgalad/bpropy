@@ -2,7 +2,7 @@
   "schema_version": 1,
 
   "slurm": {
-    "job_name": "scp_n150-300_m150-300_k15_lbp_vce_pairwise_approx_max_attention_v1",
+    "job_name": "scp_n150-300_m150-300_k15_lbp_vce_tree_approx_max_attention_v1",
     "time": "24:00:00",
     "cpus_per_task": 8,
     "gpus": 1,
@@ -12,11 +12,11 @@
   },
 
   "run": {
-    "name": "scp_n150-300_m150-300_k15_lbp_vce_pairwise_approx_max_attention_v1",
+    "name": "scp_n150-300_m150-300_k15_lbp_vce_tree_approx_max_attention_v1",
     "output_dir": "runs",
     "resume": null,
     "save_dirname": "checkpoints",
-    "tags": ["scp", "lbp", "vce", "fg_approx_pairwise"]
+    "tags": ["scp", "lbp", "vce", "fg_approx_tree"]
   },
 
   "seed": 0,
@@ -30,20 +30,20 @@
 
     "feature_mode": "EB",
     "hetero": false,
-    "refresh": false,
+    "refresh": true,
 
     "precompute": {
       "lbp": true,
       "ss": true,
       "nmf": false ,
       "fg_approx": {
-        "method": "pairwise" ,
+        "method": "tree" ,
 	"seed": 0
       }
     },
 
     "loader": {
-      "batch_size": 1,
+      "batch_size": 10,
       "num_workers": 2,
       "prefetch": 2,
       "pin_memory": true
