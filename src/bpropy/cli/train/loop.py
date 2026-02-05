@@ -188,12 +188,45 @@ def train_one_epoch(
 
         losses.append(loss_scalar)
 
+        # debugging
+        NV = (data.bipartite == 0).sum().item()
+        #print("theta shape = ", pred[1].shape)
+        #print("y_ss shape  = ", data.y_ss.shape)
+        #print("theta[y_ss==1].mean - theta[y_ss==0].mean = ", pred[1][data.y_ss == 1].mean() - pred[1][data.y_ss == 0].mean())
+        scores = pred[0].mu_v.reshape(NV,2)[:,1].detach().cpu().numpy()
+        #print("scores.shape = ", scores.shape)
+        #print("y.shape = ", y.shape)
+        #print("y mean (fraction of 1s) =", y.float().mean().item())
+        #print("y_ss mean (fraction of 1s) =", data.y_ss.float().mean().item())
+
+        _0_idx, _1_idx = (y == 0).cpu().numpy(), (y == 1).cpu().numpy()
+
+        _0_scores_mean, _0_scores_std, _1_scores_mean, _1_scores_std = (
+                np.mean( scores[_0_idx] ),
+                np.std( scores[_0_idx] ),
+                np.mean( scores[_1_idx] ),
+                np.std( scores[_1_idx] ),
+
+                )
+
+        #print("scores[y==1].mean - scores[y==0].mean = ", _1_scores_mean - _0_scores_mean)
+        #print("scores[y==0].mean = ", _0_scores_mean )
+        #print("scores[y==1].mean = ", _1_scores_mean )
+        mu_v = pred[0].mu_v.reshape(NV,2)
+        #print("mu_v[:,0].mean = " , mu_v[:,0].mean())
+        #print("mu_v[:,1].mean = " , mu_v[:,1].mean())
+
+        if torch.any(mu_v < 0):
+            print("negative probabilities")
+            break
+
         bar.next()
 
         steps += 1
         if steps >= max_steps:
             break
     bar.finish()
+    print("mean loss : ", np.mean(losses))
 
     return float(np.mean(losses)) if losses else 0.0, steps
 

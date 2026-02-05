@@ -23,6 +23,19 @@ def concat_group_by(x: torch.Tensor, index: torch.Tensor) -> torch.Tensor:
     x_ = x_[torch.argsort(index_, stable=True)].view(index_count.shape[0], index_count.max(), *x.shape[1:])
     return x_
 
+def debug_tensor(x, name, filename=None):
+    if filename:
+        with open(filename, "a") as f:
+            print(name, "min ", x.min(dim=0), file=f)
+            print(name, "max ", x.max(dim=0), file=f)
+            print(name, "mean", x.mean(dim=0), file=f)
+            print(name, "std ", x.std(dim=0), file=f)
+    else:
+        print(name, "min ", x.min(dim=0))
+        print(name, "max ", x.max(dim=0))
+        print(name, "mean", x.mean(dim=0))
+        print(name, "std ", x.std(dim=0))
+
 class GCN_MRF_v5(torch.nn.Module):
     def __init__(self, in_dim, n_layers=4, hidden_dim=64, dropout_p=0.25, normalize=False, bp_max_iter=10, bp_tol=1e-6, bp_damping=0.5, factor_sizes=[1,2], jk="lstm", norm="LayerNorm", act="elu", inference="loopy_belief_propagation", mapping_aggr="mean", normalize_theta=False, gnn_f="GCN"):
         super().__init__()
@@ -53,46 +66,20 @@ class GCN_MRF_v5(torch.nn.Module):
         data = transform(data)
 
         x = self.conv(x, edge_index)
+        debug_tensor(x, "x", filename="debug.log")
 
         if hasattr(data, "fg_map"):
-            print("creating the stacked triplets (x_i, x_j, aggr( x_c for each constraint)")
             NV = (data.bipartite==0).sum().item()
-            print("NV = ", NV)
-            print(data)
-            print(data.fg_map[data.fg_map[:,1]==0, 0])
-            print(data.fg_map[data.fg_map[:,1]==NV, 0])
-            print(data.fg_map[data.fg_map[:,1]==NV+1, 0])
-            print(data.fg_map[data.fg_map[:,1]==NV+2, 0])
-            print(data.fg_map[data.fg_map[:,1]==NV+3, 0])
 
-            y = concat_group_by(x[data.fg_map[:,0]], data.fg_map[:,1])
-
-            # build input tensor of unary variable embeddings, same as the original
+            ## build input tensor of unary variable embeddings, same as the original
             x_unary = x[:NV, :]
-            # build input tensor for pairwise factors
-            # first stack the two variable embeddings
-            var_fg_map = data.fg_map[(data.fg_map[:,0] < NV) & (data.fg_map[:,1] >= NV), :]
-            var_x_pairwise = concat_group_by(x[var_fg_map[:,0]], var_fg_map[:,1]).flatten(start_dim=1)
-            # second aggregate the constraint embeddings
-            constr_fg_map = data.fg_map[(data.fg_map[:,0] >= NV) & (data.fg_map[:,1]>=NV),:]
-            constr_x_pairwise,_ = torch_scatter.scatter_max(x[constr_fg_map[:,0]], constr_fg_map[:,1], dim=0)
-            print(constr_x_pairwise.shape)
-            print(var_x_pairwise.shape)
-
-            x_pairwise = torch.cat((var_x_pairwise, constr_x_pairwise), dim=1)
-            print(x_pairwise.shape)
-
-            #unary_theta = self.mlp_unary(x_unary).flatten()
-            _x = self.mlp_pairwise(x_pairwise).flatten()
-            print("_x shape = ", _x.shape)
-            print("ss ahep  = ", data.y_ss.shape)
-            #_x = torch.cat((unary_theta, pairwise_theta), dim=0)
+            debug_tensor(x_unary, "x_unary", filename="debug.log")
 
             #################################
             # pairwise factor count
             n_pair = int((data.factor_sizes == 2).sum().item())  # or nf - NV if guaranteed
             # but easiest if your factor ordering is unary first then pairwise:
-            n_pair = int(data.factor_sizes.numel() - NV)
+            n = int(data.factor_sizes.numel() - NV)
             
             # --- VAR endpoints for pairwise factors ---
             var_fg_map = data.fg_map[(data.fg_map[:,0] < NV) & (data.fg_map[:,1] >= NV)]
@@ -111,27 +98,44 @@ class GCN_MRF_v5(torch.nn.Module):
             )
             
             x_pairwise = torch.cat((var_x_pairwise, constr_x_pairwise), dim=1)  # [n_pair, 3H]
-            pairwise_theta = self.mlp_pairwise(x_pairwise).flatten()                  # [n_pair, 4]
-            print("1111 _x shape = ", pairwise_theta.shape)
-            print("1111 ss ahep  = ", data.y_ss.shape)
+            debug_tensor(x_pairwise, "x_pairwise", filename="debug.log")
+            pairwise_theta = self.mlp_pairwise(x_pairwise)                  # [n_pair, 4]
+            debug_tensor(pairwise_theta, "pairwise_theta", filename="debug.log")
+            pairwise_theta = pairwise_theta.flatten()
+
+            # unary params (2 per variable)
+            unary_theta = self.mlp_unary(x_unary)          # shape: [2*NV]
+            debug_tensor(unary_theta, "unary_theta", filename="debug.log")
+            p1_unary = torch.softmax(unary_theta, dim=1)[:,1]
+            debug_tensor(p1_unary, "p1_unary", filename="debug.log")
+
+            unary_theta = unary_theta.flatten()
+           
+            # pairwise params already computed (4 per pairwise factor)
+            #pairwise_theta = self.mlp_pairwise(x_pairwise).flatten() # shape: [4*n_pair]
+            
+            x = torch.cat([unary_theta, pairwise_theta], dim=0)
+            
+            #print("theta_flat", theta_flat.shape, "y_ss", data.y_ss.shape)
+            #print("diff", theta_flat.shape[0] - data.y_ss.shape[0])
 
 
             # mapping
-            if self.mapping_aggr=="mean":
-                x = torch_scatter.scatter_mean(x[data.fg_map[:,0]], data.fg_map[:,1],dim=0)
-            if self.mapping_aggr=="max":
-                x,_ = torch_scatter.scatter_max(x[data.fg_map[:,0]], data.fg_map[:,1],dim=0)
-            if self.mapping_aggr=="gat":
-                M = data.fg_map#[:,[1,0]]
-                if M[:,1].max() >= x.shape[0]:
-                    x = torch.nn.functional.pad(x, (0,0,0,M.max() - x.shape[0]+1), "constant", 0)
-                x = self.mapping(x, M.T)
+            #if self.mapping_aggr=="mean":
+            #    x = torch_scatter.scatter_mean(x[data.fg_map[:,0]], data.fg_map[:,1],dim=0)
+            #if self.mapping_aggr=="max":
+            #    x,_ = torch_scatter.scatter_max(x[data.fg_map[:,0]], data.fg_map[:,1],dim=0)
+            #if self.mapping_aggr=="gat":
+            #    M = data.fg_map#[:,[1,0]]
+            #    if M[:,1].max() >= x.shape[0]:
+            #        x = torch.nn.functional.pad(x, (0,0,0,M.max() - x.shape[0]+1), "constant", 0)
+            #    x = self.mapping(x, M.T)
 
-            print(_x.shape[0] - data.y_ss.shape[0])
-            print(x.shape)
+            #print(_x.shape[0] - data.y_ss.shape[0])
+            #print(x.shape)
 
-        x = self.efc(x, data)
-        print("after efc ", x.shape)
+        #x = self.efc(x, data)
+        #print("after efc ", x.shape)
 
 
         if inference in (None, "none", "theta", "no_inference"):
@@ -139,6 +143,8 @@ class GCN_MRF_v5(torch.nn.Module):
         if self.normalize_theta:
             x = (x - x.min()) / (x.max() - x.min())
         if inference == "loopy_belief_propagation":
-            return loopy_belief_propagation(x, torch.zeros_like(x), data.lbp_edges, max_iter=self.bp_max_iter, tol=self.bp_tol, damping=self.bp_damping), x
+            lbp_res = loopy_belief_propagation(x, torch.zeros_like(x), data.lbp_edges, max_iter=self.bp_max_iter, tol=self.bp_tol, damping=self.bp_damping)
+            debug_tensor(lbp_res.mu_v.reshape(NV,2), "mu_v (reshaped)", filename="debug.log")
+            return lbp_res, x
         if inference == "naive_mean_field":
             return naive_mean_field(x, data.nmf_edges, max_iter=self.bp_max_iter, tol=self.bp_tol, damping=self.bp_damping), x

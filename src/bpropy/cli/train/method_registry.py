@@ -229,6 +229,37 @@ def _loss_spec_factor_inference(
     _apply_regularizers(spec, adapter, batch, pred, labels, cfg)
     return spec
 
+def _loss_spec_variable_inference(
+    adapter: MethodAdapter,
+    batch: Any,
+    pred: Any,
+    labels: torch.Tensor,
+    cfg: Dict[str, Any],
+    loss_name_override: Optional[str] = None,
+) -> LossSpec:
+    """
+    pred is (inference_res, theta). We decide which tensor to feed into the loss:
+      - if loss_name endswith "_logits": use theta
+      - else: use inference_res.mu
+    """
+    loss_name = _pick_loss_name(adapter, cfg, loss_name_override)
+    inference_res, theta = _as_inference_tuple(pred)
+
+    target = labels
+    if loss_name in ("mse", "l1"):
+        target = target.float()
+
+    pred_used = theta if loss_name.endswith("_logits") else (inference_res, theta)
+
+    spec = LossSpec(
+        pred=pred_used,
+        target=target,
+        loss_name=loss_name,
+        loss_kwargs={"data": batch, **cfg.get("loss", {}).get("args", {})},
+    )
+    _apply_regularizers(spec, adapter, batch, pred, labels, cfg)
+    return spec
+
 # ----------------------------
 # Greedy scoring functions
 # ----------------------------
@@ -419,6 +450,15 @@ _METHOD_FACTOR_MARGINALS = MethodAdapter(
     decimation_adapter_fn=_decimation_adapter_default,
 )
 
+_METHOD_VARIABLE_MARGINALS = MethodAdapter(
+    forward_fn=_forward_factor_inference,
+    loss_spec_fn=_loss_spec_variable_inference,
+    greedy_scores_fn=_greedy_scores_factor_inference,
+    decimation_backend_fn=_decimation_backend_factor_marginals,
+    decimation_adapter_fn=_decimation_adapter_default,
+)
+
+
 _METHOD_HYBRID_FACTOR_LOGITS = MethodAdapter(
     forward_fn=_forward_hybrid_theta,
     loss_spec_fn=_loss_spec_factor_logits,
@@ -436,6 +476,8 @@ METHOD_REGISTRY: Dict[str, MethodAdapter] = {
     "hetero_factor_logits": _METHOD_FACTOR_LOGITS,
 
     "factor_marginals": _METHOD_FACTOR_MARGINALS,
+    "variable_marginals": _METHOD_VARIABLE_MARGINALS,
+
     "hetero_factor_marginals": _METHOD_FACTOR_MARGINALS,
     "hetero_factor_marginals": _METHOD_FACTOR_MARGINALS,  # (typo-safe)
 

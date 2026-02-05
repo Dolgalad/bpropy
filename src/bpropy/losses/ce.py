@@ -257,6 +257,13 @@ def _p_true_from_marginals(mu: torch.Tensor, strides: torch.Tensor, y_ss: torch.
     global_labels = _global_labels_from_y_ss(y_ss, m_idx, nF)
     return mu.clamp_min(eps)[global_labels]  # [nF]
 
+@register_loss("vce")
+def loss_variable_ce_from_marginals_factor_sizes(pred, target, *, data, reduction="mean", eps=1e-8):
+    inference, theta = pred
+    mu = inference.mu_v.reshape(-1,2)[:,1]
+    return torch.nn.functional.binary_cross_entropy(mu, target.float())
+
+
 @register_loss("fce")
 def loss_factor_ce_from_marginals_factor_sizes(pred, target, *, data, reduction="mean", eps=1e-8):
     inference, theta = pred
