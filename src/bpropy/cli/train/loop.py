@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import os
+import json
 import time
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional, Tuple
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -59,55 +61,6 @@ def build_optimizer(cfg: Dict[str, Any], model: torch.nn.Module) -> torch.optim.
 
     raise ValueError(f"Unknown optimizer '{name}'")
 
-#def build_scheduler(cfg: Dict[str, Any], optimizer):
-#    sch_cfg = cfg["train"]["scheduler"]
-#    if isinstance(sch_cfg, dict):
-#        name = sch_cfg["name"].lower()
-#        args = tuple(sch_cfg.get("args", ()))
-#        kwargs = dict(sch_cfg.get("kwargs", {}))
-#
-#        if name.lower() == "reducelronplateau":
-#            return torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, *args, **kwargs)
-#        if name.lower() == "cosineannealinglr":
-#            return torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, *args, **kwargs)
-#        if name.lower() == "cosineannealingwarmrestarts":
-#            return torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, *args, **kwargs)
-#        if name.lower() == "multiplicativelr":
-#            kwargs["lr_lambda"] = eval(kwargs["lr_lambda"])
-#            return torch.optim.lr_scheduler.MultiplicativeLR(optimizer, *args, **kwargs)
-#
-#    if isinstance(sch_cfg, list):
-#        schedulers = []
-#        for sch_k in sch_cfg:
-#            name = sch_k["name"].lower()
-#            args = tuple(sch_k.get("args", ()))
-#            kwargs = dict(sch_k.get("kwargs", {}))
-#            if name.lower() == "reducelronplateau":
-#                schedulers.append(torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, *args, **kwargs))
-#            if name.lower() == "cosineannealinglr":
-#                schedulers.append(torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, *args, **kwargs))
-#            if name.lower() == "cosineannealingwarmrestarts":
-#                schedulers.append(torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, *args, **kwargs))
-#            if name.lower() == "multiplicativelr":
-#                if "lr_lambda" in kwargs:
-#                    kwargs["lr_lambda"] = eval(kwargs["lr_lambda"])
-#                schedulers.append(torch.optim.lr_scheduler.MultiplicativeLR(optimizer, *args, **kwargs))
-#
-#        return schedulers
-#    raise ValueError(f"Unknown scheduler '{name}'")
-
-#def _apply_lr_schedulers(cfg: Dict[str, Any], schedulers, val):
-#    if isinstance(schedulers, list):
-#        for sch in schedulers:
-#            if isinstance(sch, torch.optim.lr_scheduler.ReduceLROnPlateau):
-#                sch.step(val)
-#            else:
-#                sch.step()
-#    else:
-#        if isinstance(schedulers, torch.optim.lr_scheduler.ReduceLROnPlateau):
-#            schedulers.step(val)
-#        else:
-#            schedulers.step()
 
 def compute_loss_from_spec(
     spec,
@@ -192,40 +145,29 @@ def train_one_epoch(
 
         # debugging
         NV = (data.bipartite == 0).sum().item()
-        #print("theta shape = ", pred[1].shape)
-        #print("y_ss shape  = ", data.y_ss.shape)
-        #print("theta[y_ss==1].mean - theta[y_ss==0].mean = ", pred[1][data.y_ss == 1].mean() - pred[1][data.y_ss == 0].mean())
-        scores = pred[0].mu_v.reshape(NV,2)[:,1].detach().cpu().numpy()
-        #print("scores.shape = ", scores.shape)
-        #print("y.shape = ", y.shape)
-        #print("y mean (fraction of 1s) =", y.float().mean().item())
-        #print("y_ss mean (fraction of 1s) =", data.y_ss.float().mean().item())
+        if isinstance(pred, tuple):
+            scores = pred[0].mu_v.reshape(NV,2)[:,1].detach().cpu().numpy()
 
-        _0_idx, _1_idx = (y == 0).cpu().numpy(), (y == 1).cpu().numpy()
+            _0_idx, _1_idx = (y == 0).cpu().numpy(), (y == 1).cpu().numpy()
 
-        _0_scores_mean, _0_scores_std, _1_scores_mean, _1_scores_std = (
-                np.mean( scores[_0_idx] ),
-                np.std( scores[_0_idx] ),
-                np.mean( scores[_1_idx] ),
-                np.std( scores[_1_idx] ),
+            _0_scores_mean, _0_scores_std, _1_scores_mean, _1_scores_std = (
+                    np.mean( scores[_0_idx] ),
+                    np.std( scores[_0_idx] ),
+                    np.mean( scores[_1_idx] ),
+                    np.std( scores[_1_idx] ),
 
-                )
-        _0_theta_mean = pred[1][data.y_ss == 0].mean().item()
-        _1_theta_mean = pred[1][data.y_ss == 1].mean().item()
+                    )
+            _0_theta_mean = pred[1][data.y_ss == 0].mean().item()
+            _1_theta_mean = pred[1][data.y_ss == 1].mean().item()
 
-        #print("scores[y==1].mean - scores[y==0].mean = ", _1_scores_mean - _0_scores_mean)
-        #print("scores[y==0].mean = ", _0_scores_mean )
-        #print("scores[y==1].mean = ", _1_scores_mean )
-        mu_v = pred[0].mu_v.reshape(NV,2)
-        #print("mu_v[:,0].mean = " , mu_v[:,0].mean())
-        #print("mu_v[:,1].mean = " , mu_v[:,1].mean())
+            mu_v = pred[0].mu_v.reshape(NV,2)
 
-        score_deltas.append(_1_scores_mean - _0_scores_mean)
-        theta_deltas.append(_1_theta_mean - _0_theta_mean)
+            score_deltas.append(_1_scores_mean - _0_scores_mean)
+            theta_deltas.append(_1_theta_mean - _0_theta_mean)
 
-        if torch.any(mu_v < 0):
-            print("negative probabilities")
-            break
+            if torch.any(mu_v < 0):
+                print("negative probabilities")
+                break
 
         bar.next()
         bar.suffix = f" loss: {np.mean(losses):.3f} sgap: {np.mean(score_deltas):.3f} tgap: {np.mean(theta_deltas):.3f}"
@@ -338,6 +280,139 @@ def validate_one_epoch(
             eld)
 
 
+def objective_value(pb, sol: np.ndarray) -> float:
+    """Objective value for a problem solution.
+
+    Prefer the problem weights/objective when available. Fall back to the
+    number of selected variables to keep the old unweighted behavior valid.
+    """
+    if isinstance(sol, torch.Tensor):
+        s = sol.detach().cpu().numpy()
+    elif hasattr(sol, "x"):
+        s = np.asarray(sol.x, dtype=np.float64)
+    else:
+        s = np.asarray(sol, dtype=np.float64)
+    s = np.asarray(s, dtype=np.float64)
+
+    if hasattr(pb, "w"):
+        return float(np.dot(np.asarray(pb.w, dtype=np.float64), s))
+    if hasattr(pb, "objective"):
+        return float(pb.objective(s))
+    return float(s.sum())
+
+
+def relative_objective_gap(
+    obj_true: float,
+    obj_pred: float,
+    maximize: bool,
+    eps: float = 1e-8,
+) -> float:
+    denom = max(abs(obj_true), eps)
+    if maximize:
+        return (obj_true - obj_pred) / denom
+    return (obj_pred - obj_true) / denom
+
+
+def _solution_array(sol: Any) -> np.ndarray:
+    if isinstance(sol, torch.Tensor):
+        return sol.detach().cpu().numpy()
+    if hasattr(sol, "x"):
+        return np.asarray(sol.x)
+    return np.asarray(sol)
+
+
+def _ensure_greedy_decimation_cfg(cfg: Dict[str, Any]) -> None:
+    cfg.setdefault("eval", {})
+    cfg["eval"].setdefault("greedy_decimation", {})
+    cfg["eval"]["greedy_decimation"].setdefault("args", {})
+    cfg["eval"]["greedy_decimation"].setdefault(
+        "adapter", {"pick_mode": "min_entropy", "value_mode": "argmax"}
+    )
+    cfg["eval"]["greedy_decimation"]["adapter"].setdefault("pick_mode", "min_entropy")
+    cfg["eval"]["greedy_decimation"]["adapter"].setdefault("value_mode", "argmax")
+
+
+def ms(x):
+    a = np.asarray(x, dtype=np.float64)
+    if a.size == 0:
+        return 0.0, 0.0
+    if a.size == 1:
+        return float(a.mean()), 0.0
+    return float(a.mean()), float(a.std(ddof=1))
+
+
+def summarize_method(d: Dict[str, list]) -> Dict[str, float]:
+    out = {}
+    for k, vals in d.items():
+        mean, std = ms(vals)
+        out[f"{k}_mean"] = mean
+        out[f"{k}_std"] = std
+    return out
+
+
+def build_eval_loss_stats(eval_losses: Dict[str, list]) -> Dict[str, Dict[str, float]]:
+    out = {}
+    for name, vals in eval_losses.items():
+        mean, std = ms(vals)
+        out[name] = {"mean": mean, "std": std}
+    return out
+
+
+def atomic_write_json(path: str, payload: Dict[str, Any]) -> None:
+    tmp_path = path + ".tmp"
+    with open(tmp_path, "w") as f:
+        json.dump(payload, f, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_path, path)
+
+
+def _build_test_payload(
+    *,
+    status: str,
+    instance_stats: list,
+    summary_lists: Dict[str, Dict[str, list]],
+    eval_losses: Dict[str, list],
+    n_ss: list,
+) -> Dict[str, Any]:
+    n_ss_mean, n_ss_std = ms(n_ss)
+    return {
+        "summary": {
+            "count": len(instance_stats),
+            "status": status,
+            "methods": {
+                "greedy_pred": summarize_method(summary_lists["greedy_pred"]),
+                "entropy_greedy": summarize_method(summary_lists["entropy_greedy"]),
+                "guided_decimation": summarize_method(summary_lists["guided_decimation"]),
+            },
+            "eval_losses": build_eval_loss_stats(eval_losses),
+            "num_ss_mean": n_ss_mean,
+            "num_ss_std": n_ss_std,
+        },
+        "instances": instance_stats,
+    }
+
+
+def _run_best_of_n_decimation(
+    *,
+    pb,
+    backend,
+    padapter,
+    n_samples: int,
+    maximize: bool,
+) -> np.ndarray:
+    best_val = None
+    best_sol = None
+    for _ in range(max(1, int(n_samples))):
+        sol = greedy_decimation(pb, backend, padapter)
+        sol_arr = _solution_array(sol)
+        val = objective_value(pb, sol_arr)
+        if best_val is None or (maximize and val > best_val) or ((not maximize) and val < best_val):
+            best_val = val
+            best_sol = sol_arr
+    return np.asarray(best_sol)
+
+
 def final_test_eval(
     cfg: Dict[str, Any],
     adapter: MethodAdapter,
@@ -345,140 +420,244 @@ def final_test_eval(
     loader,
     device: torch.device,
     log_dir: str,
+    output_json: Optional[str] = None,
 ) -> str:
-    model.eval()
-    losses, gaps, dec_gaps = [], [], []
-    eval_loss_names = [eval_loss_cfg["name"] for eval_loss_cfg in cfg.get("eval", {}).get("losses", [])]
-    eval_losses = {n: [] for n in eval_loss_names}
-    t_pred, t_grd, t_tot, t_pre, t_e2e, t_gd = [], [], [], [], [], []
-    maximize = bool(cfg.get("problem", {}).get("maximize", True))
+    """Final test evaluation with per-instance JSON logging.
 
-    c = 0
+    Logged solve methods:
+      1. greedy_pred: greedy projection guided by one forward pass scores.
+      2. entropy_greedy: greedy_decimation with min_entropy selection and
+         run_every = infinity, so inference is performed only once.
+      3. guided_decimation: greedy_decimation with min_entropy selection and
+         run_every = 1, so marginals/scores are refreshed after each fixing step.
+
+    The JSON schema mirrors the flow test evaluator: it writes a running JSON
+    after each instance and a completed JSON at the end.
+    """
+    model.eval()
+
+    eval_loss_names = [e["name"] for e in cfg.get("eval", {}).get("losses", [])]
+    eval_losses = {n: [] for n in eval_loss_names}
+    n_ss = []
+    maximize = bool(cfg.get("problem", {}).get("maximize", True))
+    test_limit = int(cfg.get("eval", {}).get("test_limit", 20000))
+
+    run_cfg = cfg.setdefault("run", {})
+    base = run_cfg.get("run_name") or run_cfg.get("name") or cfg.get("run_name") or "run"
+    seed = int(cfg.get("seed", 0))
+    unique_name = f"{base}_seed{seed}"
+    run_cfg["run_name"] = unique_name
+    run_cfg["name"] = unique_name
+    cfg["run_name"] = unique_name
+
+    if output_json is not None:
+        out_path = output_json
+        out_dir = os.path.dirname(out_path)
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+    else:
+        paths = make_run_paths(cfg)
+        log_dir = paths.log_dir
+        os.makedirs(log_dir, exist_ok=True)
+        out_path = os.path.join(log_dir, "test_eval.json")
+
+    print("IN TEST logdir = ", os.path.dirname(out_path) or log_dir)
+
+    _ensure_greedy_decimation_cfg(cfg)
+    gd_cfg = cfg["eval"]["greedy_decimation"]
+    n_samples = int(gd_cfg.get("adapter", {}).get("n_samples", 1))
+
+    instance_stats = []
+    summary_lists = {
+        "greedy_pred": {"obj": [], "gap": [], "forward_t": [], "decode_t": [], "total_t": []},
+        "entropy_greedy": {"obj": [], "gap": [], "forward_t": [], "decode_t": [], "total_t": []},
+        "guided_decimation": {"obj": [], "gap": [], "forward_t": [], "decode_t": [], "total_t": []},
+    }
 
     with torch.no_grad():
         bar = Bar("[Test]          ", max=len(loader))
-        for pb, data, y in CUDAPrefetcher(loader, device):
-            print("data.fg_map shape : ", data.fg_map.shape, data.fg_map[:,1].max())
+
+        for idx, (pb, data, y) in enumerate(CUDAPrefetcher(loader, device)):
+            pb0 = pb[0] if isinstance(pb, (list, tuple)) else pb
+            stem = None
+            if hasattr(loader, "dataset") and hasattr(loader.dataset, "stems"):
+                try:
+                    stem = Path(loader.dataset.stems[idx]).name
+                except Exception:
+                    stem = None
+
+            pre_t = float(getattr(data, "preprocess_time_s", 0.0))
+            ref_val = objective_value(pb0, y)
+
+            # ----- shared forward pass -----
             _sync(device)
             t0 = time.perf_counter()
-
-            t1 = time.perf_counter()
             pred = adapter.forward_fn(model, data)
             _sync(device)
+            t1 = time.perf_counter()
+            shared_forward_t = t1 - t0
+
+            scores = adapter.greedy_scores_fn(pb, data, pred)
+            scores_np = np.asarray(scores)
+
+            # ----- greedy_pred -----
+            _sync(device)
             t2 = time.perf_counter()
-
-            scores = adapter.greedy_scores_fn(pb[0], data, pred)
+            greedy_pred_sol = pb0.greedy(scores=scores_np).x
+            _sync(device)
             t3 = time.perf_counter()
-            grd_sol = pb[0].greedy(scores=scores).x
-            t4 = time.perf_counter()
+            greedy_pred_decode_t = t3 - t2
+            greedy_pred_total_t = pre_t + shared_forward_t + greedy_pred_decode_t
 
-            # Greedy decimation
+            # ----- entropy_greedy: min_entropy, run_every = infinity -----
+            gd_cfg["args"]["run_every"] = 1000000
+            gd_cfg["adapter"]["pick_mode"] = "min_entropy"
+            gd_cfg["adapter"]["value_mode"] = "argmax"
+            gd_cfg["args"]["max_iter"] = 10
+            gd_cfg["args"]["damping"] = 0.5
+            gd_cfg["args"]["neg_inf"] = -100.
+
+            _sync(device)
+            t4 = time.perf_counter()
+            backend = adapter.decimation_backend_fn(pb0, data, pred, cfg, device=device)
+            padapter = adapter.decimation_adapter_fn(pb0, cfg)
+            entropy_greedy_sol = _run_best_of_n_decimation(
+                pb=pb0,
+                backend=backend,
+                padapter=padapter,
+                n_samples=n_samples,
+                maximize=maximize,
+            )
+            _sync(device)
             t5 = time.perf_counter()
-            backend = adapter.decimation_backend_fn(pb[0], data, pred, cfg, device=device)
-            padapter = adapter.decimation_adapter_fn(pb[0], cfg)
-            best_val = None
-            dec_sol = None
-            n_samples = cfg.get("eval", {}).get("greedy_decimation", {}).get("adapter", {}).get("n_samples", 1)
-            for _ in range(n_samples):
-                _dec_sol = greedy_decimation(pb[0], backend, padapter)
-                dec_val = float(np.dot(pb[0].w, _dec_sol))
-                print("sample val ", dec_val)
-                if best_val is None:
-                    best_val = dec_val
-                    dec_sol = _dec_sol
-                else:
-                    if maximize and (best_val < dec_val):
-                        best_val = dec_val
-                        dec_sol = _dec_sol
-                    if (not maximize) and (best_val > dec_val):
-                        best_val = dec_val
-                        dec_sol = _dec_sol
+            entropy_greedy_decode_t = t5 - t4
+            entropy_greedy_total_t = pre_t + shared_forward_t + entropy_greedy_decode_t
+
+            # ----- guided_decimation: min_entropy, run_every = 1 -----
+            gd_cfg["args"]["run_every"] = 1
+            gd_cfg["adapter"]["pick_mode"] = "min_entropy"
+            gd_cfg["adapter"]["value_mode"] = "argmax"
+            gd_cfg["args"]["max_iter"] = 10
+            gd_cfg["args"]["damping"] = 0.5
+            gd_cfg["args"]["neg_inf"] = -100.
+
+            _sync(device)
             t6 = time.perf_counter()
-            
+            backend = adapter.decimation_backend_fn(pb0, data, pred, cfg, device=device)
+            padapter = adapter.decimation_adapter_fn(pb0, cfg)
+            guided_decimation_sol = _run_best_of_n_decimation(
+                pb=pb0,
+                backend=backend,
+                padapter=padapter,
+                n_samples=n_samples,
+                maximize=maximize,
+            )
+            _sync(device)
+            t7 = time.perf_counter()
+            guided_decimation_decode_t = t7 - t6
+            guided_decimation_total_t = pre_t + shared_forward_t + guided_decimation_decode_t
+
+            # ----- loss values from shared forward -----
             spec = adapter.loss_spec_fn(adapter, data, pred, y, cfg)
-           
-            # In eval, backward_fn should be None; if not, you can log NaN or skip loss
             loss = compute_loss_from_spec(spec, loss_registry=LOSS_REGISTRY)
-            losses.append(float(loss.detach().cpu().item()))
 
             for eval_loss_cfg in cfg.get("eval", {}).get("losses", []):
                 name = eval_loss_cfg["name"]
                 args = eval_loss_cfg.get("args", {})
-                eval_loss = LOSS_REGISTRY[name](
-                        pred,
-                        y,
-                        data=data,
-                        **args,
-                        )
-                eval_losses[name].append(eval_loss.detach().float().cpu().item())
+                val = LOSS_REGISTRY[name](pred, y, data=data, **args)
+                eval_losses[name].append(float(val.detach().cpu().item()))
 
+            if hasattr(data, "lbp_edges"):
+                n_ss += data.lbp_edges.n_ss.detach().cpu().tolist()
+            if hasattr(data, "nmf_edges"):
+                n_ss += data.nmf_edges.n_ss.detach().cpu().tolist()
 
-            gap = float(
-                gap_from_solution(
-                    y_true_sum=float(y.sum().item()),
-                    y_pred_sum=float(grd_sol.sum()),
-                    maximize=maximize,
-                    eps=1e-8,  # match your timed eval path :contentReference[oaicite:11]{index=11}
-                )
+            greedy_pred_val = objective_value(pb0, greedy_pred_sol)
+            entropy_greedy_val = objective_value(pb0, entropy_greedy_sol)
+            guided_decimation_val = objective_value(pb0, guided_decimation_sol)
+
+            greedy_pred_gap = relative_objective_gap(ref_val, greedy_pred_val, maximize=maximize)
+            entropy_greedy_gap = relative_objective_gap(ref_val, entropy_greedy_val, maximize=maximize)
+            guided_decimation_gap = relative_objective_gap(ref_val, guided_decimation_val, maximize=maximize)
+
+            instance_record = {
+                "instance_index": idx,
+                "instance_stem": stem,
+                "reference_objective": float(ref_val),
+                "loss": float(loss.detach().cpu().item()),
+                "preprocess_time_s": float(pre_t),
+                "greedy_pred": {
+                    "objective": float(greedy_pred_val),
+                    "gap": float(greedy_pred_gap),
+                    "forward_time_s": float(shared_forward_t),
+                    "decode_time_s": float(greedy_pred_decode_t),
+                    "total_time_s": float(greedy_pred_total_t),
+                },
+                "entropy_greedy": {
+                    "objective": float(entropy_greedy_val),
+                    "gap": float(entropy_greedy_gap),
+                    "forward_time_s": float(shared_forward_t),
+                    "decode_time_s": float(entropy_greedy_decode_t),
+                    "total_time_s": float(entropy_greedy_total_t),
+                    "run_every": 1000000,
+                    "pick_mode": "min_entropy",
+                    "value_mode": "argmax",
+                },
+                "guided_decimation": {
+                    "objective": float(guided_decimation_val),
+                    "gap": float(guided_decimation_gap),
+                    "forward_time_s": float(shared_forward_t),
+                    "decode_time_s": float(guided_decimation_decode_t),
+                    "total_time_s": float(guided_decimation_total_t),
+                    "run_every": 1,
+                    "pick_mode": "min_entropy",
+                    "value_mode": "argmax",
+                },
+            }
+            instance_stats.append(instance_record)
+
+            for name, val, gap, dec_t, total_t in [
+                ("greedy_pred", greedy_pred_val, greedy_pred_gap, greedy_pred_decode_t, greedy_pred_total_t),
+                ("entropy_greedy", entropy_greedy_val, entropy_greedy_gap, entropy_greedy_decode_t, entropy_greedy_total_t),
+                ("guided_decimation", guided_decimation_val, guided_decimation_gap, guided_decimation_decode_t, guided_decimation_total_t),
+            ]:
+                summary_lists[name]["obj"].append(float(val))
+                summary_lists[name]["gap"].append(float(gap))
+                summary_lists[name]["forward_t"].append(float(shared_forward_t))
+                summary_lists[name]["decode_t"].append(float(dec_t))
+                summary_lists[name]["total_t"].append(float(total_t))
+
+            partial_payload = _build_test_payload(
+                status="running",
+                instance_stats=instance_stats,
+                summary_lists=summary_lists,
+                eval_losses=eval_losses,
+                n_ss=n_ss,
             )
+            atomic_write_json(out_path, partial_payload)
 
-            dec_gap = float(
-                gap_from_solution(
-                    y_true_sum=float(y.sum().item()),
-                    y_pred_sum=float(dec_sol.sum()),
-                    maximize=maximize,
-                    eps=1e-8,
-                )
+            print()
+            print(
+                f"[test {idx:04d}] ref={ref_val:.4f} | "
+                f"GRD gap={greedy_pred_gap:.4f} t={greedy_pred_total_t:.4f}s | "
+                f"EGG gap={entropy_greedy_gap:.4f} t={entropy_greedy_total_t:.4f}s | "
+                f"GD gap={guided_decimation_gap:.4f} t={guided_decimation_total_t:.4f}s"
             )
-
-            print(f"gap : {gap}, dec_gap : {dec_gap}")
-            print("\t", float(y.sum().item()), float(dec_sol.sum()))
-
-            gaps.append(gap)
-            dec_gaps.append(dec_gap)
-            t_pred.append(t2 - t1)
-            t_grd.append(t4 - t3)
-            t_tot.append(t4 - t0)
-            t_pre.append(float(getattr(data, "preprocess_time_s", 0.0)))
-            t_gd.append(t6 - t5)
-            t_e2e.append(t_pre[-1] + (t4 - t0))
 
             bar.next()
-
-            #c += 1 
-            #if c >= 10:
-            #    break
+            if len(instance_stats) >= test_limit:
+                break
 
         bar.finish()
 
-    def ms(x):
-        a = np.asarray(x, dtype=np.float64)
-        if a.size == 0:
-            return 0.0, 0.0
-        if a.size == 1:
-            return float(a.mean()), 0.0
-        return float(a.mean()), float(a.std(ddof=1))
-
-    eval_loss_stats = {}
-    for n, vals in eval_losses.items():
-        mean, std = ms(vals)
-        eval_loss_stats[n] = {"mean": ms(vals)[0], "std": ms(vals)[1]}
-
-    stats = EvalStats(
-        loss_mean=ms(losses)[0], loss_std=ms(losses)[1],
-        gap_mean=ms(gaps)[0], gap_std=ms(gaps)[1],
-        dec_gap_mean=ms(dec_gaps)[0], dec_gap_std=ms(dec_gaps)[1],
-        time_pred_mean=ms(t_pred)[0], time_pred_std=ms(t_pred)[1],
-        time_greedy_mean=ms(t_grd)[0], time_greedy_std=ms(t_grd)[1],
-        time_total_mean=ms(t_tot)[0], time_total_std=ms(t_tot)[1],
-        time_preprocess_mean=ms(t_pre)[0], time_preprocess_std=ms(t_pre)[1],
-        time_end_to_end_mean=ms(t_e2e)[0], time_end_to_end_std=ms(t_e2e)[1],
-        time_gd_mean=ms(t_gd)[0], time_gd_std=ms(t_gd)[1],
-
-        count=len(losses),
-        eval_losses=eval_loss_stats,
+    final_payload = _build_test_payload(
+        status="completed",
+        instance_stats=instance_stats,
+        summary_lists=summary_lists,
+        eval_losses=eval_losses,
+        n_ss=n_ss,
     )
-    out_path = write_test_eval_json(log_dir, stats, filename="test_eval.json")
+    atomic_write_json(out_path, final_payload)
     return out_path
 
 
@@ -487,9 +666,24 @@ def run_training(cfg: Dict[str, Any]) -> None:
     torch.manual_seed(int(cfg.get("seed", 0)))
     np.random.seed(int(cfg.get("seed", 0)))
 
+    print("SEED value = ", cfg.get("seed", 0))
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # run dirs + logger
+    run_cfg = cfg.setdefault("run", {})
+    base = run_cfg.get("run_name") or run_cfg.get("name") or cfg.get("run_name") or "run"
+    seed = int(cfg.get("seed", 0))
+    task_id = os.environ.get("SLURM_ARRAY_TASK_ID")  # None if not an array job
+
+    suffix = f"seed{seed}"
+    unique_name = f"{base}_{suffix}"
+
+    # write back to whatever key make_run_paths uses (cover both common conventions)
+    run_cfg["run_name"] = unique_name
+    run_cfg["name"] = unique_name
+    cfg["run_name"] = unique_name
+
     paths = make_run_paths(cfg)
     logger = TrainLogger(paths, cfg)
     logger.write_hparams(extra={"device": str(device)})
@@ -541,6 +735,7 @@ def run_training(cfg: Dict[str, Any]) -> None:
         if len(eloss):
             eloss_out = " | ".join(f"{n} {eloss[n]:.4f}" for n in eloss.keys())
             epoch_out += " | " + eloss_out
+            print("LR = ", str(list(optimizer.param_groups)[0]["lr"]))
             logger.add_scalars("extra_loss", eloss, epoch)
         print(epoch_out)
 

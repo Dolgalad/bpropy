@@ -1,0 +1,138 @@
+{
+  "schema_version": 1,
+
+  "slurm": {
+    "job_name": "mis_n100_p0.15_eb_lbp_flow_q1_vce",
+    "time": "20:00:00",
+    "cpus_per_task": 8,
+    "gpus": 1,
+    "output": "slurm/out/%x_%j.out",
+    "error": "slurm/err/%x_%j.err",
+    "env": { "OMP_NUM_THREADS": "8" }
+  },
+
+  "run": {
+    "name": "mis_n100_p0.15_eb_lbp_flow_q1_vce",
+    "output_dir": "runs",
+    "resume": null,
+    "save_dirname": "checkpoints",
+    "tags": ["mis", "lbp", "vce", "flow", "q1"]
+  },
+
+  "seed": 0,
+
+  "flow": {
+    "source_prob": 0.5,
+    "num_validation_times": 5 ,
+    "num_test_times": 8,
+    "append_t_feature": true,
+    "loss_target": "q1",
+    "target_space": "prob"
+  },
+
+  "data": {
+    "problem": "mis",
+    "root": "datasets/problems/mis/mis_n100_p0.15",
+    "split": "train",
+    "val_split": "val",
+    "test_split": "test",
+
+    "feature_mode": "EB",
+    "hetero": false,
+    "refresh": false,
+
+    "precompute": {
+      "lbp": true,
+      "ss": true,
+      "nmf": false
+    },
+
+    "loader": {
+      "batch_size": 32,
+      "val_batch_size": 32,
+      "num_workers": 2,
+      "prefetch": 2,
+      "pin_memory": true
+    }
+  },
+
+  "problem": {
+    "ground_truth": {
+      "solver": "kamis",
+      "args": {}
+    },
+    "maximize": true
+  },
+
+  "model": {
+    "name": "GCN_MRF_v4",
+    "args": { "in_dim": 56, "hidden_dim": 64, "n_layers": 4, "inference": "loopy_belief_propagation", "bp_max_iter": 10, "bp_damping": 0.5 , "factor_sizes": [1,2]},
+    "init_from": null
+  },
+
+  "loss": {
+    "name": "vce",
+    "args": {}
+  },
+
+  "train": {
+    "epochs": 200000,
+    "steps_per_epoch": 200000,
+    "val_steps": 100,
+    "method": "flow_variable_marginals",
+
+    "optimizer": {
+      "name": "adamw",
+      "args": { "lr": 0.001, "weight_decay": 1e-4 }
+    },
+    "warmup": {
+	    "enabled": true ,
+	    "steps": 1000 ,
+	    "start_factor": 0.05 ,
+	    "method": "linear"
+    },
+
+    "scheduler": {
+	    "name": "cosineannealing",
+	    "kwargs": {"T_max": 200, "eta_min": 1e-5}
+    },
+
+    "grad_clip_norm": 1.0,
+    "amp": true,
+
+    "early_stop": {
+      "enabled": true,
+      "metric": "val/gap",
+      "mode": "min",
+      "patience": 100,
+      "min_delta": 0.0001
+    },
+
+    "checkpoint": {
+      "save_best": true,
+      "metric": "val/gap",
+      "mode": "min",
+      "every_n_steps": 5000
+    }
+  },
+
+  "eval": {
+    "metrics": ["gap", "accuracy"],
+    "every_n_steps": 5000,
+    "splits": ["val", "test"],
+    "greedy_decimation": {
+	    "mode": "loopy_belief_propagation",
+	    "args": {"max_iter": 10, "damping": 0.5, "neg_inf": -100.0},
+	    "adapter": { "pick_mode": "min_entropy", "value_mode": "argmax"}
+    }
+  },
+
+  "logging": {
+    "tensorboard": true,
+    "csv": true,
+    "console": {
+      "every_n_steps": 100
+    }
+  }
+}
+

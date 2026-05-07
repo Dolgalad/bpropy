@@ -18,9 +18,16 @@ dependencies = [
 ]
 
 [project.scripts]
+bpropy-park-test = "bpropy.cli.test_park:main"
 bpropy-datasets = "bpropy.cli.datasets:main"
 bpropy-train = "bpropy.cli.train:main"
 bpropy-test = "bpropy.cli.test:main"
+bpropy-test-nair = "bpropy.cli.test_nair:main"
+bpropy-diffusion-train = "bpropy.cli.diffusion:main"
+bpropy-diffusion-test = "bpropy.cli.diffusion.test:main"
+bpropy-flow-train = "bpropy.cli.flow:main"
+bpropy-flow-test = "bpropy.cli.flow.test:main"
+bpropy-ablation-inference-freq-max-iter = "bpropy.cli.ablation.inference_freq_max_iter_ablation:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

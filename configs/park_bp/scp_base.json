@@ -1,0 +1,44 @@
+{
+  "seed": 0,
+
+  "run": {
+    "run_name": "park_canonical_bp",
+    "log_dir": "runs/park_canonical_bp"
+  },
+
+  "data": {
+    "problem": "scp",
+    "root": "datasets/problems/scp/scp_n50_m50_k5",
+    "split": "train",
+    "val_split": "val",
+    "test_split": "test",
+
+    "feature_mode": "EB",
+    "hetero": false,
+    "refresh": false,
+
+    "precompute": {
+      "lbp": false,
+      "nmf": false
+    },
+
+    "loader": {
+      "batch_size": 32,
+      "val_batch_size": 32,
+
+      "num_workers": 2,
+      "prefetch": 2,
+      "pin_memory": true,
+      "persistent_workers": false,
+      "prefetch_factor": 2
+    }
+  },
+
+  "problem": {
+    "ground_truth": {
+      "solver": "scg3",
+      "args": {}
+    },
+    "maximize": false
+  }
+}

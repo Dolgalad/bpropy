@@ -279,48 +279,80 @@ class MIS(LPProblem, SerializableLPMixin):
         wsub = self.w[off:off + nV]
         return MIS(gsub, weights=wsub, cliques=Csub)
 
-    # ---- solvers (keep your specialized ones) ----
     def solve(
         self,
         verbose: bool = False,
         cliques=None,
         solver: str = "python-mip",
         relax_integrality: bool = False,
+        partial_solution: Optional[tuple] = None,
+        timelimit=None,
     ) -> Solution:
-
+    
         if cliques is None:
             cliques = self.C
-
+    
         slv = (solver or "python-mip").lower()
-
+    
+        if timelimit is None:
+            timelimit = np.inf
+    
         # specialized solvers
         if slv == "greedy":
+            if partial_solution is not None:
+                raise ValueError("MIS greedy solver does not support partial_solution.")
             return self.greedy()
-
+    
         if slv == "kamis":
+            if partial_solution is not None:
+                raise ValueError(
+                    "MIS KaMIS solver does not support partial_solution directly. "
+                    "Use a generic MILP solver such as --solver scip, gurobi, cbc, or python-mip "
+                    "for fix-and-solve evaluation."
+                )
+    
             with tempfile.TemporaryDirectory() as d:
                 graph_path = os.path.join(d, "graph.metis")
                 solution_path = os.path.join(d, "solution")
                 write_metis_graph(graph_path, self.g)
                 kamis_solve(graph_path, solution_path, verbose=verbose)
                 return solution_from_kamis(solution_path)
-
+    
         if slv == "cplex":
+            if partial_solution is not None:
+                # Let the generic LPProblem path handle bound fixing.
+                # The specialized docplex path below does not currently apply partial_solution.
+                A, lb, ub = self.linear_constraints_matrix(cliques=cliques)
+                return super().solve(
+                    config=LPSolveConfig(
+                        solver=slv,
+                        relax_integrality=relax_integrality,
+                        verbose=verbose,
+                        timelimit=timelimit,
+                    ),
+                    override_linear_constraints=(A, lb, ub),
+                    partial_solution=partial_solution,
+                )
+    
             if docplex_spec is None:
                 raise RuntimeError("CPLEX solver not found. Missing package 'docplex'")
             md = cplex_model(self, continuous_relaxation=relax_integrality, cliques=cliques)
             sol = md.solve()
             return Solution.from_solver("cplex", sol=sol, md=md)
-
-        # generic solvers, but MIS may override constraints via cliques
-        # Build override constraints matrix only if cliques != self.C (or always, your choice)
+    
+        # generic MILP solvers, with optional partial solution fixing
         A, lb, ub = self.linear_constraints_matrix(cliques=cliques)
-
+    
         return super().solve(
-            config=LPSolveConfig(solver=slv, relax_integrality=relax_integrality, verbose=verbose),
+            config=LPSolveConfig(
+                solver=slv,
+                relax_integrality=relax_integrality,
+                verbose=verbose,
+                timelimit=timelimit,
+            ),
             override_linear_constraints=(A, lb, ub),
+            partial_solution=partial_solution,
         )
-
     def constraints_for_scipy(self, cliques=None):
         # SciPy can take a single LinearConstraint with sparse A; better than list-of-rows.
         if cliques is None or cliques is self.C:

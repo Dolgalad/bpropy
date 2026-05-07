@@ -1,0 +1,39 @@
+{
+  "experiment_id": "inference_freq_max_iter_ablation",
+
+  "dataset": {
+    "dataset_id": "mis_n200-300_p0.15",
+    "test_config": "configs/train/mis/inference/mis_n200-300_p0.15/mis_n200-300_p0.15_nmf_fce.json"
+  },
+
+  "model": {
+    "model_id": "nmf_gd",
+    "model_type": "nmf",
+    "checkpoint": "runs/mis_n200-300_p0.15_nmf_fce_seed0/checkpoints/best.pt",
+    "seed": 0
+  },
+
+  "output": {
+    "root": "runs/inference_freq_max_iter_ablation",
+    "overwrite": false,
+    "resume": true
+  },
+
+  "ablation": {
+    "run_every_values": [1, 2, 4, 8, 16, 32, 64],
+    "bp_max_iter_values": [1, 2, 4, 8, 16, 32, 64],
+
+    "fixed_run_every_for_max_iter_ablation": 1,
+    "fixed_bp_max_iter_for_run_every_ablation": 10
+  },
+
+  "evaluation": {
+    "max_instances": 50,
+    "device": "cuda",
+    "save_every_instance": true,
+    "log_gd_trace": true,
+    "log_marginal_deltas": true,
+    "log_bp_residuals": true,
+    "log_solution": false
+  }
+}

@@ -6,11 +6,12 @@ from typing import Callable, Dict, List, Sequence, Set, Tuple
 import numpy as np
 import networkx as nx
 import torch
+import itertools
 
 from bpropy.mrf.factor_graph import FactorGraph
 
 Pair = Tuple[int, int]
-
+Scope = Tuple[int, ...]
 
 # ---------------------------------------------------------------------
 # Helpers
@@ -27,6 +28,12 @@ def _all_pairs(scope: Sequence[int]) -> List[Pair]:
         for b in range(a + 1, len(scope)):
             out.append(_sorted_pair(scope[a], scope[b]))
     return out
+
+def _all_k_subsets(scope: Sequence[int], k: int) -> List[Scope]:
+    scope = sorted(map(int, scope))
+    if k<=0 or len(scope) < k:
+        return []
+    return [tuple(c) for c in itertools.combinations(scope, k)]
 
 
 def _constraint_nodes_in_canonical_order(vcg) -> List[int]:
@@ -63,6 +70,15 @@ def _build_fg_from_pair_scopes(n_vars: int, pair_scopes: Sequence[Pair]) -> Fact
     )
     return fg
 
+def _build_fg_from_scopes(n_vars, scopes):
+    fg = FactorGraph()
+    fg.append_instance_from_scopes(
+            n_vars,
+            scopes=[list(map(int,s)) for s in scopes],
+            add_unaries=True,
+            )
+    return fg
+
 
 #def _unary_factor_node_by_var(fg: FactorGraph) -> Dict[int, int]:
 #    out: Dict[int, int] = {}
@@ -97,6 +113,13 @@ def _pair_factor_node_by_scope(fg: FactorGraph) -> Dict[Pair, int]:
             out[_sorted_pair(scope[0], scope[1])] = int(iF)  # <-- iF, not F
     return out
 
+def _factor_node_by_scope(fg):
+    out = {}
+    for iF,F in enumerate(fg.iter_factors()):
+        scope = tuple(map(int, fg.factor_variables(F)))
+        if len(scope) >= 2:
+            out[tuple(sorted(scope))] = int(iF)
+    return out
 
 def _compute_fg_factor_sizes(fg: FactorGraph) -> torch.Tensor:
     """
@@ -111,13 +134,13 @@ def _compute_fg_factor_sizes(fg: FactorGraph) -> torch.Tensor:
 # ---------------------------------------------------------------------
 # Mapping: VCGraph nodes -> approx FactorGraph *factor nodes*
 # ---------------------------------------------------------------------
-
 def _build_vc_to_apx_map(
-    *,
-    vcg,
-    fg_apx: FactorGraph,
-    keep_pairs: Set[Pair],
-) -> torch.Tensor:
+        *,
+        vcg,
+        fg_apx: FactorGraph,
+        keep_scopes: Set[Scope],
+        per_constraint_scopes: Callable[[List[int]], List[Scope]],
+    ) -> torch.Tensor:
     """
     fg_map shape [n_map, 2]:
       - src: VCGraph node id (indexes data.x rows)
@@ -132,7 +155,7 @@ def _build_vc_to_apx_map(
     con_nodes = _constraint_nodes_in_canonical_order(vcg)
 
     apx_unary = _unary_factor_node_by_var(fg_apx)
-    apx_pair = _pair_factor_node_by_scope(fg_apx)
+    apx_factor = _factor_node_by_scope(fg_apx)
 
     rows: List[Tuple[int, int]] = []
 
@@ -146,19 +169,37 @@ def _build_vc_to_apx_map(
     # Constraints -> included pairwise factors (many-to-one)
     for c in con_nodes:
         scope = sorted(int(v) for v in vcg.neighbors(c))
-        for p in _all_pairs(scope):
-            if p not in keep_pairs:
+        #for p in _all_pairs(scope):
+        #    if p not in keep_pairs:
+        for S in per_constraint_scopes(scope):
+            if S not in keep_scopes:
                 continue
-            Fp = apx_pair.get(p, None)
-            if Fp is None:
-                # Shouldn't happen if fg_apx was built from keep_pairs, but be safe.
+            #Fp = apx_pair.get(p, None)
+            #if Fp is None:
+            #    # Shouldn't happen if fg_apx was built from keep_pairs, but be safe.
+            #    continue
+            #rows.append((int(c), int(Fp)))
+            Fs = apx_factor.get(S, None)
+            if Fs is None:
                 continue
-            rows.append((int(c), int(Fp)))
-    for i,p in enumerate(keep_pairs):
-        Fp = apx_pair.get(p, None)
-        #print("\t", Fp, p)
-        rows.append((int(p[0]), int(Fp)))
-        rows.append((int(p[1]), int(Fp)))
+            rows.append((int(c), int(Fs)))
+    # Variables -> included approx factors (many-to-one)
+    apx_factor = {tuple(sorted(S)): Fs for S, Fs in apx_factor.items()}
+    sorted_scopes = sorted(
+                (tuple(sorted(S)) for S in keep_scopes),
+                    key=lambda s: (len(s), s)
+                    )
+    for S in sorted_scopes:
+        Fs = apx_factor.get(S, None)
+        if Fs is None:
+            continue
+        for v in S:
+            rows.append((int(v), int(Fs)))
+    #for i,p in enumerate(keep_pairs):
+    #    Fp = apx_pair.get(p, None)
+    #    #print("\t", Fp, p)
+    #    rows.append((int(p[0]), int(Fp)))
+    #    rows.append((int(p[1]), int(Fp)))
     r = torch.as_tensor(rows, dtype=torch.long)
     return r
 
@@ -187,7 +228,14 @@ def build_pairwise_factors(*, pb, vcg, fg_true: FactorGraph, approx: dict) -> Bu
     pair_scopes = sorted(pair_set)  # canonical order
     fg_apx = _build_fg_from_pair_scopes(n_vars, pair_scopes)
 
-    fg_map = _build_vc_to_apx_map(vcg=vcg, fg_apx=fg_apx, keep_pairs=set(pair_scopes))
+    #fg_map = _build_vc_to_apx_map(vcg=vcg, fg_apx=fg_apx, keep_pairs=set(pair_scopes))
+    keep_scopes: Set[Scope] = {tuple(p) for p in pair_scopes}
+    fg_map = _build_vc_to_apx_map(
+        vcg=vcg,
+        fg_apx=fg_apx,
+        keep_scopes=keep_scopes,
+        per_constraint_scopes=lambda s: [tuple(p) for p in _all_pairs(s)],
+    )
     fg_factor_sizes = _compute_fg_factor_sizes(fg_apx)
     return fg_apx, fg_map, fg_factor_sizes
 
@@ -224,10 +272,56 @@ def build_tree_cover(*, pb, vcg, fg_true: FactorGraph, approx: dict) -> BuilderO
 
     fg_apx = _build_fg_from_pair_scopes(n_vars, pair_scopes)
 
-    fg_map = _build_vc_to_apx_map(vcg=vcg, fg_apx=fg_apx, keep_pairs=set(pair_scopes))
+    #fg_map = _build_vc_to_apx_map(vcg=vcg, fg_apx=fg_apx, keep_pairs=set(pair_scopes))
+    keep_scopes: Set[Scope] = {tuple(p) for p in pair_scopes}
+    fg_map = _build_vc_to_apx_map(
+        vcg=vcg,
+        fg_apx=fg_apx,
+        keep_scopes=keep_scopes,
+        per_constraint_scopes=lambda s: [tuple(p) for p in _all_pairs(s)],
+    )
     fg_factor_sizes = _compute_fg_factor_sizes(fg_apx)
     return fg_apx, fg_map, fg_factor_sizes
 
+def build_subset_factors(*, pb, vcg, fg_true: FactorGraph, approx: dict) -> BuilderOut:
+    """
+    "subset" approximation:
+      - takes approx["size"] = r
+      - for each original constraint scope S:
+          * if |S| <= r: keep the whole scope as-is
+          * if |S| >  r: add a factor of size r for every r-subset of S
+    Always includes unary factors.
+    """
+    n_vars = _n_vars_from_vcg(vcg)
+    r = int(approx.get("size", 2))
+    if r < 2:
+        raise ValueError(f"subset approximation requires size>=2, got {r}.")
+
+    con_nodes = _constraint_nodes_in_canonical_order(vcg)
+    keep_scopes: Set[Scope] = set()
+    for c in con_nodes:
+        scope = sorted(int(v) for v in vcg.neighbors(c))
+        if len(scope) <= r:
+            keep_scopes.add(tuple(scope))
+        else:
+            keep_scopes.update(_all_k_subsets(scope, r))
+
+    scopes_sorted = sorted(keep_scopes, key=lambda s: (len(s), s))
+    fg_apx = _build_fg_from_scopes(n_vars, scopes_sorted)
+
+    def _per_constraint(scope: List[int]) -> List[Scope]:
+        if len(scope) <= r:
+            return [tuple(sorted(map(int, scope)))]
+        return _all_k_subsets(scope, r)
+
+    fg_map = _build_vc_to_apx_map(
+        vcg=vcg,
+        fg_apx=fg_apx,
+        keep_scopes=set(scopes_sorted),
+        per_constraint_scopes=_per_constraint,
+    )
+    fg_factor_sizes = _compute_fg_factor_sizes(fg_apx)
+    return fg_apx, fg_map, fg_factor_sizes
 
 # ---------------------------------------------------------------------
 # Registry
@@ -238,5 +332,7 @@ APPROX_BUILDERS: Dict[str, Callable[..., BuilderOut]] = {
     "tree_cover": build_tree_cover,
     "pairwise": build_pairwise_factors,
     "pairwise_factors": build_pairwise_factors,
+    "subset": build_subset_factors,
+    "subset_factors": build_subset_factors,
 }
 

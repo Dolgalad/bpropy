@@ -1,0 +1,105 @@
+{
+  "results_dir": "test_inference_fix_and_solve",
+  "gurobi_solutions_dir": "gurobi_solutions",
+  "gurobi_split": "test",
+  "optimal_value_key": "objective_value_from_x",
+
+  "layout": "2x2",
+  "label": "fig:inference_test_nair_pareto",
+  "caption": "Fix-and-solve Pareto frontiers. Each point is averaged over the tested instances for one fixed-variable proportion.",
+
+  "exclude_series": ["var_logits_bce::GD"],
+
+  "datasets": [
+    {
+      "id": "scp_n50_m50_k5",
+      "title": "SC-S",
+      "maximize": false
+    },
+    {
+      "id": "scp_n120-180_m150-250_k5",
+      "title": "SC-M",
+      "maximize": false
+    },
+    {
+      "id": "mis_n100_p0.15",
+      "title": "MIS-S",
+      "maximize": true
+    },
+    {
+      "id": "mis_n200-300_p0.15",
+      "title": "MIS-M",
+      "maximize": true
+    }
+  ],
+
+  "methods": [
+    "var_logits_bce",
+    "lbp_fce",
+    "nmf_fce"
+  ],
+
+  "decodings": [
+    "EGG",
+    "GD"
+  ],
+
+  "series_styles": {
+    "var_logits_bce::EGG": {
+      "title": "GNN+EGG",
+      "color": "GNNEGGColor",
+      "mark": "*"
+    },
+    "var_logits_bce::GD": {
+      "title": "GNN+GD",
+      "color": "GNNGDColor",
+      "mark": "square*"
+    },
+
+    "lbp_fce::EGG": {
+      "title": "LBP+EGG",
+      "color": "LBPEGGColor",
+      "mark": "*"
+    },
+    "lbp_fce::GD": {
+      "title": "LBP+GD",
+      "color": "LBPGDColor",
+      "mark": "square"
+    },
+
+    "nmf_fce::EGG": {
+      "title": "NMF+EGG",
+      "color": "NMFEGGColor",
+      "mark": "*"
+    },
+    "nmf_fce::GD": {
+      "title": "NMF+GD",
+      "color": "NMFGDColor",
+      "mark": "square*"
+    }
+  },
+
+  "result_value_key": "solution_value",
+  "runtime_key": "total",
+
+  "gap_as_percent": true,
+  "clamp_negative_gap": true,
+  "strict_missing_opt": false,
+
+  "xmode": "log",
+  "ymode": "normal",
+  "xlabel": "Runtime (s)",
+  "ylabel": "Gap (\\%)",
+
+  "panel_width": "0.42\\textwidth",
+  "panel_height": "0.30\\textwidth",
+  "horizontal_sep": "0.75cm",
+  "vertical_sep": "0.75cm",
+
+  "legend_columns": 3,
+  "legend_yshift": "-0.45cm",
+
+  "connect_all_points": true,
+  "draw_pareto_frontier": true,
+  "annotate_fix_prop": true
+}

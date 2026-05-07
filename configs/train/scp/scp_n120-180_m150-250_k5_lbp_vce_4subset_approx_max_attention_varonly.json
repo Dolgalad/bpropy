@@ -1,0 +1,134 @@
+{
+  "schema_version": 1,
+
+  "slurm": {
+    "job_name": "scp_n120-180_m150-250_k5_lbp_vce_4subset_approx_max_attention_varonly",
+    "time": "20:00:00",
+    "cpus_per_task": 8,
+    "gpus": 1,
+    "output": "slurm/out/%x_%j.out",
+    "error": "slurm/err/%x_%j.err",
+    "env": { "OMP_NUM_THREADS": "8" }
+  },
+
+  "run": {
+    "name": "scp_n120-180_m150-250_k5_lbp_vce_4subset_approx_max_attention_varonly",
+    "output_dir": "runs",
+    "resume": null,
+    "save_dirname": "checkpoints",
+    "tags": ["scp", "lbp", "vce", "fg_approx_4subset", "varonly"]
+  },
+
+  "seed": 0,
+
+  "data": {
+    "problem": "scp",
+    "root": "datasets/problems/scp/scp_n120-180_m150-250_k5_balanced",
+    "split": "train",
+    "val_split": "val",
+    "test_split": "test",
+
+    "feature_mode": "EB",
+    "hetero": false,
+    "refresh": false,
+
+    "precompute": {
+      "lbp": true,
+      "ss": true,
+      "nmf": false ,
+      "fg_approx": {
+        "method": "subset" ,
+	"size": 4,
+	"seed": 0
+      }
+    },
+
+    "loader": {
+      "batch_size": 32,
+      "val_batch_size": 32,
+      "num_workers": 2,
+      "prefetch": 2,
+      "pin_memory": true
+    }
+  },
+
+  "problem": {
+    "ground_truth": {
+      "solver": "scg3",
+      "args": {}
+    },
+    "maximize": false
+  },
+
+  "model": {
+    "name": "GCN_MRF_Attention_VarOnly",
+    "args": { "in_dim": 54, "hidden_dim": 64, "n_layers": 4, "inference": "loopy_belief_propagation", "bp_max_iter": 10, "bp_damping": 0.5 , "factor_sizes": [1,2,3,4]},
+    "init_from": null
+  },
+
+  "loss": {
+    "name": "vce",
+    "args": {}
+  },
+
+  "train": {
+    "epochs": 200000,
+    "steps_per_epoch": 200000,
+    "val_steps": 100,
+    "method": "variable_marginals",
+
+    "optimizer": {
+      "name": "adamw",
+      "args": { "lr": 0.001, "weight_decay": 1e-4 }
+    },
+    "warmup": {
+	    "enabled": true ,
+	    "steps": 1000 ,
+	    "start_factor": 0.05 ,
+	    "method": "linear"
+    },
+
+    "scheduler": {
+	    "name": "cosineannealing",
+	    "kwargs": {"T_max": 200, "eta_min": 1e-5}
+    },
+
+    "grad_clip_norm": 1.0,
+    "amp": true,
+
+    "early_stop": {
+      "enabled": true,
+      "metric": "val/gap",
+      "mode": "min",
+      "patience": 100,
+      "min_delta": 0.0001
+    },
+
+    "checkpoint": {
+      "save_best": true,
+      "metric": "val/gap",
+      "mode": "min",
+      "every_n_steps": 5000
+    }
+  },
+
+  "eval": {
+    "metrics": ["gap", "accuracy"],
+    "every_n_steps": 5000,
+    "splits": ["val", "test"],
+    "greedy_decimation": {
+	    "mode": "loopy_belief_propagation",
+	    "args": {"max_iter": 10, "damping": 0.5, "neg_inf": -100.0},
+	    "adapter": { "pick_mode": "min_entropy", "value_mode": "argmax"}
+    }
+  },
+
+  "logging": {
+    "tensorboard": true,
+    "csv": true,
+    "console": {
+      "every_n_steps": 100
+    }
+  }
+}
+

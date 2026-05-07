@@ -1,0 +1,99 @@
+{
+  "results_dir": "test_inference_fix_and_solve",
+  "layout": "2x2",
+  "label": "fig:inference_test_nair_runtime_stacked_bar",
+  "caption": "Runtime decomposition for fix-and-solve inference. For each dataset and fixed-variable proportion, grouped bars show total runtime split into preprocessing, forward, decoding, and reduced-solver contributions.",
+  "datasets": [
+    {
+      "id": "scp_n50_m50_k5",
+      "title": "SC-S"
+    },
+    {
+      "id": "scp_n120-180_m150-250_k5",
+      "title": "SC-M"
+    },
+    {
+      "id": "mis_n100_p0.15",
+      "title": "MIS-S"
+    },
+    {
+      "id": "mis_n200-300_p0.15",
+      "title": "MIS-M"
+    }
+  ],
+  "methods": [
+    "var_logits_bce",
+    "lbp_fce",
+    "nmf_fce"
+  ],
+  "decodings": [
+    "EGG",
+    "GD"
+  ],
+  "exclude_series": [
+    "var_logits_bce::GD"
+  ],
+  "define_colors": {
+  },
+  "series_styles": {
+    "var_logits_bce::EGG": {
+      "title": "GNN+EGG",
+      "color": "GNNEGGColor"
+    },
+    "lbp_fce::EGG": {
+      "title": "LBP+EGG",
+      "color": "LBPEGGColor"
+    },
+    "lbp_fce::GD": {
+      "title": "LBP+GD",
+      "color": "LBPGDColor"
+    },
+    "nmf_fce::EGG": {
+      "title": "NMF+EGG",
+      "color": "NMFEGGColor"
+    },
+    "nmf_fce::GD": {
+      "title": "NMF+GD",
+      "color": "NMFGDColor"
+    }
+  },
+  "component_styles": {
+    "preprocess": {
+      "title": "Preprocess",
+      "pattern": "grid"
+    },
+    "forward": {
+      "title": "Forward",
+      "pattern": "north east lines"
+    },
+    "decoding": {
+      "title": "Decoding",
+      "pattern": "crosshatch"
+    },
+    "solver": {
+      "title": "Solver",
+      "pattern": "none"
+    }
+  },
+  "components": [
+    "preprocess",
+    "forward",
+    "decoding",
+    "solver"
+  ],
+  "xlabel": "Fixed-variable proportion",
+  "ylabel": "Runtime (s)",
+  "panel_width": "0.42\\textwidth",
+  "panel_height": "0.30\\textwidth",
+  "horizontal_sep": "0.75cm",
+  "vertical_sep": "0.75cm",
+  "bar_group_width": 0.82,
+  "bar_opacity": 0.55,
+  "bar_edge_color": "black",
+  "bar_line_width": "0.3pt",
+  "legend_columns": 3,
+  "legend_yshift": "-0.55cm",
+  "show_all_y_ticks": true,
+  "x_label_digits": 1,
+  "ypad": 1.15
+}

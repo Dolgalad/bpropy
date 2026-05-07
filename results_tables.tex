@@ -1,0 +1,205 @@
+\documentclass{article}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{float}
+\usepackage{array}
+\usepackage[margin=1in]{geometry}
+\begin{document}
+
+\begin{table}[H]
+\centering
+\resizebox{.99\textwidth}{!}{%
+\begin{tabular}{llcccccc}
+\toprule
+Dataset & Model & \multicolumn{3}{c}{Decimation} & \multicolumn{3}{c}{Greedy} \\
+\cmidrule(lr){3-5} \cmidrule(lr){6-8}
+ &  & Gap Avg. (\%) $\downarrow$ & Best (\%) $\downarrow$ & t (s) & Gap Avg. (\%) $\downarrow$ & Best (\%) $\downarrow$ & t (s) \\
+\midrule
+\multirow{22}{*}{SCP $\left(\begin{array}{l}n=50\\ m=50\\ k=5\end{array}\right)$}
+& Var. Logits
+& --
+& --
+& --
+& --
+& --
+& -- \\
+
+& MRF LBP
+& --
+& --
+& --
+& --
+& --
+& -- \\
+\cmidrule(lr){2-8}
+
+& P.0 MST
+& --
+& --
+& --
+& --
+& --
+& -- \\
+
+& P.0 ($\alpha' \leq 2$)
+& --
+& --
+& --
+& --
+& --
+& -- \\
+
+& P.0 ($\alpha' \leq 3$)
+& --
+& --
+& --
+& --
+& --
+& -- \\
+
+& P.0 ($\alpha' \leq 4$)
+& --
+& --
+& --
+& --
+& --
+& -- \\
+\cmidrule(lr){2-8}
+
+& P.1 MST
+& --
+& --
+& --
+& --
+& --
+& -- \\
+
+& P.1 ($\alpha' \leq 2$)
+& --
+& --
+& --
+& --
+& --
+& -- \\
+
+& P.1 ($\alpha' \leq 3$)
+& --
+& --
+& --
+& --
+& --
+& -- \\
+
+& P.1 ($\alpha' \leq 4$)
+& --
+& --
+& --
+& --
+& --
+& -- \\
+\cmidrule(lr){2-8}
+
+& P.1 VO MST
+& --
+& --
+& --
+& --
+& --
+& -- \\
+
+& P.1 VO ($\alpha' \leq 2$)
+& --
+& --
+& --
+& --
+& --
+& -- \\
+
+& P.1 VO ($\alpha' \leq 3$)
+& --
+& --
+& --
+& --
+& --
+& -- \\
+
+& P.1 VO ($\alpha' \leq 4$)
+& --
+& --
+& --
+& --
+& --
+& -- \\
+\cmidrule(lr){2-8}
+
+& P.2 MST
+& --
+& --
+& --
+& --
+& --
+& -- \\
+
+& P.2 ($\alpha' \leq 2$)
+& --
+& --
+& --
+& --
+& --
+& -- \\
+
+& P.2 ($\alpha' \leq 3$)
+& --
+& --
+& --
+& --
+& --
+& -- \\
+
+& P.2 ($\alpha' \leq 4$)
+& --
+& --
+& --
+& --
+& --
+& -- \\
+\cmidrule(lr){2-8}
+
+& P.3 MST
+& --
+& --
+& --
+& --
+& --
+& -- \\
+
+& P.3 ($\alpha' \leq 2$)
+& --
+& --
+& --
+& --
+& --
+& -- \\
+
+& P.3 ($\alpha' \leq 3$)
+& --
+& --
+& --
+& --
+& --
+& -- \\
+
+& P.3 ($\alpha' \leq 4$)
+& --
+& --
+& --
+& --
+& --
+& -- \\
+\bottomrule
+\end{tabular}}
+\caption{Results on the SCP $(n=50,m=50,k=5)$ dataset. Gap values are reported as mean $\pm$ standard deviation over seeds. Best columns report the best (minimum) gap obtained among the seeds.}
+\label{tab:scp50_results}
+\end{table}
+
+\end{document}

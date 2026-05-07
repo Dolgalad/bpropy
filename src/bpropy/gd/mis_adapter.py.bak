@@ -1,0 +1,223 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Dict, Optional, Protocol, Tuple, List
+
+import numpy as np
+import torch
+
+import numpy as np
+
+def _as_mu2_numpy(mu: Any) -> np.ndarray:
+    """Convert backend output to a finite numpy array of shape (n, 2)."""
+    if hasattr(mu, "detach"):
+        mu_np = mu.detach().cpu().numpy()
+    else:
+        mu_np = np.asarray(mu)
+
+    mu_np = np.asarray(mu_np, dtype=float).reshape(-1, 2)
+    return np.nan_to_num(mu_np, nan=0.0, posinf=1.0, neginf=0.0)
+
+
+def _binary_entropy_from_mu1(mu1: np.ndarray) -> np.ndarray:
+    """Binary entropy H(x) from p(x=1)."""
+    p = np.clip(np.asarray(mu1, dtype=float), 1e-12, 1.0 - 1e-12)
+    return -p * np.log(p) - (1.0 - p) * np.log(1.0 - p)
+
+
+def _mean_or_none(x: np.ndarray):
+    x = np.asarray(x, dtype=float)
+    if x.size == 0:
+        return None
+    return float(np.mean(x))
+
+
+def _candidate_diagnostics(
+    *,
+    chosen: int,
+    value: int,
+    candidates: np.ndarray,
+    mu_np: np.ndarray,
+    selection_score: np.ndarray,
+) -> Dict[str, Any]:
+    """
+    Shared logging diagnostics for GD decisions.
+
+    candidates:
+        Variable indices that were eligible before the step.
+    mu_np:
+        Shape (n, 2), raw variable marginals.
+    selection_score:
+        Shape (n,), the score actually used by the adapter to rank candidates.
+        For MIS this is usually mu1.
+        For SCP this may be mu1 / cost.
+    """
+    candidates = np.asarray(candidates, dtype=int)
+    other = candidates[candidates != int(chosen)]
+
+    mu1 = np.nan_to_num(mu_np[:, 1].astype(float), nan=0.0)
+    entropy = _binary_entropy_from_mu1(mu1)
+
+    chosen_mu1 = float(mu1[int(chosen)])
+    chosen_entropy = float(entropy[int(chosen)])
+    chosen_selection_score = float(selection_score[int(chosen)])
+
+    avg_mu1_candidates = _mean_or_none(mu1[candidates])
+    avg_mu1_other_candidates = _mean_or_none(mu1[other])
+
+    avg_entropy_candidates = _mean_or_none(entropy[candidates])
+    avg_entropy_other_candidates = _mean_or_none(entropy[other])
+
+    avg_selection_score_candidates = _mean_or_none(selection_score[candidates])
+    avg_selection_score_other_candidates = _mean_or_none(selection_score[other])
+
+    return {
+        "chosen": int(chosen),
+        "value": int(value),
+
+        "chosen_mu1": chosen_mu1,
+        "avg_mu1_candidates": avg_mu1_candidates,
+        "avg_mu1_other_candidates": avg_mu1_other_candidates,
+        "delta_mu1_chosen_vs_avg_others": (
+            None if avg_mu1_other_candidates is None
+            else float(chosen_mu1 - avg_mu1_other_candidates)
+        ),
+
+        "chosen_entropy": chosen_entropy,
+        "avg_entropy_candidates": avg_entropy_candidates,
+        "avg_entropy_other_candidates": avg_entropy_other_candidates,
+        "delta_entropy_chosen_vs_avg_others": (
+            None if avg_entropy_other_candidates is None
+            else float(chosen_entropy - avg_entropy_other_candidates)
+        ),
+
+        "selection_score": chosen_selection_score,
+        "avg_selection_score_candidates": avg_selection_score_candidates,
+        "avg_selection_score_other_candidates": avg_selection_score_other_candidates,
+        "delta_selection_score_chosen_vs_avg_others": (
+            None if avg_selection_score_other_candidates is None
+            else float(chosen_selection_score - avg_selection_score_other_candidates)
+        ),
+
+        "n_candidates": int(candidates.size),
+    }
+
+class MISAdapter:
+    """
+    Decisions based ONLY on pb.g (original MIS graph).
+    Evidence semantics: x[v]=1 implies x[u]=0 for all u in N(v).
+    """
+    def __init__(self):
+        self.pb = None
+        self.active = None   # boolean mask or set
+        self.x = None
+
+    def reset(self, pb):
+        self.pb = pb
+        n = int(pb.nv()) if hasattr(pb, "nv") else int(pb.n)
+        self.active = np.ones(n, dtype=bool)
+        self.x = -np.ones(n, dtype=int)   # -1 = undecided, 0/1 decided
+
+    def is_done(self) -> bool:
+        return not self.active.any()
+
+    def step(self, backend_output, return_log: bool = False):
+        """
+        backend_output expected: mu shaped (n,2) or (2n,) convertible.
+        """
+        mu = backend_output
+        if mu is None:
+            raise ValueError("MISAdapter currently expects mu from an inference backend.")
+    
+        mu_np = _as_mu2_numpy(mu)
+        scores = mu_np[:, 1].astype(float)
+    
+        # Candidates before committing evidence.
+        active_idx = np.flatnonzero(self.active)
+        if active_idx.size == 0:
+            info = {
+                "chosen": None,
+                "value": None,
+                "reason": "no_active_vertices",
+                "n_candidates": 0,
+            }
+            return ({}, info) if return_log else ({}, None)
+    
+        # Pick best active node.
+        u = int(active_idx[np.argmax(scores[active_idx])])
+        u_val = 1
+    
+        info = None
+        
+        evidence = {u: 1}
+        for v in self.pb.g.neighbors(u):
+            v = int(v)
+            if self.active[v]:
+                evidence[v] = 0
+        
+        # Commit evidence in adapter state.
+        for v, val in evidence.items():
+            self.x[v] = val
+            self.active[v] = False
+        
+        if return_log:
+            info = _candidate_diagnostics(
+                chosen=u,
+                value=u_val,
+                candidates=active_idx,
+                mu_np=mu_np,
+                selection_score=scores,
+            )
+        
+            info.update({
+                "score": float(scores[u]),       # legacy name
+                "mu1": float(scores[u]),         # same name as SCP
+                "n_active_after": int(self.active.sum()),
+                "n_fixed_by_step": int(len(evidence)),
+            })
+        
+            candidate_scores = scores[active_idx]
+            candidate_entropy = _binary_entropy_from_mu1(candidate_scores)
+        
+            entropy_sorted = np.sort(candidate_entropy)
+            mu_sorted_desc = np.sort(candidate_scores)[::-1]
+        
+            info.update({
+                "candidate_entropy_mean": float(candidate_entropy.mean()),
+                "candidate_entropy_std": float(candidate_entropy.std()),
+                "candidate_entropy_min": float(candidate_entropy.min()),
+                "candidate_entropy_max": float(candidate_entropy.max()),
+        
+                "candidate_mu_mean": float(candidate_scores.mean()),
+                "candidate_mu_std": float(candidate_scores.std()),
+                "candidate_mu_min": float(candidate_scores.min()),
+                "candidate_mu_max": float(candidate_scores.max()),
+        
+                "entropy_gap_to_mean": float(info["chosen_entropy"] - candidate_entropy.mean()),
+                "mu1_gap_to_mean": float(scores[u] - candidate_scores.mean()),
+        
+                "entropy_rank_asc": int(1 + np.sum(candidate_entropy < info["chosen_entropy"])),
+                "mu1_rank_desc": int(1 + np.sum(candidate_scores > scores[u])),
+        
+                "candidate_entropy_second_min": (
+                    float(entropy_sorted[1]) if active_idx.size > 1 else None
+                ),
+                "candidate_mu_second_max": (
+                    float(mu_sorted_desc[1]) if active_idx.size > 1 else None
+                ),
+        
+                "entropy_gap_best_second": (
+                    float(entropy_sorted[1] - entropy_sorted[0]) if active_idx.size > 1 else None
+                ),
+                "mu_gap_best_second": (
+                    float(mu_sorted_desc[0] - mu_sorted_desc[1]) if active_idx.size > 1 else None
+                ),
+            })
+        
+        return (evidence, info) if return_log else (evidence, None)    
+    def solution(self):
+        # undecided -> 0 (or leave as -1 if you prefer)
+        x = self.x.copy()
+        x[x < 0] = 0
+        return x
+

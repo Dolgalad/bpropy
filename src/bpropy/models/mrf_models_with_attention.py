@@ -196,3 +196,425 @@ class GCN_MRF_v5(torch.nn.Module):
             return lbp_res, x
         if inference == "naive_mean_field":
             return naive_mean_field(x, data.nmf_edges, max_iter=self.bp_max_iter, tol=self.bp_tol, damping=self.bp_damping), x
+
+############################## FIX FACTOR > 2
+class GCN_MRF_v51(torch.nn.Module):
+    """
+    Generalized version of GCN_MRF_v5 that supports factors of size > 2.
+
+    Key differences vs v5:
+      - Ignores constraint embeddings completely.
+      - Factor embedding = concat of variable embeddings in the factor scope (lex ordered).
+      - Predicts theta for ALL factor arities using one MLP head per arity.
+      - Packs theta in canonical factor order by emitting per-factor blocks in factor index order
+        and slicing each by m_stride[f].
+
+    Assumptions (same spirit as v5):
+      - Binary variables, and factor parameterization uses full tables:
+            m_stride[f] == 2 ** arity(f)
+      - Factor indices follow canonical ordering within each instance:
+            first by factor size, then lex(scope)
+        and instances are concatenated by batch index.
+    """
+
+    def __init__(
+        self,
+        in_dim,
+        n_layers=4,
+        hidden_dim=64,
+        dropout_p=0.25,
+        normalize=False,
+        bp_max_iter=10,
+        bp_tol=1e-6,
+        bp_damping=0.5,
+        factor_sizes=[1, 2],   # include >2 here (e.g. [1,2,3,4]) if you have higher-order factors
+        jk="lstm",
+        norm="LayerNorm",
+        act="elu",
+        inference="loopy_belief_propagation",
+        mapping_aggr="mean",
+        normalize_theta=False,
+        gnn_f="GCN",
+    ):
+        super().__init__()
+        self.inference = inference
+        self.bp_max_iter = bp_max_iter
+        self.bp_tol = bp_tol
+        self.bp_damping = bp_damping
+        self.mapping_aggr = mapping_aggr
+        self.normalize_theta = normalize_theta
+
+        self.conv = eval(gnn_f)(
+            in_dim, hidden_dim, n_layers,
+            out_channels=hidden_dim,
+            dropout=dropout_p,
+            act=act,
+            norm=norm,
+            jk=jk
+        )
+
+        # One head per factor arity k: (k*H) -> (2**k)
+        self.theta_heads = torch.nn.ModuleDict()
+        for k in factor_sizes:
+            self.theta_heads[str(int(k))] = MLP(
+                int(k) * hidden_dim,
+                hidden_channels=[64, 64, int(2 ** int(k))],
+                activation_layer=GELU,
+                norm_layer=torch.nn.LayerNorm
+            )
+
+        if mapping_aggr == "gat":
+            self.mapping = GATConv(hidden_dim, hidden_dim)
+
+    @staticmethod
+    def _pack_theta_blocks(theta_blocks: torch.Tensor, m_stride: torch.Tensor) -> torch.Tensor:
+        """
+        theta_blocks: [n_factors, max_stride] (padded)
+        m_stride:     [n_factors] true stride per factor
+        Returns flat theta by taking, in factor index order, the first m_stride[f] entries of each row.
+        This preserves canonical ordering as long as factor indices are canonical.
+        """
+        m_stride = m_stride.to(torch.long)
+        max_stride = int(theta_blocks.size(1))
+        mask = (torch.arange(max_stride, device=theta_blocks.device)[None, :] < m_stride[:, None])
+        return theta_blocks[mask]  # [sum_f m_stride[f]]
+
+    def forward(self, data, fg_data=None, fg_map=None, inference: str | None = None):
+        inference = self.inference if inference is None else inference
+
+        x, edge_index = data.x, data.edge_index
+
+        from torch_geometric.transforms import AddSelfLoops
+        transform = AddSelfLoops(attr="edge_weight", fill_value=1.0)
+        data = transform(data)
+
+        x = self.conv(x, edge_index)  # [n_nodes, H]
+
+        if hasattr(data, "fg_map"):
+            # Number of (approx) factors in THIS instance batch is implied by lbp_edges.m_stride
+            m_stride = data.lbp_edges.m_stride.to(torch.long)     # [n_factors_total]
+            n_factors = int(m_stride.numel())
+            max_stride = int(m_stride.max().item())
+
+            # --- 1) collect (var -> factor) incidences ---
+            node_idx   = data.fg_map[:, 0]
+            factor_idx = data.fg_map[:, 1].to(torch.long)
+
+            # keep only variable endpoints (ignore constraints completely)
+            src_is_var = (data.bipartite[node_idx] == 0)
+            var_nodes  = node_idx[src_is_var].to(torch.long)      # [E_var]
+            fac_of_e   = factor_idx[src_is_var].to(torch.long)    # [E_var]
+
+            # Safety: enforce lex ordering within each factor (stable sort by (factor_idx, var_id))
+            # If your variable node ids coincide with var ids, this is lex over var ids.
+            if var_nodes.numel() > 0:
+                max_vid = var_nodes.max().item() + 1
+                key = fac_of_e * max_vid + var_nodes
+                perm = torch.argsort(key, stable=True)
+                var_nodes = var_nodes[perm]
+                fac_of_e  = fac_of_e[perm]
+
+            var_emb = x[var_nodes]                                 # [E_var, H]
+
+            # Factor arity from incidence counts (more robust than log2(m_stride))
+            counts = torch.bincount(fac_of_e, minlength=n_factors).to(torch.long)  # [n_factors]
+
+            # Optional consistency check: m_stride should be 2**arity for binary full tables
+            # (leave as runtime check; comment out if you don't want asserts)
+            # If this fails, you need explicit factor arity / table size info per factor.
+            expected = (1 << counts).to(torch.long)
+            if expected.numel() == m_stride.numel():
+                if not torch.all(expected == m_stride):
+                    raise RuntimeError(
+                        "GCN_MRF_v51: stride/arity mismatch. "
+                        "Expected m_stride == 2**arity from fg_map incidence counts."
+                    )
+
+            # --- 2) group variable embeddings by factor, producing [n_factors, k_max, H] ---
+            # concat_group_by pads to max group size
+            grouped = concat_group_by(var_emb, fac_of_e)            # [n_factors, k_max, H]
+            k_max = int(grouped.size(1))
+
+            # --- 3) predict per-factor theta blocks ---
+            theta_blocks = x.new_zeros((n_factors, max_stride))     # padded rows
+
+            # small loop over arities (k values), NOT over factors
+            for k_str, head in self.theta_heads.items():
+                k = int(k_str)
+                idx = (counts == k).nonzero(as_tuple=False).flatten()
+                if idx.numel() == 0:
+                    continue
+                if k > k_max:
+                    raise RuntimeError(
+                        f"GCN_MRF_v51: observed arity {k} but grouped only up to {k_max}. "
+                        "Check fg_map / grouping."
+                    )
+
+                xk = grouped[idx, :k, :].reshape(idx.numel(), k * x.size(1))  # [n_k, kH]
+                tk = head(xk)                                                 # [n_k, 2**k]
+                theta_blocks[idx, :tk.size(1)] = tk
+
+            # --- 4) pack into flat theta in canonical factor index order ---
+            x = self._pack_theta_blocks(theta_blocks, m_stride)
+
+        # --- inference ---
+        if inference in (None, "none", "theta", "no_inference"):
+            return x
+        if self.normalize_theta:
+            x = (x - x.min()) / (x.max() - x.min())
+
+        if inference == "loopy_belief_propagation":
+            lbp_res = loopy_belief_propagation(
+                x, torch.zeros_like(x), data.lbp_edges,
+                max_iter=self.bp_max_iter, tol=self.bp_tol, damping=self.bp_damping
+            )
+            return lbp_res, x
+
+        if inference == "naive_mean_field":
+            return naive_mean_field(
+                x, data.nmf_edges,
+                max_iter=self.bp_max_iter, tol=self.bp_tol, damping=self.bp_damping
+            ), x
+
+        return x
+
+################ REAL Attention
+class GCN_MRF_v52(torch.nn.Module):
+    """
+    General-arity version of Proposal 2 (constraint attention), built on top of GCN_MRF_v51.
+
+    Differences vs v51:
+      - Uses BOTH variable and constraint nodes from fg_map.
+      - Builds a per-factor constraint summary h_c[f] by attention-weighted sum over
+        constraint embeddings neighboring that factor in the precedence graph.
+      - Theta head input for arity k becomes (k*H + H) = (k+1)H.
+
+    Attention (generalized Proposal 2):
+        q_f = AGG_{v in scope(f)} h_v          # factor context (fixed size H)
+        s_{f,alpha} = MLP_att([q_f, h_alpha])  # scalar score
+        beta_{f,alpha} = softmax_alpha s_{f,alpha} (per factor)
+        h_c[f] = sum_alpha beta_{f,alpha} * h_alpha
+    """
+
+    def __init__(
+        self,
+        in_dim,
+        n_layers=4,
+        hidden_dim=64,
+        dropout_p=0.25,
+        normalize=False,
+        bp_max_iter=10,
+        bp_tol=1e-6,
+        bp_damping=0.5,
+        factor_sizes=[1, 2],   # include >2 here (e.g. [1,2,3,4]) if you have higher-order factors
+        jk="lstm",
+        norm="LayerNorm",
+        act="elu",
+        inference="loopy_belief_propagation",
+        mapping_aggr="mean",   # used for factor context q_f (mean/max/min) OR "gat" (kept for compatibility)
+        normalize_theta=False,
+        gnn_f="GCN",
+        att_hidden=64,
+    ):
+        super().__init__()
+        self.inference = inference
+        self.bp_max_iter = bp_max_iter
+        self.bp_tol = bp_tol
+        self.bp_damping = bp_damping
+        self.mapping_aggr = mapping_aggr
+        self.normalize_theta = normalize_theta
+
+        self.conv = eval(gnn_f)(
+            in_dim, hidden_dim, n_layers,
+            out_channels=hidden_dim,
+            dropout=dropout_p,
+            act=act,
+            norm=norm,
+            jk=jk
+        )
+
+        # Theta heads: arity-k factor gets input (k*H + H) = (k+1)H and outputs 2**k
+        self.theta_heads = torch.nn.ModuleDict()
+        for k in factor_sizes:
+            k = int(k)
+            self.theta_heads[str(k)] = MLP(
+                (k + 1) * hidden_dim,
+                hidden_channels=[64, 64, int(2 ** k)],
+                activation_layer=GELU,
+                norm_layer=torch.nn.LayerNorm
+            )
+
+        # Attention score head: [q_f, h_alpha] -> scalar
+        self.mlp_att = MLP(
+            2 * hidden_dim,
+            hidden_channels=[att_hidden, att_hidden, 1],
+            activation_layer=GELU,
+            norm_layer=torch.nn.LayerNorm
+        )
+
+        if mapping_aggr == "gat":
+            self.mapping = GATConv(hidden_dim, hidden_dim)
+
+    @staticmethod
+    def _pack_theta_blocks(theta_blocks: torch.Tensor, m_stride: torch.Tensor) -> torch.Tensor:
+        m_stride = m_stride.to(torch.long)
+        max_stride = int(theta_blocks.size(1))
+        mask = (torch.arange(max_stride, device=theta_blocks.device)[None, :] < m_stride[:, None])
+        return theta_blocks[mask]  # [sum_f m_stride[f]]
+
+    @staticmethod
+    def _scatter_softmax(scores: torch.Tensor, index: torch.Tensor, dim_size: int) -> torch.Tensor:
+        """
+        Stable softmax over groups defined by 'index' (1D).
+        scores: [E]
+        index:  [E] in [0, dim_size)
+        returns: [E] softmax(scores) per group
+        """
+        if scores.numel() == 0:
+            return scores
+        max_per = torch_scatter.scatter_max(scores, index, dim=0, dim_size=dim_size)[0]
+        max_per_e = max_per.index_select(0, index)
+        exp = torch.exp(scores - max_per_e)
+        denom = torch_scatter.scatter_add(exp, index, dim=0, dim_size=dim_size).index_select(0, index)
+        return exp / (denom + 1e-12)
+
+    def _agg_by_factor(self, var_emb: torch.Tensor, fac_of_var: torch.Tensor, n_factors: int) -> torch.Tensor:
+        """
+        Computes q_f = AGG_{v in f} h_v as a fixed-size [n_factors, H] tensor.
+        """
+        if var_emb.numel() == 0:
+            return var_emb.new_zeros((n_factors, var_emb.size(1)))
+
+        if self.mapping_aggr == "max":
+            return torch_scatter.scatter_max(var_emb, fac_of_var, dim=0, dim_size=n_factors)[0]
+        if self.mapping_aggr == "min":
+            return torch_scatter.scatter_min(var_emb, fac_of_var, dim=0, dim_size=n_factors)[0]
+        # default / "mean"
+        return torch_scatter.scatter_mean(var_emb, fac_of_var, dim=0, dim_size=n_factors)
+
+    def forward(self, data, fg_data=None, fg_map=None, inference: str | None = None):
+        inference = self.inference if inference is None else inference
+
+        x, edge_index = data.x, data.edge_index
+        from torch_geometric.transforms import AddSelfLoops
+        data = AddSelfLoops(attr="edge_weight", fill_value=1.0)(data)
+
+        # Feature extraction
+        x = self.conv(x, edge_index)  # [n_nodes, H]
+
+        if hasattr(data, "fg_map"):
+            m_stride = data.lbp_edges.m_stride.to(torch.long)  # [n_factors]
+            n_factors = int(m_stride.numel())
+            max_stride = int(m_stride.max().item())
+
+            node_idx   = data.fg_map[:, 0].to(torch.long)
+            factor_idx = data.fg_map[:, 1].to(torch.long)
+
+            src_is_var = (data.bipartite[node_idx] == 0)
+            src_is_con = ~src_is_var
+
+            # -----------------------------
+            # 1) Variable -> factor incidences (lex ordered)
+            # -----------------------------
+            var_nodes = node_idx[src_is_var]
+            fac_of_v  = factor_idx[src_is_var]
+
+            if var_nodes.numel() > 0:
+                max_vid = int(var_nodes.max().item()) + 1
+                key = fac_of_v * max_vid + var_nodes
+                perm = torch.argsort(key, stable=True)
+                var_nodes = var_nodes[perm]
+                fac_of_v  = fac_of_v[perm]
+
+            var_emb = x[var_nodes]  # [E_var, H]
+
+            # Factor arities from incidence counts
+            counts = torch.bincount(fac_of_v, minlength=n_factors).to(torch.long)  # [n_factors]
+
+            # Consistency: for binary full tables, stride == 2**arity
+            expected = (1 << counts).to(torch.long)
+            if expected.numel() == m_stride.numel():
+                if not torch.all(expected == m_stride):
+                    raise RuntimeError(
+                        "GCN_MRF_v52: stride/arity mismatch. "
+                        "Expected m_stride == 2**arity from fg_map incidence counts."
+                    )
+
+            # Group var embeddings by factor: [n_factors, k_max, H]
+            grouped = concat_group_by(var_emb, fac_of_v)
+            k_max = int(grouped.size(1))
+
+            # -----------------------------
+            # 2) Constraint attention per factor to get h_c[f] in R^H
+            # -----------------------------
+            # factor context q_f: [n_factors, H]
+            q_f = self._agg_by_factor(var_emb, fac_of_v, n_factors)  # [n_factors, H]
+
+            con_nodes = node_idx[src_is_con]
+            fac_of_c  = factor_idx[src_is_con]
+            h_alpha   = x[con_nodes]  # [E_con, H]
+
+            if h_alpha.numel() == 0:
+                h_c = x.new_zeros((n_factors, x.size(1)))
+            else:
+                q_e = q_f.index_select(0, fac_of_c)                 # [E_con, H]
+                att_in = torch.cat([q_e, h_alpha], dim=1)           # [E_con, 2H]
+                scores = self.mlp_att(att_in).squeeze(-1)           # [E_con]
+                beta = self._scatter_softmax(scores, fac_of_c, dim_size=n_factors)  # [E_con]
+                h_c = torch_scatter.scatter_add(
+                    h_alpha * beta.unsqueeze(-1),
+                    fac_of_c,
+                    dim=0,
+                    dim_size=n_factors
+                )  # [n_factors, H]
+
+            # -----------------------------
+            # 3) Predict theta blocks per factor (loop over arities, not factors)
+            # -----------------------------
+            theta_blocks = x.new_zeros((n_factors, max_stride))
+
+            for k_str, head in self.theta_heads.items():
+                k = int(k_str)
+                idx = (counts == k).nonzero(as_tuple=False).flatten()
+                if idx.numel() == 0:
+                    continue
+                if k > k_max:
+                    raise RuntimeError(
+                        f"GCN_MRF_v52: observed arity {k} but grouped only up to {k_max}. "
+                        "Check fg_map / grouping."
+                    )
+
+                xk_vars = grouped[idx, :k, :].reshape(idx.numel(), k * x.size(1))  # [n_k, kH]
+                xk_c    = h_c[idx]                                                 # [n_k, H]
+                xk      = torch.cat([xk_vars, xk_c], dim=1)                        # [n_k, (k+1)H]
+                tk      = head(xk)                                                 # [n_k, 2**k]
+                theta_blocks[idx, :tk.size(1)] = tk
+
+            # -----------------------------
+            # 4) Pack into flat theta in canonical factor order
+            # -----------------------------
+            x = self._pack_theta_blocks(theta_blocks, m_stride)
+
+        # -----------------------------
+        # Inference
+        # -----------------------------
+        if inference in (None, "none", "theta", "no_inference"):
+            return x
+
+        if self.normalize_theta:
+            x = (x - x.min()) / (x.max() - x.min() + 1e-12)
+
+        if inference == "loopy_belief_propagation":
+            lbp_res = loopy_belief_propagation(
+                x, torch.zeros_like(x), data.lbp_edges,
+                max_iter=self.bp_max_iter, tol=self.bp_tol, damping=self.bp_damping
+            )
+            return lbp_res, x
+
+        if inference == "naive_mean_field":
+            return naive_mean_field(
+                x, data.nmf_edges,
+                max_iter=self.bp_max_iter, tol=self.bp_tol, damping=self.bp_damping
+            ), x
+
+        return x

@@ -58,7 +58,8 @@ def loopy_belief_propagation(theta, v2f, edges, max_iter=100, tol=1e-6, damping=
 
 
         # damping on messages
-        v2f = (1-damping)*new_v2f + damping*v2f
+        #v2f = (1-damping)*new_v2f + damping*v2f
+        v2f.mul_(damping).add_(new_v2f, alpha=1-damping)
         
         # marginals
         mufbar.copy_(theta).scatter_add_(0, edges.m_edges[:,0], v2f[edges.m_edges[:,1]])

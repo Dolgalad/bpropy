@@ -1,0 +1,69 @@
+\begin{figure}[t]
+\centering
+
+\definecolor{darkgray176}{RGB}{110,110,110}
+\definecolor{lightgray204}{RGB}{200,200,200}
+\definecolor{GNNEGGColor}{RGB}{0,102,204}
+\definecolor{MRFEGGColor}{RGB}{200,60,40}
+\definecolor{MRFGDColor}{RGB}{140,80,160}
+\definecolor{PairMRFEGGColor}{RGB}{230,120,20}
+\definecolor{PairMRFGDColor}{RGB}{0,150,180}
+\definecolor{TreeMRFEGGColor}{RGB}{0,140,100}
+\definecolor{TreeMRFGDColor}{RGB}{120,120,40}
+
+\begin{tikzpicture}
+\begin{axis}[
+    width=0.82\textwidth,
+    height=0.42\textwidth,
+    scale only axis,
+    tick align=outside,
+    tick pos=left,
+    x grid style={darkgray176},
+    y grid style={darkgray176},
+    ymajorgrids,
+    xmin=-0.6, xmax=1.6,
+    ymin=0, ymax=9.10475,
+    xtick={0,1},
+    xticklabels={SC-S,MIS-S},
+    xlabel={Dataset},
+    ylabel={Optimality gap (%)},
+    title={Average optimality gap by dataset},
+    xtick style={color=black},
+    ytick style={color=black},
+    legend columns=4,
+    legend cell align=left,
+    legend style={
+      draw=lightgray204,
+      /tikz/every even column/.append style={column sep=0.4cm}
+    },
+]
+
+% --- GNN ---
+\draw[draw=none,fill=GNNEGGColor] (axis cs:-0.4,0) rectangle (axis cs:-0.21,7.91717171717);
+% missing: group=MIS-S, series=gnn
+
+% --- LBP ---
+\draw[draw=none,fill=MRFEGGColor] (axis cs:-0.2,0) rectangle (axis cs:-0.01,3.69515151515);
+% missing: group=MIS-S, series=lbp
+
+% --- LBP+GD ---
+\draw[draw=none,fill=MRFGDColor] (axis cs:0,0) rectangle (axis cs:0.19,0.888282828283);
+% missing: group=MIS-S, series=lbp_gd
+
+% --- NMF ---
+% missing: group=SC-S, series=nmf
+% missing: group=MIS-S, series=nmf
+
+\addlegendimage{ybar,ybar legend,draw=none,fill=GNNEGGColor}
+\addlegendentry{GNN}
+\addlegendimage{ybar,ybar legend,draw=none,fill=MRFEGGColor}
+\addlegendentry{LBP}
+\addlegendimage{ybar,ybar legend,draw=none,fill=MRFGDColor}
+\addlegendentry{LBP+GD}
+\addlegendimage{ybar,ybar legend,draw=none,fill=PairMRFEGGColor}
+\addlegendentry{NMF}
+
+\end{axis}
+\end{tikzpicture}
+\label{fig:grouped_bar}
+\end{figure}

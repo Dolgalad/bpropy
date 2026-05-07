@@ -6,6 +6,11 @@ from typing import Any, Dict, Optional, Protocol, Tuple, List
 import numpy as np
 import torch
 
+from bpropy.mrf.lbp_edges import LBPEdges
+from bpropy.mrf.lbp import loopy_belief_propagation
+from bpropy.mrf.evidence_factory import EvidenceMaskFactory
+
+
 Evidence = Dict[int, int]
 
 @dataclass
@@ -30,14 +35,15 @@ class LBPBackend:
     _step: int = 0
 
     def reset(self, pb: Any) -> None:
-        from bpropy.mrf.lbp_edges import LBPEdges
-        from bpropy.mrf.lbp import loopy_belief_propagation
-        from bpropy.mrf.evidence_factory import EvidenceMaskFactory
 
         self._loopy_bp = loopy_belief_propagation
 
         fg = self.fg_builder(pb)
-        self._theta = self.theta_builder(pb, fg, self.device, self.dtype)
+        theta = self.theta_builder(pb, fg, self.device, self.dtype)
+
+        if torch.is_tensor(theta):
+            theta = theta.detach().clone()
+        self._theta = theta
 
         self._edges = LBPEdges(fg)
         self._evidence_factory = EvidenceMaskFactory(
@@ -54,17 +60,20 @@ class LBPBackend:
         assert self._theta is not None
 
         if (self._mu is None) or (self.run_every <= 1) or (self._step % self.run_every == 0):
-            th = self._evidence_factory.apply(self._theta)
+            #th = self._evidence_factory.apply(self._theta)
+            th = self._evidence_factory.apply_inplace(self._theta)
 
             if not self.warm_start:
                 self._v2f.zero_()
-
             res = self._loopy_bp(
                 th, self._v2f, self._edges,
                 max_iter=self.max_iter, tol=self.tol, damping=self.damping
             )
-            self._mu = torch.nan_to_num(res.mu_v.reshape(-1, 2), nan=0.0)
 
+            if torch.isnan(res.mu_v).any():
+                self._mu = torch.nan_to_num(res.mu_v.reshape(-1, 2), nan=0.0)
+            else:
+                self._mu = res.mu_v.reshape(-1, 2)
         return self._mu
 
     def update(self, evidence: Evidence) -> None:
