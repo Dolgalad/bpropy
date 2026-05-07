@@ -11,6 +11,7 @@ from bpropy.mrf.nmf_edges import NMFEdges
 class NMFSolution:
     def __init__(self, mu, u, n_iter):
         self.mu = mu
+        self.mu_v = mu
         self.u = u
         self.n_iter = n_iter
 

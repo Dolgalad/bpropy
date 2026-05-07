@@ -81,6 +81,8 @@ class SCP(LPProblem, SerializableLPMixin):
         verbose : bool = False,
         solver: str = "cbc",
         relax_integrality: bool = False,
+        partial_solution: Optional[tuple] = None,
+        timelimit = None,
     ) -> Solution:
 
         slv = (solver or "cbc").lower()
@@ -99,8 +101,11 @@ class SCP(LPProblem, SerializableLPMixin):
                 return Solution(solver="scg3", x=x)
 
         # generic
+        if timelimit is None:
+            timelimit = np.inf
         return super().solve(
-            config=LPSolveConfig(solver=slv, relax_integrality=relax_integrality, verbose=verbose)
+            config=LPSolveConfig(solver=slv, relax_integrality=relax_integrality, verbose=verbose, timelimit=timelimit), 
+            partial_solution=partial_solution
         )
 
     # ---- serialization (keep your existing logic, but align names) ----
@@ -189,6 +194,7 @@ class SCP(LPProblem, SerializableLPMixin):
         rng: Optional[np.random.Generator] = None,
         use_costs: bool = True,
         scores: Optional[np.ndarray] = None,
+        fix_prop: Optional[float] = None,
     ) -> SCPSolution:
         """
         Greedy Set Cover heuristic.
@@ -209,7 +215,7 @@ class SCP(LPProblem, SerializableLPMixin):
         -------
         sol : SCPSolution
         """
-        x = scp_greedy(self, policy=policy, temperature=temperature, rng=rng, use_costs=use_costs, scores=scores)
+        x = scp_greedy(self, policy=policy, temperature=temperature, rng=rng, use_costs=use_costs, scores=scores, fix_prop=fix_prop)
         return Solution(x=x, solver="greedy")
 
 LPProblem.register_vcgraph_type("SCP", SCP)
@@ -233,7 +239,8 @@ def scp_greedy(
     temperature: float = 1.0,
     rng: Optional[np.random.Generator] = None,
     use_costs: bool = True,
-    scores: Optional[np.ndarray] = None
+    scores: Optional[np.ndarray] = None,
+    fix_prop: Optional[float] = None
 ) -> np.ndarray:
     """
     Classic greedy heuristic for Set Cover:
@@ -257,6 +264,9 @@ def scp_greedy(
         if scores.size != n:
             raise ValueError(f"scores must have shape ({n},), got ({scores.size},)")
 
+    if fix_prop is None:
+        fix_prop = 1.
+
     # coverage state
     uncovered = np.ones(m, dtype=bool)
     active_sets = np.ones(n, dtype=bool)
@@ -273,7 +283,7 @@ def scp_greedy(
         # infeasible SCP instance
         return x
 
-    while uncovered.any():
+    while uncovered.any() and (active_sets.sum() > n * (1.0 - fix_prop)):
         active_idx = np.flatnonzero(active_sets)
         if active_idx.size == 0:
             # No sets left but still uncovered elements => infeasible under given representation
@@ -308,8 +318,6 @@ def scp_greedy(
             j = int(rng.choice(active_idx, p=p))
         else:
             raise ValueError(f"Unknown policy={policy!r} (expected 'argmax' or 'sample')")
-        #print(f"selected j={j} val={np.max(step_scores)}")
-        #print("\tnewly covered = ", sum(uncovered[int(a)] for a in pb.F[j]))
 
         # select set j
         x[j] = 1.0
@@ -331,6 +339,7 @@ def scp_greedy(
             if g==0 and active_sets[aidx]:
                 active_sets[aidx] = False
                 x[aidx] = 0.0
-
+    if fix_prop < 1.0:
+        return x, active_sets
     return x
 

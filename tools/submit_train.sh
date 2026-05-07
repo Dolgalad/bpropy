@@ -30,6 +30,7 @@ MEM="$(jget mem "32G")"
 GPUS="$(jget gpus "1")"
 JOBNAME_BASE="$(jget job_name "bpropy_train")"
 
+
 # We'll suffix these per-seed inside the job
 OUT_BASE="$(jget output "slurm/out/%x_%A_%a.out")"
 ERR_BASE="$(jget error  "slurm/err/%x_%A_%a.err")"
@@ -38,6 +39,17 @@ ERR_BASE="$(jget error  "slurm/err/%x_%A_%a.err")"
 QOS="$(jget qos "")"
 ACCOUNT="$(jget account "")"
 CONSTRAINT="$(jget constraint "")"
+
+OUT_BASE="${ROOT}/slurm_outputs/${JOBNAME_BASE}/%x_%A_%a.out"
+ERR_BASE="${ROOT}/slurm_outputs/${JOBNAME_BASE}/%x_%A_%a.err"
+mkdir -p $(dirname ${OUT_BASE})
+
+echo $PARTITION
+echo $QOS
+echo $ACCOUNT
+
+echo ${OUT_BASE}
+echo ${ERR_BASE}
 
 # Seeds: either from config .slurm.seeds (array), or default [0,1,2]
 # Example in config:
@@ -56,13 +68,13 @@ cat > "${TMP_SCRIPT}" <<EOF
 #!/bin/bash
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --partition=${PARTITION}
-#SBATCH --time=${TIME}
+#SBATCH --time=20:00:00
 #SBATCH --cpus-per-task=${CPUS}
-#SBATCH --mem=${MEM}
 #SBATCH --gres=gpu:${GPUS}
 #SBATCH --array=0-2
 #SBATCH --job-name=${JOBNAME_BASE}
+#SBATCH -A bnq@v100
+##SBATCH --exclusive
 $(printf "%s\n" "${SBATCH_OPT_LINES[@]}")
 
 set -euo pipefail
@@ -86,6 +98,8 @@ SUFFIX="_seed\${SEED}"
 # Make job run as if launched from ROOT
 cd "\${ROOT}"
 export PYTHONPATH="\${PYTHONPATH:-}:\${ROOT}"
+
+export PYTHONUNBUFFERED=1
 
 # Ensure slurm log dirs exist under ROOT (if you keep them relative)
 mkdir -p "\${ROOT}/slurm/out" "\${ROOT}/slurm/err"
@@ -112,8 +126,10 @@ esac
 
 srun --job-name="${JOBNAME_BASE}\${SUFFIX}" \\
      --output="\${OUT_FILE}" --error="\${ERR_FILE}" \\
-     bpropy-train --config "\${CONFIG}" --seed "\${SEED}" "$@"
+     bpropy-train --config "\${CONFIG}" --seed "\${SEED}"
 EOF
+
+cat "${TMP_SCRIPT}"
 
 sbatch "${TMP_SCRIPT}"
 

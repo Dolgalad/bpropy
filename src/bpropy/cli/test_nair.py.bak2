@@ -1,0 +1,268 @@
+from __future__ import annotations
+
+import argparse
+import fcntl
+import hashlib
+import json
+import os
+import sys
+import tempfile
+import time
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+import numpy as np
+import torch
+from progress.bar import Bar
+
+from bpropy.cli.train.checkpoint import load_checkpoint
+from bpropy.cli.train.config import load_run_config, merge_cli_overrides, validate_config
+from bpropy.cli.train.data import make_loaders
+from bpropy.cli.train.logging import make_run_paths
+from bpropy.cli.train.loop import build_model
+from bpropy.cli.train.method_registry import METHOD_REGISTRY
+from bpropy.cli.train.metrics import _sync
+from bpropy.datasets.prefetcher import CUDAPrefetcher
+from bpropy.gd.greedy_decimation import greedy_decimation
+
+
+OPT_CACHE_DIR = Path(
+    os.environ.get(
+        "BPROPY_NAIR_OPT_CACHE",
+        os.path.expanduser("/lustre/fswork/projects/rech/bnq/udj74tc/bpropy_shared_cache/nair_full_ilp_opt"),
+    )
+)
+
+
+def build_base_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="bpropy-test-nair", add_help=False)
+    p.add_argument("--config", required=True)
+    p.add_argument("--print-config", action="store_true")
+    return p
+
+
+def build_full_parser(defaults: Dict[str, Any]) -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="bpropy-test-nair")
+
+    p.add_argument("--config", required=True)
+    p.add_argument("--print-config", action="store_true")
+    p.add_argument("--checkpoint", default=argparse.SUPPRESS)
+
+    p.add_argument("--max-test-instances", type=int, default=None)
+    p.add_argument("--seed", type=int, default=0)
+
+    return p
+
+
+def _pick_checkpoint_path(cfg: Dict[str, Any], paths, args: argparse.Namespace) -> str:
+    if hasattr(args, "checkpoint"):
+        return getattr(args, "checkpoint")
+
+    best = os.path.join(paths.ckpt_dir, "best.pt")
+    last = os.path.join(paths.ckpt_dir, "last.pt")
+
+    if os.path.exists(best):
+        return best
+    if os.path.exists(last):
+        return last
+
+    raise FileNotFoundError("No checkpoint found.")
+
+
+def _ms(x: List[float]) -> tuple[float, float]:
+    a = np.asarray(x, dtype=np.float64)
+    if a.size <= 1:
+        return float(a.mean()) if a.size else 0.0, 0.0
+    return float(a.mean()), float(a.std(ddof=1))
+
+
+def _solve_full_opt_with_cache(pb, solver_name: str, timelimit: int):
+    t0 = time.perf_counter()
+    sol = pb.solve(solver=solver_name, verbose=False, timelimit=timelimit)
+    t1 = time.perf_counter()
+    return float(np.asarray(sol.x).sum()), t1 - t0
+
+
+def final_test_eval_nair(
+    cfg: Dict[str, Any],
+    adapter,
+    model,
+    loader,
+    device,
+    checkpoint_path: str,
+    log_dir: str,
+    max_instances: Optional[int] = None,
+) -> str:
+
+    model.eval()
+
+    solver_name = "scip"
+    timelimit = 300
+
+    props = [0.5, 0.6, 0.7, 0.8, 0.9]
+
+    grd_vals = {p: [] for p in props}
+    gd_vals = {p: [] for p in props}
+    opt_vals = []
+
+    c = 0
+    limit = max_instances
+
+    with torch.no_grad():
+        bar = Bar("[Test]", max=len(loader))
+
+        for pb, data, y in CUDAPrefetcher(loader, device):
+            problem = pb[0]
+
+            opt_val, t_opt = _solve_full_opt_with_cache(problem, solver_name, timelimit)
+            opt_vals.append([opt_val, t_opt])
+            print("OPT:", opt_vals[-1])
+
+            for prop in props:
+
+                # -------- GRD (run_every=1) --------
+                t0 = time.perf_counter()
+
+                pred = adapter.forward_fn(model, data)
+                cfg["eval"]["greedy_decimation"]["args"]["run_every"] = 1
+                backend = adapter.decimation_backend_fn(problem, data, pred, cfg, device=device)
+                padapter = adapter.decimation_adapter_fn(problem, cfg, fix_prop=prop)
+
+                sol, free = greedy_decimation(problem, backend, padapter)
+
+                _sync(device)
+                t1 = time.perf_counter()
+
+                partial = problem.solve(
+                    solver=solver_name,
+                    verbose=False,
+                    partial_solution=(sol, free),
+                    timelimit=timelimit,
+                )
+
+                val = float(np.asarray(partial.x).sum())
+                t2 = time.perf_counter()
+
+                total_t = (t1 - t0) + (t2 - t1)
+                gap = (val - opt_val) / opt_val
+
+                grd_vals[prop].append([gap, total_t])
+                print(f"GRD p={prop}:", grd_vals[prop][-1])
+
+                # -------- GD (run_every=1e6) --------
+                t0 = time.perf_counter()
+
+                pred = adapter.forward_fn(model, data)
+                cfg["eval"]["greedy_decimation"]["args"]["run_every"] = 1000000
+                backend = adapter.decimation_backend_fn(problem, data, pred, cfg, device=device)
+                padapter = adapter.decimation_adapter_fn(problem, cfg, fix_prop=prop)
+
+                sol, free = greedy_decimation(problem, backend, padapter)
+
+                _sync(device)
+                t1 = time.perf_counter()
+
+                partial = problem.solve(
+                    solver=solver_name,
+                    verbose=False,
+                    partial_solution=(sol, free),
+                    timelimit=timelimit,
+                )
+
+                val = float(np.asarray(partial.x).sum())
+                t2 = time.perf_counter()
+
+                total_t = (t1 - t0) + (t2 - t1)
+                gap = (val - opt_val) / opt_val
+
+                gd_vals[prop].append([gap, total_t])
+                print(f"GD  p={prop}:", gd_vals[prop][-1])
+
+            print("----")
+            bar.next()
+
+            c += 1
+            if limit is not None and c >= limit:
+                break
+
+        bar.finish()
+
+    summary = {
+        "count": len(opt_vals),
+        "grd": {},
+        "gd": {},
+    }
+
+    for prop in props:
+        g = [x[0] for x in grd_vals[prop]]
+        t = [x[1] for x in grd_vals[prop]]
+        summary["grd"][str(prop)] = {
+            "gap_mean": _ms(g)[0],
+            "gap_std": _ms(g)[1],
+            "time_mean_s": _ms(t)[0],
+            "time_std_s": _ms(t)[1],
+        }
+
+    for prop in props:
+        g = [x[0] for x in gd_vals[prop]]
+        t = [x[1] for x in gd_vals[prop]]
+        summary["gd"][str(prop)] = {
+            "gap_mean": _ms(g)[0],
+            "gap_std": _ms(g)[1],
+            "time_mean_s": _ms(t)[0],
+            "time_std_s": _ms(t)[1],
+        }
+
+    out_path = Path(checkpoint_path).parent.parent / "test_eval_nair.json"
+    with open(out_path, "w") as f:
+        json.dump(summary, f, indent=2)
+
+    return str(out_path)
+
+
+def run_test(cfg: Dict[str, Any], checkpoint_path: str):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    loaders = make_loaders(cfg, splits=["test"])
+
+    adapter = METHOD_REGISTRY[cfg["train"]["method"]]
+    model = build_model(cfg, device)
+
+    load_checkpoint(checkpoint_path, model, optimizer=None, map_location=device)
+
+    return final_test_eval_nair(
+        cfg,
+        adapter,
+        model,
+        loaders.test_loader,
+        device,
+        checkpoint_path,
+        "",
+        max_instances=cfg.get("max_test_instances"),
+    )
+
+
+def main():
+    base = build_base_parser()
+    args, _ = base.parse_known_args()
+
+    cfg = load_run_config(args.config)
+    validate_config(cfg)
+
+    parser = build_full_parser(cfg)
+    args = parser.parse_args()
+
+    cfg = merge_cli_overrides(cfg, args)
+
+    if hasattr(args, "max_test_instances"):
+        cfg["max_test_instances"] = args.max_test_instances
+
+    paths = make_run_paths(cfg)
+    ckpt = _pick_checkpoint_path(cfg, paths, args)
+
+    stats = run_test(cfg, ckpt)
+    print(stats)
+
+
+if __name__ == "__main__":
+    main()

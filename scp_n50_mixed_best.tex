@@ -1,0 +1,335 @@
+% This file was created with tikzplotlib v0.10.1.
+\begin{tikzpicture}
+
+\definecolor{crimson2143940}{RGB}{214,39,40}
+\definecolor{darkgray176}{RGB}{176,176,176}
+\definecolor{darkorange25512714}{RGB}{255,127,14}
+\definecolor{forestgreen4416044}{RGB}{44,160,44}
+\definecolor{lightgray204}{RGB}{204,204,204}
+\definecolor{mediumpurple148103189}{RGB}{148,103,189}
+\definecolor{orchid227119194}{RGB}{227,119,194}
+\definecolor{sienna1408675}{RGB}{140,86,75}
+\definecolor{steelblue31119180}{RGB}{31,119,180}
+
+\begin{groupplot}[group style={group size=2 by 2}]
+\nextgroupplot[
+tick align=outside,
+tick pos=left,
+x grid style={darkgray176},
+xmin=0, xmax=1,
+xtick style={color=black},
+y grid style={darkgray176},
+ymin=0, ymax=1,
+ytick style={color=black}
+]
+
+\nextgroupplot[
+tick align=outside,
+tick pos=left,
+x grid style={darkgray176},
+xmin=0, xmax=1,
+xtick style={color=black},
+y grid style={darkgray176},
+ymin=0, ymax=1,
+ytick style={color=black}
+]
+
+\nextgroupplot[
+tick align=outside,
+tick pos=left,
+x grid style={darkgray176},
+xmin=0, xmax=1,
+xtick style={color=black},
+y grid style={darkgray176},
+ymin=0, ymax=1,
+ytick style={color=black}
+]
+
+\nextgroupplot[
+tick align=outside,
+tick pos=left,
+x grid style={darkgray176},
+xmin=0, xmax=1,
+xtick style={color=black},
+y grid style={darkgray176},
+ymin=0, ymax=1,
+ytick style={color=black}
+]
+\end{groupplot}
+
+\begin{groupplot}[group style={group size=2 by 2}]
+\nextgroupplot[
+log basis x={10},
+tick align=outside,
+tick pos=left,
+title={Pareto: Runtime vs Gap},
+x grid style={darkgray176},
+xlabel={Runtime (s)},
+xmajorgrids,
+xmin=0.0382552015427704, xmax=1.13122162828969,
+xmode=log,
+xtick style={color=black},
+xtick={0.001,0.01,0.1,1,10,100},
+xticklabels={
+  \(\displaystyle {10^{-3}}\),
+  \(\displaystyle {10^{-2}}\),
+  \(\displaystyle {10^{-1}}\),
+  \(\displaystyle {10^{0}}\),
+  \(\displaystyle {10^{1}}\),
+  \(\displaystyle {10^{2}}\)
+},
+y grid style={darkgray176},
+ylabel={Gap (\%)},
+ymajorgrids,
+ymin=0.46589898989899, ymax=8.50056565656566,
+ytick style={color=black}
+]
+\addplot [semithick, steelblue31119180, mark=*, mark size=3, mark options={solid}]
+table {%
+0.0531592645859346 1.31555555555556
+0.047894343301421 2.15535353535354
+0.0446218569956254 3.32181818181818
+0.0462797573062126 5.5010101010101
+0.0492485746208113 7.99535353535354
+};
+\addplot [semithick, sienna1408675, mark=*, mark size=3, mark options={solid}]
+table {%
+0.195885555677465 0.873737373737374
+0.19111349684454 1.39454545454545
+0.184869603958505 2.00909090909091
+0.182774256774166 2.88484848484849
+0.182351896431472 4.29171717171717
+};
+\addplot [semithick, orchid227119194, mark=*, mark size=3, mark options={solid}]
+table {%
+0.63474965326098 0.831111111111111
+0.716260478485667 1.06929292929293
+0.801418313685514 1.53191919191919
+0.898569299806841 1.78828282828283
+0.969818700822012 1.86828282828283
+};
+\addplot [semithick, crimson2143940, mark=*, mark size=3, mark options={solid}]
+table {%
+0.207384664838668 1.01111111111111
+0.202682344879198 1.61232323232323
+0.196343929060153 2.50989898989899
+0.194246814861603 4.13818181818182
+0.19385058823158 5.68060606060606
+};
+\addplot [semithick, mediumpurple148103189, mark=*, mark size=3, mark options={solid}]
+table {%
+0.687745523172023 0.884444444444444
+0.742887339151173 1.45818181818182
+0.815705424738 2.21757575757576
+0.89466471032222 3.4010101010101
+0.947926537556923 3.96888888888889
+};
+\addplot [semithick, darkorange25512714, mark=*, mark size=3, mark options={solid}]
+table {%
+0.129990039316763 1.17111111111111
+0.122681376422581 2.0430303030303
+0.112618070731813 3.27737373737374
+0.110949973754352 5.57151515151515
+0.110415697651508 8.13535353535354
+};
+\addplot [semithick, forestgreen4416044, mark=*, mark size=3, mark options={solid}]
+table {%
+0.511182649901195 1.27777777777778
+0.548876848609827 2.05939393939394
+0.598207885302138 3.51777777777778
+0.64932990619156 5.72282828282828
+0.678116374436184 7.75777777777778
+};
+\addplot [thick, black]
+table {%
+0.0446218569956254 3.32181818181818
+0.047894343301421 2.15535353535354
+0.0531592645859346 1.31555555555556
+0.129990039316763 1.17111111111111
+0.195885555677465 0.873737373737374
+0.63474965326098 0.831111111111111
+};
+\addplot [semithick, steelblue31119180]
+table {%
+0.200310266066135 0.46589898989899
+0.200310266066135 8.50056565656566
+};
+
+\nextgroupplot[
+log basis y={10},
+tick align=outside,
+tick pos=left,
+title={Runtime vs p},
+x grid style={darkgray176},
+xlabel={p},
+xmajorgrids,
+xmin=0.48, xmax=0.92,
+xtick style={color=black},
+y grid style={darkgray176},
+ylabel={Runtime (s)},
+ymajorgrids,
+ymin=0.0382552015427704, ymax=1.13122162828969,
+ymode=log,
+ytick style={color=black},
+ytick={0.001,0.01,0.1,1,10,100},
+yticklabels={
+  \(\displaystyle {10^{-3}}\),
+  \(\displaystyle {10^{-2}}\),
+  \(\displaystyle {10^{-1}}\),
+  \(\displaystyle {10^{0}}\),
+  \(\displaystyle {10^{1}}\),
+  \(\displaystyle {10^{2}}\)
+}
+]
+\addplot [semithick, steelblue31119180, mark=*, mark size=3, mark options={solid}]
+table {%
+0.5 0.0531592645859346
+0.6 0.047894343301421
+0.7 0.0446218569956254
+0.8 0.0462797573062126
+0.9 0.0492485746208113
+};
+\addplot [semithick, sienna1408675, mark=*, mark size=3, mark options={solid}]
+table {%
+0.5 0.195885555677465
+0.6 0.19111349684454
+0.7 0.184869603958505
+0.8 0.182774256774166
+0.9 0.182351896431472
+};
+\addplot [semithick, orchid227119194, mark=*, mark size=3, mark options={solid}]
+table {%
+0.5 0.63474965326098
+0.6 0.716260478485667
+0.7 0.801418313685514
+0.8 0.898569299806841
+0.9 0.969818700822012
+};
+\addplot [semithick, crimson2143940, mark=*, mark size=3, mark options={solid}]
+table {%
+0.5 0.207384664838668
+0.6 0.202682344879198
+0.7 0.196343929060153
+0.8 0.194246814861603
+0.9 0.19385058823158
+};
+\addplot [semithick, mediumpurple148103189, mark=*, mark size=3, mark options={solid}]
+table {%
+0.5 0.687745523172023
+0.6 0.742887339151173
+0.7 0.815705424738
+0.8 0.89466471032222
+0.9 0.947926537556923
+};
+\addplot [semithick, darkorange25512714, mark=*, mark size=3, mark options={solid}]
+table {%
+0.5 0.129990039316763
+0.6 0.122681376422581
+0.7 0.112618070731813
+0.8 0.110949973754352
+0.9 0.110415697651508
+};
+\addplot [semithick, forestgreen4416044, mark=*, mark size=3, mark options={solid}]
+table {%
+0.5 0.511182649901195
+0.6 0.548876848609827
+0.7 0.598207885302138
+0.8 0.64932990619156
+0.9 0.678116374436184
+};
+\addplot [semithick, steelblue31119180]
+table {%
+0.48 0.200310266066135
+0.92 0.200310266066135
+};
+
+\nextgroupplot[
+legend cell align={left},
+legend style={
+  fill opacity=0.8,
+  draw opacity=1,
+  text opacity=1,
+  at={(0.03,0.97)},
+  anchor=north west,
+  draw=lightgray204
+},
+tick align=outside,
+tick pos=left,
+title={Gap Comparison},
+x grid style={darkgray176},
+xlabel={p},
+xmin=-0.64, xmax=4.64,
+xtick style={color=black},
+xtick={0,1,2,3,4},
+xticklabels={0.5,0.6,0.7,0.8,0.9},
+y grid style={darkgray176},
+ylabel={Gap (\%)},
+ymajorgrids,
+ymin=0, ymax=8.54212121212121,
+ytick style={color=black}
+]
+\draw[draw=none,fill=steelblue31119180] (axis cs:-0.4,0) rectangle (axis cs:-0.285714285714286,1.31555555555556);
+\addlegendimage{ybar,ybar legend,draw=none,fill=steelblue31119180}
+\addlegendentry{GNN EGG}
+
+\draw[draw=none,fill=steelblue31119180] (axis cs:0.6,0) rectangle (axis cs:0.714285714285714,2.15535353535354);
+\draw[draw=none,fill=steelblue31119180] (axis cs:1.6,0) rectangle (axis cs:1.71428571428571,3.32181818181818);
+\draw[draw=none,fill=steelblue31119180] (axis cs:2.6,0) rectangle (axis cs:2.71428571428571,5.5010101010101);
+\draw[draw=none,fill=steelblue31119180] (axis cs:3.6,0) rectangle (axis cs:3.71428571428571,7.99535353535354);
+\draw[draw=none,fill=sienna1408675] (axis cs:-0.285714285714286,0) rectangle (axis cs:-0.171428571428571,0.873737373737374);
+\addlegendimage{ybar,ybar legend,draw=none,fill=sienna1408675}
+\addlegendentry{MRF EGG}
+
+\draw[draw=none,fill=sienna1408675] (axis cs:0.714285714285714,0) rectangle (axis cs:0.828571428571429,1.39454545454545);
+\draw[draw=none,fill=sienna1408675] (axis cs:1.71428571428571,0) rectangle (axis cs:1.82857142857143,2.00909090909091);
+\draw[draw=none,fill=sienna1408675] (axis cs:2.71428571428571,0) rectangle (axis cs:2.82857142857143,2.88484848484849);
+\draw[draw=none,fill=sienna1408675] (axis cs:3.71428571428571,0) rectangle (axis cs:3.82857142857143,4.29171717171717);
+\draw[draw=none,fill=orchid227119194] (axis cs:-0.171428571428571,0) rectangle (axis cs:-0.0571428571428571,0.831111111111111);
+\addlegendimage{ybar,ybar legend,draw=none,fill=orchid227119194}
+\addlegendentry{MRF GD}
+
+\draw[draw=none,fill=orchid227119194] (axis cs:0.828571428571429,0) rectangle (axis cs:0.942857142857143,1.06929292929293);
+\draw[draw=none,fill=orchid227119194] (axis cs:1.82857142857143,0) rectangle (axis cs:1.94285714285714,1.53191919191919);
+\draw[draw=none,fill=orchid227119194] (axis cs:2.82857142857143,0) rectangle (axis cs:2.94285714285714,1.78828282828283);
+\draw[draw=none,fill=orchid227119194] (axis cs:3.82857142857143,0) rectangle (axis cs:3.94285714285714,1.86828282828283);
+\draw[draw=none,fill=crimson2143940] (axis cs:-0.0571428571428571,0) rectangle (axis cs:0.0571428571428571,1.01111111111111);
+\addlegendimage{ybar,ybar legend,draw=none,fill=crimson2143940}
+\addlegendentry{Pair MRF EGG}
+
+\draw[draw=none,fill=crimson2143940] (axis cs:0.942857142857143,0) rectangle (axis cs:1.05714285714286,1.61232323232323);
+\draw[draw=none,fill=crimson2143940] (axis cs:1.94285714285714,0) rectangle (axis cs:2.05714285714286,2.50989898989899);
+\draw[draw=none,fill=crimson2143940] (axis cs:2.94285714285714,0) rectangle (axis cs:3.05714285714286,4.13818181818182);
+\draw[draw=none,fill=crimson2143940] (axis cs:3.94285714285714,0) rectangle (axis cs:4.05714285714286,5.68060606060606);
+\draw[draw=none,fill=mediumpurple148103189] (axis cs:0.0571428571428571,0) rectangle (axis cs:0.171428571428571,0.884444444444444);
+\addlegendimage{ybar,ybar legend,draw=none,fill=mediumpurple148103189}
+\addlegendentry{Pair MRF GD}
+
+\draw[draw=none,fill=mediumpurple148103189] (axis cs:1.05714285714286,0) rectangle (axis cs:1.17142857142857,1.45818181818182);
+\draw[draw=none,fill=mediumpurple148103189] (axis cs:2.05714285714286,0) rectangle (axis cs:2.17142857142857,2.21757575757576);
+\draw[draw=none,fill=mediumpurple148103189] (axis cs:3.05714285714286,0) rectangle (axis cs:3.17142857142857,3.4010101010101);
+\draw[draw=none,fill=mediumpurple148103189] (axis cs:4.05714285714286,0) rectangle (axis cs:4.17142857142857,3.96888888888889);
+\draw[draw=none,fill=darkorange25512714] (axis cs:0.171428571428571,0) rectangle (axis cs:0.285714285714286,1.17111111111111);
+\addlegendimage{ybar,ybar legend,draw=none,fill=darkorange25512714}
+\addlegendentry{Tree MRF EGG}
+
+\draw[draw=none,fill=darkorange25512714] (axis cs:1.17142857142857,0) rectangle (axis cs:1.28571428571429,2.0430303030303);
+\draw[draw=none,fill=darkorange25512714] (axis cs:2.17142857142857,0) rectangle (axis cs:2.28571428571429,3.27737373737374);
+\draw[draw=none,fill=darkorange25512714] (axis cs:3.17142857142857,0) rectangle (axis cs:3.28571428571429,5.57151515151515);
+\draw[draw=none,fill=darkorange25512714] (axis cs:4.17142857142857,0) rectangle (axis cs:4.28571428571429,8.13535353535354);
+\draw[draw=none,fill=forestgreen4416044] (axis cs:0.285714285714286,0) rectangle (axis cs:0.4,1.27777777777778);
+\addlegendimage{ybar,ybar legend,draw=none,fill=forestgreen4416044}
+\addlegendentry{Tree MRF GD}
+
+\draw[draw=none,fill=forestgreen4416044] (axis cs:1.28571428571429,0) rectangle (axis cs:1.4,2.05939393939394);
+\draw[draw=none,fill=forestgreen4416044] (axis cs:2.28571428571429,0) rectangle (axis cs:2.4,3.51777777777778);
+\draw[draw=none,fill=forestgreen4416044] (axis cs:3.28571428571429,0) rectangle (axis cs:3.4,5.72282828282828);
+\draw[draw=none,fill=forestgreen4416044] (axis cs:4.28571428571429,0) rectangle (axis cs:4.4,7.75777777777778);
+\end{groupplot}
+
+\draw ({$(current bounding box.south west)!0.5!(current bounding box.south east)$}|-{$(current bounding box.south west)!0.98!(current bounding box.north west)$}) node[
+  scale=0.9,
+  anchor=north,
+  text=black,
+  rotate=0.0
+]{SCP(n=50, m=50, k=5) — best file per label};
+\end{tikzpicture}

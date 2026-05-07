@@ -1,0 +1,207 @@
+{
+  "table_type": "seed_aggregate",
+  "label": "tab:mrf_nair_inference_results",
+  "caption": "Average relative gap and runtimes.",
+
+  "group_key": "dataset_id",
+  "multirow_group_col": "dataset_id",
+  "group_rule": "\\midrule",
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "seed_pattern": "{prefix}_seed{seed}/test_eval.json",
+  "model_tokens": [
+    "var_logits",
+    "lbp",
+    "nmf"
+  ],
+  "metric_scales": {
+    "gap": 100.0,
+    "relative_gap": 100.0
+  },
+  "columns": [
+    {
+      "title": "Dataset",
+      "source": "dataset_id",
+      "align": "l"
+    },
+    {
+      "title": "Model",
+      "source": "model_architecture",
+      "align": "l"
+    },
+    {
+      "title": "EGG rel. gap (\\%)",
+      "method": "entropy_greedy",
+      "metric": "gap",
+      "stat": "mean",
+      "format": "number",
+      "cell_format": "mean_std"
+    },
+    {
+      "title": "Best EGG rel. gap (\\%)",
+      "method": "egg",
+      "metric": "relative_gap",
+      "stat": "best",
+      "format": "number",
+      "suppress_if": {
+        "model_architecture": ["PBP", "PMF"]
+      }
+
+    },
+    {
+      "title": "EGG time (s)",
+      "method": "egg",
+      "metric": "runtime",
+      "stat": "mean",
+      "format": "number",
+      "cell_format": "mean_std"
+    },
+    {
+      "title": "GD rel. gap (\\%)",
+      "method": "gd",
+      "metric": "relative_gap",
+      "stat": "mean",
+      "format": "number",
+      "cell_format": "mean_std",
+      "suppress_if": {
+        "model_architecture": ["GNN"]
+      }
+
+    },
+    {
+      "title": "Best GD rel. gap (\\%)",
+      "method": "gd",
+      "metric": "relative_gap",
+      "stat": "best",
+      "format": "number",
+      "suppress_if": {
+        "model_architecture": ["GNN", "PBP", "PMF"]
+      }
+
+    },
+    {
+      "title": "GD time (s)",
+      "method": "gd",
+      "metric": "runtime",
+      "stat": "mean",
+      "format": "number",
+      "cell_format": "mean_std",
+      "suppress_if": {
+        "model_architecture": ["GNN"]
+      }
+
+    }
+  ],
+  "rows": [
+    {
+      "run_prefix": "runs/scp_n50_m50_k5_pbp_default",
+      "dataset_id": "SC-S",
+      "model_architecture": "PBP"
+    },
+    {
+      "run_prefix": "runs/scp_n50_m50_k5_pmf_default",
+      "dataset_id": "SC-S",
+      "model_architecture": "PMF"
+    },
+
+    {
+      "run_prefix": "runs/scp_n50_m50_k5_var_logits_bce",
+      "dataset_id": "SC-S",
+      "model_architecture": "GNN"
+    },
+    {
+      "run_prefix": "runs/scp_n50_m50_k5_lbp_fce",
+      "dataset_id": "SC-S",
+      "model_architecture": "LBP"
+    },
+    {
+      "run_prefix": "runs/scp_n50_m50_k5_nmf_fce",
+      "dataset_id": "SC-S",
+      "model_architecture": "NMF"
+    },
+
+    {
+      "run_prefix": "runs/scp_n120-180_m150-250_k5_pbp_default",
+      "dataset_id": "SC-M",
+      "model_architecture": "PBP"
+    },
+    {
+      "run_prefix": "runs/scp_n120-180_m150-250_k5_pmf_default",
+      "dataset_id": "SC-M",
+      "model_architecture": "PMF"
+    },
+    {
+      "run_prefix": "runs/scp_n120-180_m150-250_k5_var_logits_bce",
+      "dataset_id": "SC-M",
+      "model_architecture": "GNN"
+    },
+    {
+      "run_prefix": "runs/scp_n120-180_m150-250_k5_lbp_fce",
+      "dataset_id": "SC-M",
+      "model_architecture": "LBP"
+    },
+    {
+      "run_prefix": "runs/scp_n120-180_m150-250_k5_nmf_fce",
+      "dataset_id": "SC-M",
+      "model_architecture": "NMF"
+    },
+
+
+    {
+      "run_prefix": "runs/mis_n100_p0.15_pbp_default",
+      "dataset_id": "MIS-S",
+      "model_architecture": "PBP"
+    },
+    {
+      "run_prefix": "runs/mis_n100_p0.15_pmf_default",
+      "dataset_id": "MIS-S",
+      "model_architecture": "PMF"
+    },
+    {
+      "run_prefix": "runs/mis_n100_p0.15_var_logits_bce",
+      "dataset_id": "MIS-S",
+      "model_architecture": "GNN"
+    },
+    {
+      "run_prefix": "runs/mis_n100_p0.15_lbp_fce",
+      "dataset_id": "MIS-S",
+      "model_architecture": "LBP"
+    },
+    {
+      "run_prefix": "runs/mis_n100_p0.15_nmf_fce",
+      "dataset_id": "MIS-S",
+      "model_architecture": "NMF"
+    },
+
+
+    {
+      "run_prefix": "runs/mis_n200-300_p0.15_maxdeg15_pbp_default",
+      "dataset_id": "MIS-M",
+      "model_architecture": "PBP"
+    },
+    {
+      "run_prefix": "runs/mis_n200-300_p0.15_maxdeg15_pmf_default",
+      "dataset_id": "MIS-M",
+      "model_architecture": "PMF"
+    },
+    {
+      "run_prefix": "runs/mis_n200-300_p0.15_var_logits_bce",
+      "dataset_id": "MIS-M",
+      "model_architecture": "GNN"
+    },
+    {
+      "run_prefix": "runs/mis_n200-300_p0.15_lbp_fce",
+      "dataset_id": "MIS-M",
+      "model_architecture": "LBP"
+    },
+    {
+      "run_prefix": "runs/mis_n200-300_p0.15_nmf_fce",
+      "dataset_id": "MIS-M",
+      "model_architecture": "NMF"
+    }
+
+  ]
+}

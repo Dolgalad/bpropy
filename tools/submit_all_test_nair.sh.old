@@ -1,0 +1,20 @@
+#!/bin/bash
+
+SUBMIT_SCRIPT="./tools/submit_test_nair.sh"
+
+# SCP (n=50, m=50, k=5)
+${SUBMIT_SCRIPT} $HOME/bpropy/configs/train/scp/scp_n50_m50_k5_var_logits_bce.json 
+${SUBMIT_SCRIPT} $HOME/bpropy/configs/train/scp/scp_n50_m50_k5_lbp_vce.json 
+${SUBMIT_SCRIPT} $HOME/bpropy/configs/train/scp/scp_n50_m50_k5_lbp_vce_tree_approx_max_transformer.json 
+${SUBMIT_SCRIPT} $HOME/bpropy/configs/train/scp/scp_n50_m50_k5_lbp_vce_pairwise_approx_max_transformer.json 
+
+# SCP (n=[120,180], m=[150,250], k=5)
+${SUBMIT_SCRIPT} $HOME/bpropy/configs/train/scp/scp_n120-180_m150-250_k5_var_logits_bce.json 
+${SUBMIT_SCRIPT} $HOME/bpropy/configs/train/scp/scp_n120-180_m150-250_k5_lbp_vce.json 
+${SUBMIT_SCRIPT} $HOME/bpropy/configs/train/scp/scp_n120-180_m150-250_k5_lbp_vce_tree_approx_max_transformer.json 
+${SUBMIT_SCRIPT} $HOME/bpropy/configs/train/scp/scp_n120-180_m150-250_k5_lbp_vce_pairwise_approx_max_transformer.json 
+
+# SCP (n=[150,300], m=[150,300], k=15)
+${SUBMIT_SCRIPT} $HOME/bpropy/configs/train/scp/scp_n150-300_m150-300_k15_var_logits_bce.json 
+${SUBMIT_SCRIPT} $HOME/bpropy/configs/train/scp/scp_n150-300_m150-300_k15_lbp_vce_tree_approx_max_transformer.json 
+${SUBMIT_SCRIPT} $HOME/bpropy/configs/train/scp/scp_n150-300_m150-300_k15_lbp_vce_pairwise_approx_max_transformer.json 

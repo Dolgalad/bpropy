@@ -1,0 +1,99 @@
+{
+  "figure_type": "grouped_bar",
+  "title": "Average optimality gap by dataset",
+  "xlabel": "Dataset",
+  "ylabel": "Optimality gap (\\%)",
+  "show_error_bars": false,
+  "metric_scales": {
+    "gap": 100.0,
+    "relative_gap": 100.0
+  },
+  "seeds": [0, 1, 2],
+  "seed_pattern": "{prefix}_seed{seed}/test_eval.json",
+  "manual_legend": true,
+  "legend_entries_per_row": 4,
+  "legend_anchor": "$(current bounding box.south) + (0, -0.25cm)$",
+  "legend_marker_width": 0.42,
+  "legend_marker_height": 0.16,
+
+  "pattern_legend_marker_width": 0.42,
+  "pattern_legend_marker_height": 0.16,
+
+  "fill_opacity": 0.55,
+  "segment_draw": "black",
+  "segment_line_width": "0.3pt",
+  "pattern_color": "black",
+
+  "series": [
+    {"key": "pbp", "title": "PBP+EGG", "method": "entropy_greedy", "metric": "gap"     , "color": "PBPEGGColor"},
+    {"key": "pbp_gd", "title": "PBP+GD", "method": "guided_decimation", "metric": "gap", "color": "PBPGDColor"},
+    {"key": "pmf", "title": "PMF+EGG", "method": "entropy_greedy", "metric": "gap"     , "color": "PMFEGGColor"},
+    {"key": "pmf_gd", "title": "PMF+GD", "method": "guided_decimation", "metric": "gap", "color": "PMFGDColor"},
+    {"key": "gnn", "title": "GNN+EGG", "method": "entropy_greedy", "metric": "gap"      ,"color": "GNNEGGColor"},
+    {"key": "lbp", "title": "LBP+EGG", "method": "entropy_greedy", "metric": "gap"      ,"color": "LBPEGGColor"},
+    {"key": "lbp_gd", "title": "LBP+GD", "method": "guided_decimation", "metric": "gap" ,"color": "LBPGDColor" },
+    {"key": "nmf", "title": "NMF+EGG", "method": "entropy_greedy", "metric": "gap"      ,"color": "NMFEGGColor" },
+    {"key": "nmf_gd", "title": "NMF+GD", "method": "guided_decimation", "metric": "gap" ,"color": "NMFGDColor" }
+
+  ],
+  "groups": [
+    {
+      "label": "SC-S",
+      "results": {
+        "pbp":    {"run_prefix": "runs/scp_n50_m50_k5_pbp_default"},
+        "pbp_gd": {"run_prefix": "runs/scp_n50_m50_k5_pbp_default"},
+        "pmf":    {"run_prefix": "runs/scp_n50_m50_k5_pmf_default"},
+        "pmf_gd": {"run_prefix": "runs/scp_n50_m50_k5_pmf_default"},
+        "gnn":    {"run_prefix": "runs/scp_n50_m50_k5_var_logits_bce"},
+        "lbp":    {"run_prefix": "runs/scp_n50_m50_k5_lbp_fce"},
+        "lbp_gd": {"run_prefix": "runs/scp_n50_m50_k5_lbp_fce"},
+        "nmf":    {"run_prefix": "runs/scp_n50_m50_k5_nmf_fce"},
+        "nmf_gd": {"run_prefix": "runs/scp_n50_m50_k5_nmf_fce"}
+      }
+    },
+    {
+      "label": "SC-M",
+      "results": {
+        "pbp":       {"run_prefix": "runs/scp_n120-180_m150-250_k5_pbp_default"},
+        "pbp_gd":    {"run_prefix": "runs/scp_n120-180_m150-250_k5_pbp_default"},
+        "pmf":       {"run_prefix": "runs/scp_n120-180_m150-250_k5_pmf_default"},
+        "pmf_gd":    {"run_prefix": "runs/scp_n120-180_m150-250_k5_pmf_default"},
+        "gnn":       {"run_prefix": "runs/scp_n120-180_m150-250_k5_var_logits_bce"},
+        "lbp":       {"run_prefix": "runs/scp_n120-180_m150-250_k5_lbp_fce"},
+        "lbp_gd":    {"run_prefix": "runs/scp_n120-180_m150-250_k5_lbp_fce"},
+        "nmf":       {"run_prefix": "runs/scp_n120-180_m150-250_k5_nmf_fce"},
+        "nmf_gd":    {"run_prefix": "runs/scp_n120-180_m150-250_k5_nmf_fce"}
+      }
+    },
+
+    {
+      "label": "MIS-S",
+      "results": {
+        "pbp":       {"run_prefix": "runs/mis_n100_p0.15_pbp_default"},
+        "pbp_gd":    {"run_prefix": "runs/mis_n100_p0.15_pbp_default"},
+        "pmf":       {"run_prefix": "runs/mis_n100_p0.15_pmf_default"},
+        "pmf_gd":    {"run_prefix": "runs/mis_n100_p0.15_pmf_default"},
+        "gnn":       {"run_prefix": "runs/mis_n100_p0.15_var_logits_bce"},
+        "lbp":       {"run_prefix": "runs/mis_n100_p0.15_lbp_fce"},
+        "lbp_gd":    {"run_prefix": "runs/mis_n100_p0.15_lbp_fce"},
+        "nmf":       {"run_prefix": "runs/mis_n100_p0.15_nmf_fce"},
+        "nmf_gd":    {"run_prefix": "runs/mis_n100_p0.15_nmf_fce"}
+      }
+    },
+    {
+      "label": "MIS-M",
+      "results": {
+        "pbp":       {"run_prefix":    "runs/mis_n200-300_p0.15_maxdeg15_pbp_default"},
+        "pbp_gd":    {"run_prefix":    "runs/mis_n200-300_p0.15_maxdeg15_pbp_default"},
+        "pmf":       {"run_prefix":    "runs/mis_n200-300_p0.15_maxdeg15_pmf_default"},
+        "pmf_gd":    {"run_prefix":    "runs/mis_n200-300_p0.15_maxdeg15_pmf_default"},
+        "gnn":       {"run_prefix":    "runs/mis_n200-300_p0.15_var_logits_bce"},
+        "lbp":       {"run_prefix":    "runs/mis_n200-300_p0.15_lbp_fce"},
+        "lbp_gd":    {"run_prefix":    "runs/mis_n200-300_p0.15_lbp_fce"},
+        "nmf":       {"run_prefix":    "runs/mis_n200-300_p0.15_nmf_fce"},
+        "nmf_gd":    {"run_prefix":    "runs/mis_n200-300_p0.15_nmf_fce"}
+      }
+    }
+
+  ]
+}

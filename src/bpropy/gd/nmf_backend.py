@@ -37,6 +37,7 @@ class NMFBackend:
     _step: int = 0
 
     def reset(self, pb: Any) -> None:
+
         from bpropy.mrf.nmf_edges import NMFEdges
         from bpropy.mrf.naive_mean_field import naive_mean_field
         from bpropy.mrf.evidence_factory import EvidenceMaskFactory

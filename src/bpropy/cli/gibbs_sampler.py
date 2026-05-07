@@ -468,7 +468,7 @@ def run_gibbs(cfg: Dict[str, Any], checkpoint_path: str, args: argparse.Namespac
                 sense="min",
                 gap_mode="relative",
                 out_dir="figs",
-                tag="test_000123",
+                tag=f"test_{idx}",
                 show=False
             )
             print(gap_path, feas_path)

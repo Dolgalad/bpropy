@@ -36,6 +36,13 @@ def build_full_parser(defaults: Dict[str, Any]) -> argparse.ArgumentParser:
     """
     p = argparse.ArgumentParser(prog="bpropy-test")
 
+    p.add_argument(
+        "--output-json",
+        dest="output_json",
+        default=argparse.SUPPRESS,
+        help="Path to the JSON file where test evaluation results will be written.",
+    )
+
     # still include these so `-h` shows them and they can be re-parsed
     p.add_argument("--config", required=True, help="Path to JSON config.")
     p.add_argument("--print-config", action="store_true", help="Print resolved config and exit.")
@@ -110,7 +117,7 @@ def _pick_checkpoint_path(cfg: Dict[str, Any], paths, args: argparse.Namespace) 
     )
 
 
-def run_test(cfg: Dict[str, Any], checkpoint_path: str) -> Dict[str, Any]:
+def run_test(cfg: Dict[str, Any], checkpoint_path: str, output_json: Optional[str] = None) -> Dict[str, Any]:
     # seeds (match train script behavior)
     torch.manual_seed(int(cfg.get("seed", 0)))
     np.random.seed(int(cfg.get("seed", 0)))
@@ -136,7 +143,15 @@ def run_test(cfg: Dict[str, Any], checkpoint_path: str) -> Dict[str, Any]:
     load_checkpoint(checkpoint_path, model, optimizer=None, map_location=device)
 
     # run test eval (writes json) :contentReference[oaicite:5]{index=5}
-    out_path = final_test_eval(cfg, adapter_eval, model, loaders.test_loader, device, paths.log_dir)
+    out_path = final_test_eval(
+        cfg=cfg,
+        adapter=adapter_eval,
+        model=model,
+        loader=loaders.test_loader,
+        device=device,
+        log_dir=paths.log_dir,
+        output_json=output_json,
+    )
 
     # print results to stdout
     with open(out_path, "r") as f:
@@ -174,7 +189,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     ckpt_path = _pick_checkpoint_path(cfg, paths, args)
     print("checkpoint path = ", ckpt_path)
 
-    stats = run_test(cfg, ckpt_path)
+    stats = run_test(cfg, ckpt_path, output_json=getattr(args, "output_json", None))
     print(json.dumps(stats, indent=2, sort_keys=True))
     return 0
 

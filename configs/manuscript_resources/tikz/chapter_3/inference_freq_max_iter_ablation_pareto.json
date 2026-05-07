@@ -1,0 +1,65 @@
+{
+  "root_dir": "../runs/inference_freq_max_iter_ablation",
+  "label": "fig:inference_freq_max_iter_ablation_pareto",
+  "caption": "Pareto frontiers for guided decimation ablations. Left: varying the reinference interval with fixed message-passing depth. Right: varying the number of message-passing iterations with fixed reinference interval.",
+  "datasets": [
+    {
+      "id": "mis_n100_p0.15",
+      "path": "mis_n100_p0.15",
+      "title": "MIS-S",
+      "color": "MISSColor"
+    },
+    {
+      "id": "mis_n200-300_p0.15",
+      "path": "mis_n200-300_p0.15",
+      "title": "MIS-M",
+      "color": "MISSColor"
+    },
+    {
+      "id": "scp_n50_m50_k5",
+      "path": "scp_n50_m50_k5",
+      "title": "SC-S",
+      "color": "MISSColor"
+    },
+    {
+      "id": "scp_n120-180_m150-250_k5",
+      "path": "scp_n120-180_m150-250_k5",
+      "title": "SC-M",
+      "color": "MISSColor"
+    }
+
+  ],
+  "panel_width": "0.42\\textwidth",
+  "panel_height": "0.16\\textwidth",
+  "xlabel": "Runtime (s)",
+  "ylabel": "Optimality gap",
+  "annotate_settings": true,
+  "layout": "dataset_grid",
+  "methods": [
+    "lbp_gd",
+    "nmf_gd"
+  ],
+  "method_styles": {
+    "lbp_gd": {
+      "title": "LBP+GD",
+      "mark": "*"
+    },
+    "nmf_gd": {
+      "title": "NMF+GD",
+      "mark": "square*"
+    }
+  },
+  "horizontal_sep": "0.9cm",
+  "vertical_sep": "0.95cm",
+  "show_xlabel_only_bottom": true,
+  "show_ylabel_every_row": true,
+  "show_ytick_labels_on_non_left": false,
+  "show_panel_titles": false,
+  "show_empty_datasets": true,
+  "connect_all_points": true,
+  "legend_mode": "methods",
+  "legend_columns": 2,
+  "legend_yshift": "-0.35cm",
+  "gap_scale": 100.0,
+  "prefer_record_ids": false
+}

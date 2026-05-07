@@ -1,0 +1,534 @@
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import os
+import sys
+import time
+from dataclasses import asdict, dataclass
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+
+import numpy as np
+import torch
+
+from bpropy.cli.train.config import load_run_config, merge_cli_overrides, validate_config
+from bpropy.cli.train.data import make_loaders
+from bpropy.datasets.prefetcher import CUDAPrefetcher
+from bpropy.cli.train.metrics import _sync, gap_from_solution
+
+from bpropy.mrf.canonical_parameters import canonical_parameters
+
+
+@dataclass
+class MethodStats:
+    gap_mean: float
+    gap_std: float
+    time_infer_mean: float
+    time_infer_std: float
+    time_solver_mean: float
+    time_solver_std: float
+    time_total_mean: float
+    time_total_std: float
+    value_mean: float
+    value_std: float
+
+
+def _ms(xs: Sequence[float]) -> Tuple[float, float]:
+    a = np.asarray(xs, dtype=np.float64)
+    if a.size == 0:
+        return 0.0, 0.0
+    if a.size == 1:
+        return float(a.mean()), 0.0
+    return float(a.mean()), float(a.std(ddof=1))
+
+
+def _problem_value(pb: Any, x: np.ndarray) -> float:
+    if hasattr(pb, "w"):
+        return float(np.dot(np.asarray(pb.w, dtype=float), np.asarray(x, dtype=float)))
+    return float(np.asarray(x, dtype=float).sum())
+
+
+def _is_feasible(pb: Any, x: np.ndarray, tol: float = 1e-8) -> Optional[bool]:
+    for name in ("is_feasible", "feasible", "check_feasible"):
+        fn = getattr(pb, name, None)
+        if callable(fn):
+            try:
+                return bool(fn(x))
+            except TypeError:
+                try:
+                    return bool(fn(x, tol=tol))
+                except Exception:
+                    pass
+            except Exception:
+                pass
+    try:
+        A, lb, ub = pb.linear_constraints_matrix()
+        Ax = A @ np.asarray(x, dtype=float)
+        lb = np.asarray(lb, dtype=float).reshape(-1)
+        ub = np.asarray(ub, dtype=float).reshape(-1)
+        return bool(np.all(Ax >= lb - tol) and np.all(Ax <= ub + tol))
+    except Exception:
+        return None
+
+
+class CanonicalBinaryMRF:
+    """Small, dependency-light loopy sum-product engine for the Park/canonical MRF.
+
+    It reconstructs the factor scopes from `pb.linear_constraints_matrix()` in the same
+    sorted order expected by `canonical_parameters`: unary factors first, then constraint
+    rows sorted by (scope size, lexicographic scope). This is intentionally independent of
+    the learned model stack.
+    """
+
+    def __init__(
+        self,
+        pb: Any,
+        *,
+        M: float,
+        unary_bias: float,
+        add_unaries: bool,
+        device: torch.device,
+        dtype: torch.dtype = torch.float32,
+        tol: float = 0.0,
+    ) -> None:
+        self.pb = pb
+        self.n = int(pb.nv())
+        self.device = device
+        self.dtype = dtype
+        self.add_unaries = bool(add_unaries)
+        self.theta = canonical_parameters(
+            pb,
+            M=M,
+            device=device,
+            dtype=dtype,
+            add_unaries=add_unaries,
+            unary_bias=unary_bias,
+            tol=tol,
+        ).detach()
+        self.scopes, self.log_potentials = self._unpack_theta()
+        self.var_to_factors: List[List[Tuple[int, int]]] = [[] for _ in range(self.n)]
+        for fi, scope in enumerate(self.scopes):
+            for li, v in enumerate(scope):
+                self.var_to_factors[v].append((fi, li))
+
+    def _constraint_scopes(self) -> List[Tuple[int, ...]]:
+        try:
+            import scipy.sparse as sp  # type: ignore
+        except Exception:
+            sp = None
+        A, _lb, _ub = self.pb.linear_constraints_matrix()
+        rows: List[Tuple[Tuple[int, ...], int]] = []
+        if sp is not None and sp.issparse(A):
+            A = A.tocsr()
+            for i in range(A.shape[0]):
+                start, end = A.indptr[i], A.indptr[i + 1]
+                cols = A.indices[start:end]
+                if cols.size == 0:
+                    continue
+                rows.append((tuple(sorted(int(j) for j in cols)), i))
+        else:
+            A_arr = np.asarray(A, dtype=float)
+            for i in range(A_arr.shape[0]):
+                cols = np.flatnonzero(A_arr[i] != 0)
+                if cols.size == 0:
+                    continue
+                rows.append((tuple(sorted(int(j) for j in cols)), i))
+        rows.sort(key=lambda t: (len(t[0]), list(t[0])))
+        return [scope for scope, _ in rows]
+
+    def _unpack_theta(self) -> Tuple[List[Tuple[int, ...]], List[torch.Tensor]]:
+        scopes: List[Tuple[int, ...]] = []
+        pots: List[torch.Tensor] = []
+        c = 0
+        if self.add_unaries:
+            for v in range(self.n):
+                scopes.append((v,))
+                pots.append(self.theta[c : c + 2].reshape(2).clone())
+                c += 2
+        for scope in self._constraint_scopes():
+            k = len(scope)
+            width = 1 << k
+            scopes.append(scope)
+            pots.append(self.theta[c : c + width].reshape([2] * k).clone())
+            c += width
+        if c != int(self.theta.numel()):
+            raise RuntimeError(f"theta unpack mismatch: consumed {c}, theta has {self.theta.numel()} entries")
+        return scopes, pots
+
+    @staticmethod
+    def _norm_logprob(logp: torch.Tensor) -> torch.Tensor:
+        return logp - torch.logsumexp(logp, dim=0)
+
+    def infer(
+        self,
+        *,
+        evidence: Optional[Dict[int, int]] = None,
+        max_iter: int = 50,
+        damping: float = 0.0,
+    ) -> torch.Tensor:
+        evidence = evidence or {}
+        damping = float(damping)
+        # messages are log probabilities of shape [2]
+        f_to_v: Dict[Tuple[int, int], torch.Tensor] = {}
+        v_to_f: Dict[Tuple[int, int], torch.Tensor] = {}
+        zero_msg = torch.zeros(2, device=self.device, dtype=self.dtype) - math.log(2.0)
+        for fi, scope in enumerate(self.scopes):
+            for li, _v in enumerate(scope):
+                f_to_v[(fi, li)] = zero_msg.clone()
+                v_to_f[(fi, li)] = zero_msg.clone()
+
+        ev_msgs: Dict[int, torch.Tensor] = {}
+        for v, val in evidence.items():
+            m = torch.full((2,), -1.0e9, device=self.device, dtype=self.dtype)
+            m[int(val)] = 0.0
+            ev_msgs[int(v)] = m
+
+        for _ in range(int(max_iter)):
+            # variable -> factor
+            new_v_to_f: Dict[Tuple[int, int], torch.Tensor] = {}
+            for fi, scope in enumerate(self.scopes):
+                for li, v in enumerate(scope):
+                    msg = ev_msgs.get(v, torch.zeros(2, device=self.device, dtype=self.dtype)).clone()
+                    for ofi, oli in self.var_to_factors[v]:
+                        if ofi == fi and oli == li:
+                            continue
+                        msg = msg + f_to_v[(ofi, oli)]
+                    msg = self._norm_logprob(msg)
+                    old = v_to_f[(fi, li)]
+                    new_v_to_f[(fi, li)] = self._norm_logprob((1.0 - damping) * msg + damping * old)
+            v_to_f = new_v_to_f
+
+            # factor -> variable
+            new_f_to_v: Dict[Tuple[int, int], torch.Tensor] = {}
+            for fi, scope in enumerate(self.scopes):
+                k = len(scope)
+                pot = self.log_potentials[fi]
+                for li, _v in enumerate(scope):
+                    table = pot.clone()
+                    for lj in range(k):
+                        if lj == li:
+                            continue
+                        shape = [1] * k
+                        shape[lj] = 2
+                        table = table + v_to_f[(fi, lj)].reshape(shape)
+                    # marginalize all variables except li
+                    dims = tuple(j for j in range(k) if j != li)
+                    msg = torch.logsumexp(table, dim=dims) if dims else table
+                    msg = self._norm_logprob(msg.reshape(2))
+                    old = f_to_v[(fi, li)]
+                    new_f_to_v[(fi, li)] = self._norm_logprob((1.0 - damping) * msg + damping * old)
+            f_to_v = new_f_to_v
+
+        beliefs = torch.zeros((self.n, 2), device=self.device, dtype=self.dtype)
+        for v in range(self.n):
+            b = ev_msgs.get(v, torch.zeros(2, device=self.device, dtype=self.dtype)).clone()
+            for fi, li in self.var_to_factors[v]:
+                b = b + f_to_v[(fi, li)]
+            beliefs[v] = torch.softmax(b, dim=0)
+        return beliefs
+
+
+def _entropy_binary(p1: np.ndarray, eps: float = 1e-12) -> np.ndarray:
+    p1 = np.clip(p1, eps, 1.0 - eps)
+    return -(p1 * np.log(p1) + (1.0 - p1) * np.log(1.0 - p1))
+
+
+def solve_egg(pb: Any, mrf: CanonicalBinaryMRF, *, max_iter: int, damping: float, device: torch.device) -> Tuple[np.ndarray, float, float]:
+    _sync(device)
+    t0 = time.perf_counter()
+    beliefs = mrf.infer(max_iter=max_iter, damping=damping)
+    _sync(device)
+    t1 = time.perf_counter()
+    scores = beliefs[:, 1].detach().cpu().numpy()
+    sol = np.asarray(pb.greedy(scores=scores).x, dtype=np.int64)
+    _sync(device)
+    t2 = time.perf_counter()
+    return sol, t1 - t0, t2 - t1
+
+
+def solve_gd(
+    pb: Any,
+    mrf: CanonicalBinaryMRF,
+    *,
+    max_iter: int,
+    damping: float,
+    run_every: int,
+    final_repair: bool,
+    fixed_score_bias: float,
+    device: torch.device,
+) -> Tuple[np.ndarray, float, float, Dict[str, Any]]:
+    n = int(pb.nv())
+    evidence: Dict[int, int] = {}
+    free = set(range(n))
+    infer_time = 0.0
+    solve_time = 0.0
+    run_every = max(1, int(run_every))
+    beliefs_np: Optional[np.ndarray] = None
+
+    _sync(device)
+    t_solver0 = time.perf_counter()
+    for step in range(n):
+        if beliefs_np is None or step % run_every == 0:
+            _sync(device)
+            ti0 = time.perf_counter()
+            beliefs = mrf.infer(evidence=evidence, max_iter=max_iter, damping=damping)
+            _sync(device)
+            infer_time += time.perf_counter() - ti0
+            beliefs_np = beliefs.detach().cpu().numpy()
+
+        p1 = beliefs_np[:, 1].copy()
+        ent = _entropy_binary(p1)
+        for v in range(n):
+            if v not in free:
+                ent[v] = np.inf
+        v_star = int(np.argmin(ent))
+        x_star = int(p1[v_star] >= 0.5)
+        evidence[v_star] = x_star
+        free.remove(v_star)
+
+    direct = np.zeros(n, dtype=np.int64)
+    for v, val in evidence.items():
+        direct[v] = int(val)
+
+    # The direct decimated assignment may be infeasible for generic ILPs.  By default,
+    # repair through the existing problem-specific greedy decoder while strongly biasing
+    # fixed decisions.  Disable with --gd-no-final-repair if you want the raw assignment.
+    if final_repair:
+        scores = np.where(direct > 0, fixed_score_bias, -fixed_score_bias).astype(float)
+        sol = np.asarray(pb.greedy(scores=scores).x, dtype=np.int64)
+    else:
+        sol = direct
+    _sync(device)
+    solve_time = time.perf_counter() - t_solver0 - infer_time
+    meta = {
+        "num_fixed": len(evidence),
+        "direct_feasible": _is_feasible(pb, direct),
+        "final_feasible": _is_feasible(pb, sol),
+    }
+    return sol, infer_time, solve_time, meta
+
+
+def evaluate_park(cfg: Dict[str, Any], args: argparse.Namespace) -> Dict[str, Any]:
+    torch.manual_seed(int(cfg.get("seed", 0)))
+    np.random.seed(int(cfg.get("seed", 0)))
+    device = torch.device("cuda" if torch.cuda.is_available() and not args.cpu else "cpu")
+
+    cfg.setdefault("data", {})["root"] = args.dataset_path
+    if args.test_split is not None:
+        cfg.setdefault("data", {})["test_split"] = args.test_split
+    if args.batch_size is not None:
+        cfg.setdefault("data", {})["batch_size"] = int(args.batch_size)
+    if args.num_workers is not None:
+        cfg.setdefault("data", {})["num_workers"] = int(args.num_workers)
+
+    loaders = make_loaders(cfg, splits=["test"])
+    maximize = bool(cfg.get("problem", {}).get("maximize", True))
+
+    per_instance: List[Dict[str, Any]] = []
+    egg_gaps: List[float] = []
+    egg_values: List[float] = []
+    egg_t_inf: List[float] = []
+    egg_t_sol: List[float] = []
+    gd_gaps: List[float] = []
+    gd_values: List[float] = []
+    gd_t_inf: List[float] = []
+    gd_t_sol: List[float] = []
+    preprocess_times: List[float] = []
+    n_ss: List[int] = []
+
+    count = 0
+    with torch.no_grad():
+        for pbs, data, y in CUDAPrefetcher(loaders.test_loader, device):
+            # This evaluator is intentionally instance-wise, matching your test path.
+            pb = pbs[0] if isinstance(pbs, (list, tuple)) else pbs
+            yy = y.detach().cpu().numpy().reshape(-1)
+            pre_t = float(getattr(data, "preprocess_time_s", 0.0))
+            preprocess_times.append(pre_t)
+
+            mrf = CanonicalBinaryMRF(
+                pb,
+                M=float(args.M),
+                unary_bias=float(args.unary_bias),
+                add_unaries=not args.no_unaries,
+                device=device,
+                tol=float(args.tol),
+            )
+            n_ss.append(int(mrf.theta.numel()))
+
+            egg_sol, egg_inf, egg_sol_t = solve_egg(
+                pb,
+                mrf,
+                max_iter=int(args.egg_max_iter),
+                damping=float(args.egg_damping),
+                device=device,
+            )
+            egg_val = _problem_value(pb, egg_sol)
+            egg_gap = float(gap_from_solution(float(yy.sum()), float(egg_sol.sum()), maximize=maximize, eps=1e-8))
+
+            gd_sol, gd_inf, gd_sol_t, gd_meta = solve_gd(
+                pb,
+                mrf,
+                max_iter=int(args.gd_max_iter),
+                damping=float(args.gd_damping),
+                run_every=int(args.gd_run_every),
+                final_repair=not args.gd_no_final_repair,
+                fixed_score_bias=float(args.gd_fixed_score_bias),
+                device=device,
+            )
+            gd_val = _problem_value(pb, gd_sol)
+            gd_gap = float(gap_from_solution(float(yy.sum()), float(gd_sol.sum()), maximize=maximize, eps=1e-8))
+
+            egg_gaps.append(egg_gap); egg_values.append(egg_val); egg_t_inf.append(egg_inf); egg_t_sol.append(egg_sol_t)
+            gd_gaps.append(gd_gap); gd_values.append(gd_val); gd_t_inf.append(gd_inf); gd_t_sol.append(gd_sol_t)
+
+            per_instance.append({
+                "idx": count,
+                "nv": int(pb.nv()),
+                "num_sufficient_statistics": int(mrf.theta.numel()),
+                "preprocess_time_s": pre_t,
+                "target_sum": float(yy.sum()),
+                "egg": {
+                    "value": egg_val,
+                    "sum": float(egg_sol.sum()),
+                    "gap": egg_gap,
+                    "time_infer_s": egg_inf,
+                    "time_solver_s": egg_sol_t,
+                    "time_total_s": pre_t + egg_inf + egg_sol_t,
+                    "feasible": _is_feasible(pb, egg_sol),
+                },
+                "gd": {
+                    "value": gd_val,
+                    "sum": float(gd_sol.sum()),
+                    "gap": gd_gap,
+                    "time_infer_s": gd_inf,
+                    "time_solver_s": gd_sol_t,
+                    "time_total_s": pre_t + gd_inf + gd_sol_t,
+                    **gd_meta,
+                },
+            })
+
+            count += 1
+            print(f"[{count}] nv={pb.nv()} EGG gap={egg_gap:.4f} GD gap={gd_gap:.4f}")
+            if args.test_limit is not None and count >= int(args.test_limit):
+                break
+
+    def pack(gaps: List[float], vals: List[float], tinf: List[float], tsol: List[float]) -> Dict[str, float]:
+        gm, gs = _ms(gaps)
+        vm, vs = _ms(vals)
+        im, istd = _ms(tinf)
+        sm, sstd = _ms(tsol)
+        tm, tstd = _ms([p + i + s for p, i, s in zip(preprocess_times, tinf, tsol)])
+        return asdict(MethodStats(gm, gs, im, istd, sm, sstd, tm, tstd, vm, vs))
+
+    result = {
+        "method": "PBP",
+        "method_name": "Park Belief Propagation",
+        "description": "Canonical hand-built MRF: theta=0 for feasible local assignments and theta=-M for infeasible local assignments; marginals are estimated by loopy sum-product BP.",
+        "dataset_path": args.dataset_path,
+        "output_dir": args.output_dir,
+        "count": count,
+        "maximize": maximize,
+        "canonical_args": {
+            "M": float(args.M),
+            "unary_bias": float(args.unary_bias),
+            "add_unaries": not args.no_unaries,
+            "tol": float(args.tol),
+        },
+        "egg_args": {"max_iter": int(args.egg_max_iter), "damping": float(args.egg_damping), "run_every": None},
+        "gd_args": {
+            "max_iter": int(args.gd_max_iter),
+            "damping": float(args.gd_damping),
+            "run_every": int(args.gd_run_every),
+            "final_repair": not args.gd_no_final_repair,
+        },
+        "num_ss_mean": _ms(n_ss)[0],
+        "num_ss_std": _ms(n_ss)[1],
+        "time_preprocess_mean": _ms(preprocess_times)[0],
+        "time_preprocess_std": _ms(preprocess_times)[1],
+        "egg": pack(egg_gaps, egg_values, egg_t_inf, egg_t_sol),
+        "gd": pack(gd_gaps, gd_values, gd_t_inf, gd_t_sol),
+        "instances": per_instance,
+    }
+    os.makedirs(args.output_dir, exist_ok=True)
+    out_path = os.path.join(args.output_dir, args.output_filename)
+    tmp_path = out_path + ".tmp"
+    with open(tmp_path, "w") as f:
+        json.dump(result, f, indent=2, sort_keys=True)
+    os.replace(tmp_path, out_path)
+    result["_test_eval_path"] = out_path
+    return result
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="bpropy-test-park")
+    p.add_argument("--config", required=True, help="Base JSON config; used only to construct the dataset/LPProblem objects.")
+    p.add_argument("--dataset-path", required=True, help="Dataset root/path to evaluate.")
+    p.add_argument("--output-dir", required=True, help="Directory where park_test_eval.json is written.")
+    p.add_argument("--output-filename", default="park_test_eval.json")
+    p.add_argument("--test-split", default=None)
+    p.add_argument("--batch-size", type=int, default=1)
+    p.add_argument("--num-workers", type=int, default=None)
+    p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--cpu", action="store_true")
+    p.add_argument("--test-limit", type=int, default=None)
+
+    p.add_argument("--M", type=float, default=20.0, help="Penalty magnitude: infeasible local assignments get theta=-M.")
+    p.add_argument("--unary-bias", type=float, default=0.0, help="Optional objective-direction unary bias passed to canonical_parameters.")
+    p.add_argument("--no-unaries", action="store_true", help="Disable unary factors in the canonical MRF.")
+    p.add_argument("--tol", type=float, default=0.0)
+
+    p.add_argument("--egg-max-iter", type=int, default=50)
+    p.add_argument("--egg-damping", type=float, default=0.0)
+
+    p.add_argument("--gd-max-iter", type=int, default=50)
+    p.add_argument("--gd-damping", type=float, default=0.0)
+    p.add_argument("--gd-run-every", type=int, default=1)
+    p.add_argument("--gd-no-final-repair", action="store_true")
+    p.add_argument("--gd-fixed-score-bias", type=float, default=1.0e6)
+    p.add_argument("--print-config", action="store_true")
+    return p
+
+def _validate_park_config(cfg):
+    required = ["data", "problem"]
+    for k in required:
+        if k not in cfg:
+            raise ValueError(f"Park config missing top-level key '{k}'.")
+
+    cfg.setdefault("seed", 0)
+    cfg.setdefault("run", {})
+    cfg.setdefault("eval", {})
+
+    data = cfg.setdefault("data", {})
+    data.setdefault("batch_size", 1)
+    data.setdefault("num_workers", 0)
+    data.setdefault("test_split", "test")
+
+    problem = cfg.setdefault("problem", {})
+    if "maximize" not in problem:
+        ptype = str(problem.get("type", "")).lower()
+        problem["maximize"] = ptype in {"mis", "maxcut"}
+
+def main(argv: Optional[List[str]] = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    cfg = load_run_config(args.config)
+    _validate_park_config(cfg)
+    cfg["seed"] = int(args.seed)
+    cfg.setdefault("data", {})["batch_size"] = int(args.batch_size)
+    cfg.setdefault("run", {})["run_name"] = "park_canonical_bp"
+    cfg.setdefault("run", {})["log_dir"] = args.output_dir
+
+    if args.print_config:
+        print(json.dumps(cfg, indent=2, sort_keys=True))
+        return 0
+
+    stats = evaluate_park(cfg, args)
+    print(json.dumps({k: v for k, v in stats.items() if k != "instances"}, indent=2, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

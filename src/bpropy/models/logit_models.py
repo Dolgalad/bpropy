@@ -50,7 +50,22 @@ class GCNVarLogits(torch.nn.Module):
         return torch.arange(data.num_nodes, device=data.x.device)
 
     def forward(self, data):
+        from bpropy.cli.train.embedding_metrics import mean_embedding_distance, mean_embedding_std, spectral_effective_rank, condition_number
+        #print("in forward, before conv")
+        #print("\tx.shape                 = ", data.x.shape)
+        #print("\tmean_embedding_distance = ", mean_embedding_distance(data.x))
+        #print("\tmean_embedding_std      = ", mean_embedding_std(data.x))
+        #print("\tspectral_effective_rank = ", spectral_effective_rank(data.x))
+        #print("\tcondition number        = ", condition_number(data.x))
+
         x = self.conv(data.x, data.edge_index)   # [N, hidden_dim]
+        #print("in forward, after conv")
+        #print("\tx.shape                 = ", data.x.shape)
+        #print("\tmean_embedding_distance = ", mean_embedding_distance(x))
+        #print("\tmean_embedding_std      = ", mean_embedding_std(x))
+        #print("\tspectral_effective_rank = ", spectral_effective_rank(x))
+        #print("\tcondition number        = ", condition_number(x))
+
         #vidx = self._var_idx(data)               # [K]
 
         #logits = self.readout(x[vidx]).squeeze(-1)  # [K]

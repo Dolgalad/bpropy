@@ -287,4 +287,10 @@ def loss_factor_focal_ce_from_marginals_factor_sizes(
     return l.mean() if reduction == "mean" else l.sum() if reduction == "sum" else l
 
 
+@register_loss("mse")
+def loss_mse(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    return F.mse_loss(pred, target.float())
 
+@register_loss("l1")
+def loss_l1(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    return F.l1_loss(pred, target.float())

@@ -1,0 +1,444 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+from typing import Dict, List, Tuple
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        description=(
+            "Plot selected-variable diagnostics per iteration from GD/EGG log JSON files. "
+            "Expected layout: ROOT/<dataset_id>/<model_id>/<seed>.json"
+        )
+    )
+    p.add_argument("root", type=Path, help="Root directory containing GD logs.")
+    p.add_argument(
+        "--output-dir",
+        type=Path,
+        default=None,
+        help="Directory where plots will be saved. Defaults to ROOT/plots.",
+    )
+    p.add_argument(
+        "--formats",
+        nargs="+",
+        default=["png"],
+        choices=["png", "pdf", "svg", "tex"],
+        help="Output figure format(s). Use 'tex' for tikzplotlib output.",
+    )
+    p.add_argument("--dpi", type=int, default=200, help="DPI for raster outputs.")
+    p.add_argument(
+        "--title-prefix",
+        type=str,
+        default="Selected-variable diagnostics",
+        help="Prefix used in figure titles.",
+    )
+    p.add_argument(
+        "--min-support",
+        type=int,
+        default=1,
+        help=(
+            "Minimum number of trajectories contributing to an iteration for it to be kept. "
+            "Useful to hide very late noisy tails."
+        ),
+    )
+    p.add_argument(
+        "--tikz-axis-width",
+        type=str,
+        default=r"\figurewidth",
+        help="Axis width passed to tikzplotlib for .tex output.",
+    )
+    p.add_argument(
+        "--tikz-axis-height",
+        type=str,
+        default=r"\figureheight",
+        help="Axis height passed to tikzplotlib for .tex output.",
+    )
+    return p.parse_args()
+
+
+def safe_entropy_from_mu1(mu1: float) -> float:
+    p = np.clip(float(mu1), 1e-12, 1.0 - 1e-12)
+    return float(-p * np.log(p) - (1.0 - p) * np.log(1.0 - p))
+
+
+def cumulative_fraction_ones(values: List[float]) -> List[float]:
+    arr = np.asarray(values, dtype=float)
+    return (np.cumsum(arr) / np.arange(1, len(arr) + 1)).tolist()
+
+
+def load_metrics_from_run(json_path: Path) -> Dict[str, Dict[str, List[List[float]]]]:
+    with json_path.open("r", encoding="utf-8") as f:
+        payload = json.load(f)
+
+    out: Dict[str, Dict[str, List[List[float]]]] = {
+        "egg": {"entropy": [], "value": [], "mu1": [], "cum_value1": []},
+        "gd": {"entropy": [], "value": [], "mu1": [], "cum_value1": []},
+    }
+
+    for inst in payload.get("instances", []):
+        for variant in ("egg", "gd"):
+            block = inst.get(variant)
+            if not block:
+                continue
+
+            info_list = block.get("info", [])
+            if not info_list:
+                continue
+
+            seq_entropy: List[float] = []
+            seq_value: List[float] = []
+            seq_mu1: List[float] = []
+
+            for step_info in info_list:
+                if not step_info:
+                    continue
+
+                score = step_info.get("score", None)
+                mu1 = step_info.get("mu1", None)
+                value = step_info.get("value", None)
+
+                if score is not None:
+                    seq_entropy.append(float(score))
+                elif mu1 is not None:
+                    seq_entropy.append(safe_entropy_from_mu1(mu1))
+
+                if value is not None:
+                    seq_value.append(float(value))
+
+                if mu1 is not None:
+                    seq_mu1.append(float(mu1))
+
+            if seq_entropy:
+                out[variant]["entropy"].append(seq_entropy)
+            if seq_value:
+                out[variant]["value"].append(seq_value)
+                out[variant]["cum_value1"].append(cumulative_fraction_ones(seq_value))
+            if seq_mu1:
+                out[variant]["mu1"].append(seq_mu1)
+
+    return out
+
+
+def pad_nan(seqs: List[List[float]]) -> Tuple[np.ndarray, np.ndarray]:
+    if not seqs:
+        return np.empty((0, 0), dtype=float), np.empty((0,), dtype=int)
+
+    max_len = max(len(s) for s in seqs)
+    arr = np.full((len(seqs), max_len), np.nan, dtype=float)
+
+    for i, seq in enumerate(seqs):
+        arr[i, : len(seq)] = seq
+
+    support = np.sum(~np.isnan(arr), axis=0)
+    return arr, support
+
+
+def aggregate_mean_std(
+    seqs: List[List[float]],
+    min_support: int,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    arr, support = pad_nan(seqs)
+    if arr.size == 0:
+        return np.empty((0,)), np.empty((0,)), np.empty((0,), dtype=int)
+
+    mean = np.nanmean(arr, axis=0)
+    std = np.nanstd(arr, axis=0)
+
+    keep = support >= min_support
+    return mean[keep], std[keep], support[keep]
+
+
+def support_fraction(
+    seqs: List[List[float]],
+    min_support: int,
+) -> Tuple[np.ndarray, np.ndarray]:
+    arr, support = pad_nan(seqs)
+    if arr.size == 0:
+        return np.empty((0,)), np.empty((0,), dtype=int)
+
+    frac = support.astype(float) / arr.shape[0]
+    keep = support >= min_support
+    return frac[keep], support[keep]
+
+
+def collect_all_runs(
+    root: Path,
+) -> Dict[str, Dict[str, Dict[str, Dict[str, List[List[float]]]]]]:
+    data: Dict[str, Dict[str, Dict[str, Dict[str, List[List[float]]]]]] = {}
+
+    for dataset_dir in sorted(p for p in root.iterdir() if p.is_dir()):
+        dataset_id = dataset_dir.name
+        data.setdefault(dataset_id, {})
+
+        for model_dir in sorted(p for p in dataset_dir.iterdir() if p.is_dir()):
+            model_id = model_dir.name
+            data[dataset_id].setdefault(
+                model_id,
+                {
+                    "egg": {"entropy": [], "value": [], "mu1": [], "cum_value1": []},
+                    "gd": {"entropy": [], "value": [], "mu1": [], "cum_value1": []},
+                },
+            )
+
+            for json_path in sorted(model_dir.glob("*.json")):
+                run_metrics = load_metrics_from_run(json_path)
+                for variant in ("egg", "gd"):
+                    for metric in ("entropy", "value", "mu1", "cum_value1"):
+                        data[dataset_id][model_id][variant][metric].extend(
+                            run_metrics[variant][metric]
+                        )
+
+    return data
+
+
+def save_figure(
+    fig,
+    out_path: Path,
+    fmt: str,
+    dpi: int,
+    tikz_axis_width: str,
+    tikz_axis_height: str,
+) -> None:
+    if fmt == "tex":
+        try:
+            import tikzplotlib
+        except ImportError as e:
+            raise RuntimeError(
+                "TikZ export requested but tikzplotlib is not installed. "
+                "Install it with: pip install tikzplotlib"
+            ) from e
+
+        tikzplotlib.save(
+            out_path,
+            figure=fig,
+            axis_width=tikz_axis_width,
+            axis_height=tikz_axis_height,
+        )
+    else:
+        fig.savefig(out_path, dpi=dpi if fmt == "png" else None)
+
+
+def plot_with_band(ax, mean: np.ndarray, std: np.ndarray, label: str) -> None:
+    x = np.arange(mean.size)
+    ax.plot(x, mean, label=label)
+    ax.fill_between(x, mean - std, mean + std, alpha=0.18)
+
+
+def plot_plain(ax, y: np.ndarray, label: str) -> None:
+    x = np.arange(y.size)
+    ax.plot(x, y, label=label)
+
+
+def plot_dataset(
+    dataset_id: str,
+    dataset_data: Dict[str, Dict[str, Dict[str, List[List[float]]]]],
+    output_dir: Path,
+    formats: List[str],
+    dpi: int,
+    title_prefix: str,
+    min_support: int,
+    tikz_axis_width: str,
+    tikz_axis_height: str,
+) -> None:
+    fig, axes = plt.subplots(5, 2, figsize=(13, 16), sharex=False)
+
+    ax_entropy_egg = axes[0, 0]
+    ax_entropy_gd = axes[0, 1]
+    ax_value_egg = axes[1, 0]
+    ax_value_gd = axes[1, 1]
+    ax_mu1_egg = axes[2, 0]
+    ax_mu1_gd = axes[2, 1]
+    ax_cumv_egg = axes[3, 0]
+    ax_cumv_gd = axes[3, 1]
+    ax_sup_egg = axes[4, 0]
+    ax_sup_gd = axes[4, 1]
+
+    plotted_any = False
+
+    for model_id in sorted(dataset_data):
+        # EGG entropy
+        mean, std, _ = aggregate_mean_std(
+            dataset_data[model_id]["egg"]["entropy"],
+            min_support=min_support,
+        )
+        if mean.size > 0:
+            plot_with_band(ax_entropy_egg, mean, std, model_id)
+            plotted_any = True
+
+        # GD entropy
+        mean, std, _ = aggregate_mean_std(
+            dataset_data[model_id]["gd"]["entropy"],
+            min_support=min_support,
+        )
+        if mean.size > 0:
+            plot_with_band(ax_entropy_gd, mean, std, model_id)
+            plotted_any = True
+
+        # EGG selected value
+        mean, std, _ = aggregate_mean_std(
+            dataset_data[model_id]["egg"]["value"],
+            min_support=min_support,
+        )
+        if mean.size > 0:
+            plot_with_band(ax_value_egg, mean, std, model_id)
+            plotted_any = True
+
+        # GD selected value
+        mean, std, _ = aggregate_mean_std(
+            dataset_data[model_id]["gd"]["value"],
+            min_support=min_support,
+        )
+        if mean.size > 0:
+            plot_with_band(ax_value_gd, mean, std, model_id)
+            plotted_any = True
+
+        # EGG mu1
+        mean, std, _ = aggregate_mean_std(
+            dataset_data[model_id]["egg"]["mu1"],
+            min_support=min_support,
+        )
+        if mean.size > 0:
+            plot_with_band(ax_mu1_egg, mean, std, model_id)
+            plotted_any = True
+
+        # GD mu1
+        mean, std, _ = aggregate_mean_std(
+            dataset_data[model_id]["gd"]["mu1"],
+            min_support=min_support,
+        )
+        if mean.size > 0:
+            plot_with_band(ax_mu1_gd, mean, std, model_id)
+            plotted_any = True
+
+        # EGG cumulative fraction value=1
+        mean, std, _ = aggregate_mean_std(
+            dataset_data[model_id]["egg"]["cum_value1"],
+            min_support=min_support,
+        )
+        if mean.size > 0:
+            plot_with_band(ax_cumv_egg, mean, std, model_id)
+            plotted_any = True
+
+        # GD cumulative fraction value=1
+        mean, std, _ = aggregate_mean_std(
+            dataset_data[model_id]["gd"]["cum_value1"],
+            min_support=min_support,
+        )
+        if mean.size > 0:
+            plot_with_band(ax_cumv_gd, mean, std, model_id)
+            plotted_any = True
+
+        # EGG support
+        frac, _ = support_fraction(
+            dataset_data[model_id]["egg"]["entropy"],
+            min_support=min_support,
+        )
+        if frac.size > 0:
+            plot_plain(ax_sup_egg, frac, model_id)
+            plotted_any = True
+
+        # GD support
+        frac, _ = support_fraction(
+            dataset_data[model_id]["gd"]["entropy"],
+            min_support=min_support,
+        )
+        if frac.size > 0:
+            plot_plain(ax_sup_gd, frac, model_id)
+            plotted_any = True
+
+    if not plotted_any:
+        print(f"[skip] {dataset_id}: no usable trajectories found")
+        plt.close(fig)
+        return
+
+    ax_entropy_egg.set_title("EGG - entropy")
+    ax_entropy_gd.set_title("GD - entropy")
+    ax_value_egg.set_title("EGG - selected value")
+    ax_value_gd.set_title("GD - selected value")
+    ax_mu1_egg.set_title("EGG - selected $\\mu_1$")
+    ax_mu1_gd.set_title("GD - selected $\\mu_1$")
+    ax_cumv_egg.set_title("EGG - cumulative fraction selected value = 1")
+    ax_cumv_gd.set_title("GD - cumulative fraction selected value = 1")
+    ax_sup_egg.set_title("EGG - support")
+    ax_sup_gd.set_title("GD - support")
+
+    for ax in axes.ravel():
+        ax.set_xlabel("Iteration")
+        ax.grid(True, alpha=0.3)
+
+    ax_entropy_egg.set_ylabel("Entropy")
+    ax_entropy_gd.set_ylabel("Entropy")
+    ax_value_egg.set_ylabel("Selected value")
+    ax_value_gd.set_ylabel("Selected value")
+    ax_mu1_egg.set_ylabel("$\\mu_1$")
+    ax_mu1_gd.set_ylabel("$\\mu_1$")
+    ax_cumv_egg.set_ylabel("Cum. frac. value=1")
+    ax_cumv_gd.set_ylabel("Cum. frac. value=1")
+    ax_sup_egg.set_ylabel("Support")
+    ax_sup_gd.set_ylabel("Support")
+
+    ax_value_egg.set_ylim(-0.02, 1.02)
+    ax_value_gd.set_ylim(-0.02, 1.02)
+    ax_mu1_egg.set_ylim(-0.02, 1.02)
+    ax_mu1_gd.set_ylim(-0.02, 1.02)
+    ax_cumv_egg.set_ylim(-0.02, 1.02)
+    ax_cumv_gd.set_ylim(-0.02, 1.02)
+    ax_sup_egg.set_ylim(-0.02, 1.02)
+    ax_sup_gd.set_ylim(-0.02, 1.02)
+
+    ax_entropy_egg.legend()
+    ax_entropy_gd.legend()
+
+    fig.suptitle(f"{title_prefix} - {dataset_id}", y=0.995)
+    fig.tight_layout(rect=[0, 0, 1, 0.985])
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for fmt in formats:
+        out_path = output_dir / f"{dataset_id}.{fmt}"
+        save_figure(
+            fig=fig,
+            out_path=out_path,
+            fmt=fmt,
+            dpi=dpi,
+            tikz_axis_width=tikz_axis_width,
+            tikz_axis_height=tikz_axis_height,
+        )
+        print(f"[ok] wrote {out_path}")
+
+    plt.close(fig)
+
+
+def main() -> None:
+    args = parse_args()
+    root = args.root.resolve()
+    output_dir = args.output_dir.resolve() if args.output_dir else root / "plots"
+
+    if not root.exists():
+        raise FileNotFoundError(f"Input root does not exist: {root}")
+
+    all_data = collect_all_runs(root)
+    if not all_data:
+        raise RuntimeError(f"No dataset directories found under {root}")
+
+    for dataset_id in sorted(all_data):
+        plot_dataset(
+            dataset_id=dataset_id,
+            dataset_data=all_data[dataset_id],
+            output_dir=output_dir,
+            formats=args.formats,
+            dpi=args.dpi,
+            title_prefix=args.title_prefix,
+            min_support=args.min_support,
+            tikz_axis_width=args.tikz_axis_width,
+            tikz_axis_height=args.tikz_axis_height,
+        )
+
+
+if __name__ == "__main__":
+    main()

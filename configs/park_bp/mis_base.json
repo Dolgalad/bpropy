@@ -1,0 +1,42 @@
+{
+  "seed": 0,
+
+  "run": {
+    "run_name": "park_canonical_bp_mis",
+    "log_dir": "runs/park_canonical_bp_mis"
+  },
+
+  "data": {
+    "problem": "mis",
+    "root": "datasets/problems/mis/mis_n100_p0.15",
+    "split": "train",
+    "val_split": "val",
+    "test_split": "test",
+
+    "feature_mode": "EB",
+    "hetero": false,
+    "refresh": false,
+
+    "precompute": {
+      "lbp": false,
+      "nmf": false
+    },
+
+    "loader": {
+      "batch_size": 32,
+      "val_batch_size": 32,
+
+      "num_workers": 2,
+      "prefetch": 2,
+      "pin_memory": true
+    }
+  },
+
+  "problem": {
+    "ground_truth": {
+      "solver": "kamis",
+      "args": {}
+    },
+    "maximize": true
+  }
+}

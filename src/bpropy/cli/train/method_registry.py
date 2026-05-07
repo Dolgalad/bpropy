@@ -115,7 +115,6 @@ def _forward_var_logits(model: torch.nn.Module, data: Any) -> torch.Tensor:
     if hasattr(data, "node_types") and ("variable" in getattr(data, "node_types", [])):
         return out
     # homo: filter variable nodes
-    print("in _forward_var_logits: using .bipartite")
     return out[data.bipartite == 0]
 
 
@@ -256,6 +255,212 @@ def _loss_spec_variable_inference(
         target=target,
         loss_name=loss_name,
         loss_kwargs={"data": batch, **cfg.get("loss", {}).get("args", {})},
+    )
+    _apply_regularizers(spec, adapter, batch, pred, labels, cfg)
+    return spec
+
+def _diffusion_target_from_cfg(
+    batch: Any,
+    pred: Any,
+    labels: torch.Tensor,
+    cfg: Dict[str, Any],
+    ):
+    diff_cfg = cfg.get("diffusion", {})
+    training_mode = diff_cfg.get("training_mode", "denoise")
+    target_mode = diff_cfg.get("target_mode", "x0")
+    target_space = diff_cfg.get("target_space", "prob")
+
+    loss_name = cfg.get("loss", {}).get("name", "bce_logits")
+    loss_kwargs = dict(cfg.get("loss", {}).get("args", {}))
+
+    diff_targets = getattr(batch, "diff_targets", None)
+
+    if training_mode == "denoise":
+        # current behavior
+        y = labels.to(pred.device if torch.is_tensor(pred) else pred[1].device).float()
+
+        if target_space == "logit":
+            return pred, y, loss_name, loss_kwargs
+        elif target_space == "prob":
+            if isinstance(pred, tuple):
+                if loss_name == "vce":
+                    return pred, y, loss_name, {"data": batch, **loss_kwargs}
+                elif loss_name in ("mse", "l1"):
+                    pred_used = pred[0].mu_v.reshape(-1, 2)[:, 1]
+                    return pred_used, y, loss_name, loss_kwargs
+                else:
+                    raise ValueError(f"Unsupported loss {loss_name}")
+            else:
+                pred_used = torch.sigmoid(pred)
+                return pred_used, y, loss_name, loss_kwargs
+        else:
+            raise ValueError(f"Unsupported target space {target_space}")
+
+    elif training_mode == "faithful":
+        if diff_targets is None:
+            raise ValueError("Faithful diffusion training requires batch.diff_targets")
+
+        reverse_prob = diff_targets["reverse_prob"]
+
+        if target_mode == "reverse_prob":
+            # predict Bernoulli parameter for y_{t-1}
+            if target_space == "logit":
+                return pred, reverse_prob, "bce_logits", loss_kwargs
+            elif target_space == "prob":
+                pred_used = torch.sigmoid(pred) if torch.is_tensor(pred) else pred[0].mu_v.reshape(-1, 2)[:, 1]
+                return pred_used, reverse_prob, "mse", loss_kwargs
+            else:
+                raise ValueError(f"Unsupported target space {target_space}")
+
+        elif target_mode == "x0":
+            # x0-prediction with faithful reverse loss would need
+            # special loss that builds p_theta(y_{t-1}|y_t,\hat x0)
+            return pred, reverse_prob, "diffusion_reverse_kl", {"data": batch, **loss_kwargs}
+
+        else:
+            raise ValueError(f"Unsupported target mode {target_mode}")
+
+def _flow_target_from_cfg(
+    batch: Any,
+    pred: Any,
+    labels: torch.Tensor,
+    cfg: Dict[str, Any],
+    ):
+    flow_cfg = cfg.get("flow", {})
+    target_kind = flow_cfg.get("loss_target", "q1")
+    target_space = flow_cfg.get("target_space", "prob")
+
+    if isinstance(pred, tuple):
+        device = pred[1].device
+    else:
+        device = pred.device
+
+    y = labels.to(device, non_blocking=True).float()
+
+    z = getattr(batch, "z_var", None)
+    if z is not None:
+        z = z.to(device).float()
+
+    loss_name = cfg.get("loss", {}).get("name", "bce_logits")
+    loss_kwargs = dict(cfg.get("loss", {}).get("args", {}))
+
+    if target_kind == "q1":
+        if target_space == "prob":
+            if isinstance(pred, tuple):
+                # variable-marginal path
+                if loss_name == "vce":
+                    # keep full pred so the vce loss can unpack it
+                    return pred, y, loss_name, {"data": batch, **loss_kwargs}
+                elif loss_name in ("mse", "l1"):
+                    pred_used = pred[0].mu_v.reshape(-1, 2)[:, 1]
+                    return pred_used, y, loss_name, loss_kwargs
+                else:
+                    raise ValueError(
+                        f"Unsupported loss '{loss_name}' for flow q1 prob with marginal model."
+                    )
+            else:
+                pred_used = torch.sigmoid(pred)
+                return pred_used, y, loss_name, loss_kwargs
+
+        elif target_space == "logit":
+            return pred, y, loss_name, loss_kwargs
+
+        else:
+            raise ValueError(f"Unknown flow.target_space={target_space}")
+
+    elif target_kind == "velocity":
+        if z is None:
+            raise ValueError("Flow velocity target requires batch.z_var.")
+
+        if isinstance(pred, tuple):
+            q1_hat = pred[0].mu_v.reshape(-1, 2)[:, 1]
+        else:
+            q1_hat = torch.sigmoid(pred)
+
+        pred_used = q1_hat - z
+        target = y - z
+
+        return pred_used, target, loss_name, loss_kwargs
+    elif target_kind == "instant_velocity":
+        if z is None:
+            raise ValueError("Flow instant_velocity target requires batch.z_var.")
+        p_t = getattr(batch, "p_t", None)
+        t = getattr(batch, "t_var", None)
+        if p_t is None or t is None:
+            raise ValueError("Flow instant_velocity target requires batch.p_t and batch.t_var.")
+
+        eps = float(flow_cfg.get("velocity_eps", 1e-2))
+
+        if isinstance(pred, tuple):
+            q1_hat = pred[0].mu_v.reshape(-1, 2)[:, 1]
+        else:
+            q1_hat = torch.sigmoid(pred)
+
+        z = z.to(device).float()
+        p_t = p_t.to(device).float()
+        t = t.to(device).float()
+        y = labels.to(device, non_blocking=True).float()
+
+        denom = (1.0 - t).clamp_min(eps)
+
+        pred_used = (q1_hat - p_t) / denom
+        target = y - z
+
+        return pred_used, target, loss_name, loss_kwargs
+
+    else:
+        raise ValueError(f"Unknown flow.loss_target={target_kind}")
+
+def _loss_spec_flow_q1_or_velocity(
+    adapter: MethodAdapter,
+    batch: Any,
+    pred: torch.Tensor,
+    labels: torch.Tensor,
+    cfg: Dict[str, Any],
+    loss_name_override: Optional[str] = None,
+    ) -> LossSpec:
+    pred_used, target, loss_name, loss_kwargs = _flow_target_from_cfg(
+        batch=batch,
+        pred=pred,
+        labels=labels,
+        cfg=cfg,
+    )
+
+    if loss_name_override is not None:
+        loss_name = loss_name_override
+
+    spec = LossSpec(
+        pred=pred_used,
+        target=target,
+        loss_name=loss_name,
+        loss_kwargs=loss_kwargs,
+    )
+    _apply_regularizers(spec, adapter, batch, pred, labels, cfg)
+    return spec
+
+def _loss_spec_diffusion(
+    adapter: MethodAdapter,
+    batch: Any,
+    pred: Any,
+    labels: torch.Tensor,
+    cfg: Dict[str, Any],
+    loss_name_override: Optional[str] = None,
+    ) -> LossSpec:
+    pred_used, target, loss_name, loss_kwargs = _diffusion_target_from_cfg(
+        batch=batch,
+        pred=pred,
+        labels=labels,
+        cfg=cfg,
+    )
+
+    if loss_name_override is not None:
+        loss_name = loss_name_override
+
+    spec = LossSpec(
+        pred=pred_used,
+        target=target,
+        loss_name=loss_name,
+        loss_kwargs=loss_kwargs,
     )
     _apply_regularizers(spec, adapter, batch, pred, labels, cfg)
     return spec
@@ -408,16 +613,23 @@ from bpropy.co.mis import MIS
 from bpropy.co.scp import SCP
 from bpropy.gd.mis_adapter import MISAdapter
 from bpropy.gd.scp_adapter import SCPAdapter
-def _decimation_adapter_default(pb: LPProblem, cfg: Any):
+def _decimation_adapter_default(pb: LPProblem, cfg: Any, fix_prop: Optional[float] = None):
     gd_cfg = cfg.get("eval", {}).get("greedy_decimation", {}).get("adapter", {})
-    print(gd_cfg)
     if isinstance(pb, MIS):
-        return MISAdapter()
+        #return MISAdapter()
+        return MISAdapter(pick_mode=gd_cfg.get("pick_mode", "min_entropy"),
+                          value_mode=gd_cfg.get("value_mode", "argmax"),
+                          j_temperature=gd_cfg.get("j_temperature", 1.0),
+                          seed=gd_cfg.get("seed", None),
+                          fix_prop=fix_prop,
+                          )
+
     if isinstance(pb, SCP):
         return SCPAdapter(pick_mode=gd_cfg.get("pick_mode", "min_entropy"),
                           value_mode=gd_cfg.get("value_mode", "argmax"),
                           j_temperature=gd_cfg.get("j_temperature", 1.0),
-                          seed=gd_cfg.get("seed", None)
+                          seed=gd_cfg.get("seed", None),
+                          fix_prop=fix_prop,
                           )
     raise Exception(f"unknown problem type :  {type(pb)}")
 
@@ -467,6 +679,39 @@ _METHOD_HYBRID_FACTOR_LOGITS = MethodAdapter(
     decimation_adapter_fn=_decimation_adapter_default,
 )
 
+_METHOD_FLOW_VAR = MethodAdapter(
+    forward_fn=_forward_var_logits,
+    loss_spec_fn=_loss_spec_flow_q1_or_velocity,
+    greedy_scores_fn=_greedy_scores_var_logits,
+    decimation_backend_fn=_decimation_backend_var_logits,
+    decimation_adapter_fn=_decimation_adapter_default,
+)
+
+_METHOD_FLOW_VARIABLE_MARGINALS = MethodAdapter(
+    forward_fn=_forward_factor_inference,
+    loss_spec_fn=_loss_spec_flow_q1_or_velocity,
+    greedy_scores_fn=_greedy_scores_factor_inference,
+    decimation_backend_fn=_decimation_backend_factor_marginals,
+    decimation_adapter_fn=_decimation_adapter_default,
+)
+
+_METHOD_DIFFUSION_VAR = MethodAdapter(
+    forward_fn=_forward_var_logits,
+    loss_spec_fn=_loss_spec_diffusion,
+    greedy_scores_fn=_greedy_scores_var_logits,
+    decimation_backend_fn=_decimation_backend_var_logits,
+    decimation_adapter_fn=_decimation_adapter_default,
+)
+
+_METHOD_DIFFUSION_VARIABLE_MARGINALS = MethodAdapter(
+    forward_fn=_forward_factor_inference,
+    loss_spec_fn=_loss_spec_diffusion,
+    greedy_scores_fn=_greedy_scores_factor_inference,
+    decimation_backend_fn=_decimation_backend_factor_marginals,
+    decimation_adapter_fn=_decimation_adapter_default,
+)
+
+
 # Keep old names as aliases for backwards compatibility.
 METHOD_REGISTRY: Dict[str, MethodAdapter] = {
     "var_logits": _METHOD_VAR_LOGITS,
@@ -482,5 +727,14 @@ METHOD_REGISTRY: Dict[str, MethodAdapter] = {
     "hetero_factor_marginals": _METHOD_FACTOR_MARGINALS,  # (typo-safe)
 
     "hybrid_factor_logits": _METHOD_HYBRID_FACTOR_LOGITS,
+
+    # rectified flow
+    "flow_variable_logits": _METHOD_FLOW_VAR,
+    "flow_variable_marginals": _METHOD_FLOW_VARIABLE_MARGINALS,
+
+    # diffusion
+    "diffusion_variable_logits": _METHOD_DIFFUSION_VAR,
+    "diffusion_variable_marginals": _METHOD_DIFFUSION_VARIABLE_MARGINALS,
+
 }
 

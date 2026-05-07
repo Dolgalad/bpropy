@@ -1,0 +1,51 @@
+{
+  "root_dir": "../runs/inference_theta_distribution",
+  "label": "fig:inference_theta_distribution",
+  "caption": "Distribution of predicted local interaction parameters. Predicted non-unary factor potentials are grouped according to whether the corresponding local assignment is feasible or infeasible.",
+  "datasets": [
+    {
+      "id": "scp_n50_m50_k5",
+      "path": "scp_n50_m50_k5",
+      "title": "SC-S"
+    },
+    {
+      "id": "scp_n120-180_m150-250_k5",
+      "path": "scp_n120-180_m150-250_k5",
+      "title": "SC-M"
+    },
+    {
+      "id": "mis_n100_p0.15",
+      "path": "mis_n100_p0.15",
+      "title": "MIS-S"
+    }
+
+  ],
+  "methods": [
+    {
+      "id": "lbp",
+      "path": "lbp",
+      "title": "LBP",
+      "color": "LBPGDColor"
+    },
+    {
+      "id": "nmf",
+      "path": "nmf",
+      "title": "NMF",
+      "color": "NMFGDColor"
+    }
+  ],
+  "file_template": "{dataset_id}_{method_id}_fce.json",
+  "bin_width": 0.2,
+  "shade_under_curves": true,
+  "fill_opacity": 0.5,
+  "density": true,
+  "panel_width": "0.43\\textwidth",
+  "panel_height": "0.25\\textwidth",
+  "horizontal_sep": "0.85cm",
+  "vertical_sep": "0.85cm",
+  "xlabel": "Predicted $\\theta$",
+  "ylabel": "Density",
+  "legend_columns": 4,
+  "feasible_style": "solid",
+  "infeasible_style": "densely dashed"
+}

@@ -41,7 +41,7 @@ def _build_one_scheduler(name: str, optimizer, args=(), kwargs=None):
 
 
 def build_scheduler(cfg: Dict[str, Any], optimizer):
-    sch_cfg = cfg["train"]["scheduler"]
+    sch_cfg = cfg.get("train",{}).get("scheduler",None)
 
     if sch_cfg is None:
         return None
