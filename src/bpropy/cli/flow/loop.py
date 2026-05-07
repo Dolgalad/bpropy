@@ -219,6 +219,7 @@ def sample_flow_source(
     """
     Binary source z ~ Bernoulli(source_prob)^n.
     """
+    return torch.rand(torch.full_like(y.float), device=device)
     return torch.bernoulli(torch.full_like(y.float(), source_prob, device=device))
 
 def make_probability_path(
