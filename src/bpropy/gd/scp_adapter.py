@@ -94,12 +94,17 @@ class SCPAdapter:
                  value_mode: str = "argmax"    , # "argmax" | "sample" | "add"
                  j_temperature: float = 1.0,
                  seed: Optional[int] = None,
+                 fix_prop: Optional[float] = None,
     ):
         self.normalize_by_cost = normalize_by_cost
         self.pick_mode = pick_mode
         self.value_mode = value_mode
         self.j_temperature = j_temperature
         self.rng = np.random.default_rng(seed)
+        if fix_prop is not None:
+            self.fix_prop = fix_prop
+        else:
+            self.fix_prop = 1.0
 
         self.pb: Any = None
         self.S: List[np.ndarray] = []
@@ -109,6 +114,12 @@ class SCPAdapter:
         self.active_sets: Optional[np.ndarray] = None
         self.uncovered: Optional[np.ndarray] = None
         self.x: Optional[np.ndarray] = None
+
+        ## Perf improvements
+        self.useful_sets: Optional[np.ndarray] = None
+        self.remaining_cover_count: Optional[np.ndarray] = None
+        self.enable_pruning: bool = True
+        self.active_coverer_count: Optional[np.ndarray] = None
 
     def reset(self, pb: Any) -> None:
         self.pb = pb
@@ -121,11 +132,55 @@ class SCPAdapter:
         self.uncovered = np.ones(n_elems, dtype=bool)
         self.x = -np.ones(n_sets, dtype=int)
 
+        ## Perf improvements
+        self.remaining_cover_count = np.fromiter(
+                    (len(self.S[j]) for j in range(n_sets)),
+                        dtype=np.int32,
+                            count=n_sets,
+                            )
+        self.useful_sets = self.remaining_cover_count > 0
+
+        self.active_coverer_count = np.fromiter(
+                    (len(self.C[i]) for i in range(n_elems)),
+                        dtype=np.int32,
+                            count=n_elems,
+                            )
+
     def is_done(self) -> bool:
         assert self.uncovered is not None
-        return not self.uncovered.any()
+        return (not self.uncovered.any()) or (self.active_sets.sum() <= self.pb.nv() * (1.0 - self.fix_prop))
+    def _deactivate_set(self, j: int, value: int, evidence: Dict[int, int]) -> None:
+        if not self.active_sets[j]:
+            return
 
-    def step(self, backend_output: Any) -> Tuple[Dict[int, int], Dict[str, Any]]:
+        self.active_sets[j] = False
+        self.useful_sets[j] = False
+        self.x[j] = value
+        evidence[j] = value
+
+        for i in self.S[j]:
+            i = int(i)
+            if self.uncovered[i]:
+                self.active_coverer_count[i] -= 1
+    def _cover_element(self, i: int, evidence: Dict[int, int], newly: list[int]) -> None:
+        if not self.uncovered[i]:
+            return
+
+        self.uncovered[i] = False
+        newly.append(i)
+
+        for s_idx in self.C[i]:
+            s_idx = int(s_idx)
+            if self.active_sets[s_idx]:
+                self.remaining_cover_count[s_idx] -= 1
+                if self.remaining_cover_count[s_idx] <= 0:
+                    self.useful_sets[s_idx] = False
+                    self.active_sets[s_idx] = False
+                    if self.x[s_idx] < 0:
+                        self.x[s_idx] = 0
+                    evidence[s_idx] = 0
+
+    def step(self, backend_output: Any, return_log: bool = False) -> Tuple[Dict[int, int], Dict[str, Any]]:
         """
         backend_output expected: mu shaped (n_sets,2) or (2*n_sets,) convertible.
         Uses mu[:,1] as "probability/score of selecting set".
@@ -147,9 +202,12 @@ class SCPAdapter:
         scores = np.nan_to_num(mu_np[:, 1].astype(float), nan=0.0)
 
         # Mask inactive sets
-        active_idx = np.flatnonzero(self.active_sets)
-        feasible = np.array([self.uncovered[self.S[j]].any() for j in active_idx], dtype=bool)
-        cand = active_idx[feasible]
+        #active_idx = np.flatnonzero(self.active_sets)
+        #feasible = np.array([self.uncovered[self.S[j]].any() for j in active_idx], dtype=bool)
+        #cand = active_idx[feasible]
+
+        ## Perf improvements
+        cand = np.flatnonzero(self.active_sets & self.useful_sets)
         if cand.size == 0:
             return {}, {"chosen": None, "reason": "no_feasible_sets"}
         
@@ -213,40 +271,67 @@ class SCPAdapter:
         #evidence = {j: 1}
         #self.x[j] = 1
         #self.active_sets[j] = False
-        evidence = {jj: jj_val}
-        self.x[jj] = int(jj_val)
-        self.active_sets[jj] = False
+
+        #evidence = {jj: jj_val}
+        #self.x[jj] = int(jj_val)
+        #self.active_sets[jj] = False
+        ## Perf improvements
+        evidence = {}
+        self._deactivate_set(jj, int(jj_val), evidence)
 
         # Update coverage
         newly = []
         if jj_val == 1:
+            #for i in self.S[jj]:
+            #    i = int(i)
+            #    if self.uncovered[i]:
+            #        self.uncovered[i] = False
+            #        newly.append(i)
+            ## Perf improvements
             for i in self.S[jj]:
-                i = int(i)
-                if self.uncovered[i]:
-                    self.uncovered[i] = False
-                    newly.append(i)
+                self._cover_element(int(i), evidence, newly)
         else:
             # check for items covered by S[j] covered by only 1 active set
-            active_idx = np.flatnonzero(self.active_sets)
+            #active_idx = np.flatnonzero(self.active_sets)
+            #for a in self.S[jj]:
+            #    a = int(a)
+            #    if self.uncovered[a]:
+            #        sets_covering_a = []
+            #        for s_idx in active_idx:
+            #            if a in self.S[s_idx]:
+            #                sets_covering_a.append(s_idx)
+            #        if len(sets_covering_a)==1:
+            #            s_idx = int(sets_covering_a[0])
+            #            self.uncovered[a] = False
+            #            newly.append(a)
+            #            evidence[s_idx] = 1
+            #            self.x[s_idx] = 1
+            #            self.active_sets[s_idx] = False
+            #            for ii in self.S[s_idx]:
+            #                ii = int(ii)
+            #                if self.uncovered[ii]:
+            #                    self.uncovered[ii] = False
+            #                    newly.append(ii)
+
+            ## Perf improvements
+            forced = []
             for a in self.S[jj]:
                 a = int(a)
-                if self.uncovered[a]:
-                    sets_covering_a = []
-                    for s_idx in active_idx:
-                        if a in self.S[s_idx]:
-                            sets_covering_a.append(s_idx)
-                    if len(sets_covering_a)==1:
-                        s_idx = int(sets_covering_a[0])
-                        self.uncovered[a] = False
-                        newly.append(a)
-                        evidence[s_idx] = 1
-                        self.x[s_idx] = 1
-                        self.active_sets[s_idx] = False
-                        for ii in self.S[s_idx]:
-                            ii = int(ii)
-                            if self.uncovered[ii]:
-                                self.uncovered[ii] = False
-                                newly.append(ii)
+                if self.uncovered[a] and self.active_coverer_count[a] == 1:
+                    coverers = self.C[a]
+                    active_coverers = coverers[self.active_sets[coverers]]
+                    if active_coverers.size == 1:
+                        forced.append(int(active_coverers[0]))
+
+            # deduplicate
+            if forced:
+                forced = list(dict.fromkeys(forced))
+
+            for s_idx in forced:
+                if self.active_sets[s_idx]:
+                    self._deactivate_set(s_idx, 1, evidence)
+                    for ii in self.S[s_idx]:
+                        self._cover_element(int(ii), evidence, newly)
         # --- NEW: deactivate sets that cannot cover anything new anymore ---
         # Any active set that has zero uncovered elements left is useless.
         if newly:
@@ -264,16 +349,17 @@ class SCPAdapter:
                     if self.x[s_idx] < 0:
                         self.x[s_idx] = 0
                     evidence[s_idx] = 0
-
-        info = {
-            "chosen": jj,
-            "value": jj_val,
-            "mu1": float(scores[jj]),
-            "cost": float(self.cost[jj]),
-            "newly_covered": newly,
-            "n_uncovered": int(self.uncovered.sum()),
-        }
-        return evidence, info
+        if return_log:
+            info = {
+                "chosen": jj,
+                "value": jj_val,
+                "mu1": float(scores[jj]),
+                "cost": float(self.cost[jj]),
+                "newly_covered": newly,
+                "n_uncovered": int(self.uncovered.sum()),
+            }
+            return evidence, info
+        return evidence, None
 
     def _prune_nonexclusive_coverers(self, x: np.ndarray, S: List[np.ndarray], n_elems: int) -> np.ndarray:
         """
@@ -322,7 +408,7 @@ class SCPAdapter:
                     x[int(j)] = 0
                     cover_count[elems] -= 1
                     changed = True
-    
+   
         return x
 
     def solution(self) -> np.ndarray:
@@ -330,6 +416,9 @@ class SCPAdapter:
         assert self.x is not None
         x = self.x.copy()
         x[x < 0] = 0
+
+        if self.fix_prop < 1.0:
+            return x, self.active_sets
 
         if self.S and self.C:
             print("pruning")

@@ -22,16 +22,23 @@ def entropy_bernoulli(
       eps: float = 1e-12
       reduction: 'mean'|'sum'|'none' = 'mean'
     """
+    #print("in entropy_bernoulli ", data)
+    #print("\t", pred)
+    #print("\t", labels.shape)
     eps = float(kwargs.pop("eps", 1e-12))
     reduction = kwargs.pop("reduction", "mean")
     if kwargs:
         raise TypeError(f"Unexpected kwargs: {list(kwargs.keys())}")
 
-    if not torch.is_tensor(pred):
-        raise TypeError(f"entropy_bernoulli expects pred to be a Tensor of logits, got {type(pred)}")
+    #if not torch.is_tensor(pred):
+    #    raise TypeError(f"entropy_bernoulli expects pred to be a Tensor of logits, got {type(pred)}")
 
-    logits = pred
-    p = torch.sigmoid(logits)
+    if isinstance(pred, tuple):
+        if len(pred) >= 2:
+            p = pred[0].mu_v.reshape(-1,2)[:,1]
+    else:
+        logits = pred
+        p = torch.sigmoid(logits)
     ent = -(p * torch.log(p.clamp_min(eps)) + (1 - p) * torch.log((1 - p).clamp_min(eps)))
 
     if reduction == "mean":
@@ -42,6 +49,6 @@ def entropy_bernoulli(
         pass
     else:
         raise ValueError(f"Unknown reduction: {reduction}")
-
+    print(" ent = ", ent)
     return -ent
 

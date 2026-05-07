@@ -43,7 +43,8 @@
     },
 
     "loader": {
-      "batch_size": 1,
+      "batch_size": 10,
+      "val_batch_size": 10,
       "num_workers": 2,
       "prefetch": 2,
       "pin_memory": true
@@ -72,7 +73,7 @@
   "train": {
     "epochs": 200000,
     "steps_per_epoch": 200000,
-    "val_steps": 1000000,
+    "val_steps": 100,
     "method": "variable_marginals",
 
     "optimizer": {
@@ -90,7 +91,6 @@
 	    "name": "cosineannealing",
 	    "kwargs": {"T_max": 200, "eta_min": 1e-5}
     },
-
 
     "grad_clip_norm": 1.0,
     "amp": true,
@@ -117,7 +117,7 @@
     "splits": ["val", "test"],
     "greedy_decimation": {
 	    "mode": "loopy_belief_propagation",
-	    "args": {"max_iter": 10, "damping": 0.5, "neg_inf": -100.0, "run_every": 10},
+	    "args": {"max_iter": 10, "damping": 0.5, "neg_inf": -100.0},
 	    "adapter": { "pick_mode": "min_entropy", "value_mode": "argmax"}
     }
   },
@@ -130,4 +130,3 @@
     }
   }
 }
-

@@ -21,6 +21,7 @@ dependencies = [
 bpropy-datasets = "bpropy.cli.datasets:main"
 bpropy-train = "bpropy.cli.train:main"
 bpropy-test = "bpropy.cli.test:main"
+bpropy-test-nair = "bpropy.cli.test_nair:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

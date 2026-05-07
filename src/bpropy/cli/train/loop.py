@@ -192,40 +192,34 @@ def train_one_epoch(
 
         # debugging
         NV = (data.bipartite == 0).sum().item()
-        #print("theta shape = ", pred[1].shape)
-        #print("y_ss shape  = ", data.y_ss.shape)
-        #print("theta[y_ss==1].mean - theta[y_ss==0].mean = ", pred[1][data.y_ss == 1].mean() - pred[1][data.y_ss == 0].mean())
-        scores = pred[0].mu_v.reshape(NV,2)[:,1].detach().cpu().numpy()
-        #print("scores.shape = ", scores.shape)
-        #print("y.shape = ", y.shape)
-        #print("y mean (fraction of 1s) =", y.float().mean().item())
-        #print("y_ss mean (fraction of 1s) =", data.y_ss.float().mean().item())
+        if isinstance(pred, tuple):
+            scores = pred[0].mu_v.reshape(NV,2)[:,1].detach().cpu().numpy()
 
-        _0_idx, _1_idx = (y == 0).cpu().numpy(), (y == 1).cpu().numpy()
+            _0_idx, _1_idx = (y == 0).cpu().numpy(), (y == 1).cpu().numpy()
 
-        _0_scores_mean, _0_scores_std, _1_scores_mean, _1_scores_std = (
-                np.mean( scores[_0_idx] ),
-                np.std( scores[_0_idx] ),
-                np.mean( scores[_1_idx] ),
-                np.std( scores[_1_idx] ),
+            _0_scores_mean, _0_scores_std, _1_scores_mean, _1_scores_std = (
+                    np.mean( scores[_0_idx] ),
+                    np.std( scores[_0_idx] ),
+                    np.mean( scores[_1_idx] ),
+                    np.std( scores[_1_idx] ),
 
-                )
-        _0_theta_mean = pred[1][data.y_ss == 0].mean().item()
-        _1_theta_mean = pred[1][data.y_ss == 1].mean().item()
+                    )
+            _0_theta_mean = pred[1][data.y_ss == 0].mean().item()
+            _1_theta_mean = pred[1][data.y_ss == 1].mean().item()
 
-        #print("scores[y==1].mean - scores[y==0].mean = ", _1_scores_mean - _0_scores_mean)
-        #print("scores[y==0].mean = ", _0_scores_mean )
-        #print("scores[y==1].mean = ", _1_scores_mean )
-        mu_v = pred[0].mu_v.reshape(NV,2)
-        #print("mu_v[:,0].mean = " , mu_v[:,0].mean())
-        #print("mu_v[:,1].mean = " , mu_v[:,1].mean())
+            #print("scores[y==1].mean - scores[y==0].mean = ", _1_scores_mean - _0_scores_mean)
+            #print("scores[y==0].mean = ", _0_scores_mean )
+            #print("scores[y==1].mean = ", _1_scores_mean )
+            mu_v = pred[0].mu_v.reshape(NV,2)
+            #print("mu_v[:,0].mean = " , mu_v[:,0].mean())
+            #print("mu_v[:,1].mean = " , mu_v[:,1].mean())
 
-        score_deltas.append(_1_scores_mean - _0_scores_mean)
-        theta_deltas.append(_1_theta_mean - _0_theta_mean)
+            score_deltas.append(_1_scores_mean - _0_scores_mean)
+            theta_deltas.append(_1_theta_mean - _0_theta_mean)
 
-        if torch.any(mu_v < 0):
-            print("negative probabilities")
-            break
+            if torch.any(mu_v < 0):
+                print("negative probabilities")
+                break
 
         bar.next()
         bar.suffix = f" loss: {np.mean(losses):.3f} sgap: {np.mean(score_deltas):.3f} tgap: {np.mean(theta_deltas):.3f}"
@@ -351,30 +345,57 @@ def final_test_eval(
     eval_loss_names = [eval_loss_cfg["name"] for eval_loss_cfg in cfg.get("eval", {}).get("losses", [])]
     eval_losses = {n: [] for n in eval_loss_names}
     t_pred, t_grd, t_tot, t_pre, t_e2e, t_gd = [], [], [], [], [], []
+    t_gd_e2e, t_grd_e2e = [], []
+    n_ss = []
     maximize = bool(cfg.get("problem", {}).get("maximize", True))
 
+    run_cfg = cfg.setdefault("run", {})
+    base = run_cfg.get("run_name") or run_cfg.get("name") or cfg.get("run_name") or "run"
+    seed = int(cfg.get("seed", 0))
+    task_id = os.environ.get("SLURM_ARRAY_TASK_ID")  # None if not an array job
+
+    suffix = f"seed{seed}"
+    unique_name = f"{base}_{suffix}"
+
+    # write back to whatever key make_run_paths uses (cover both common conventions)
+    run_cfg["run_name"] = unique_name
+    run_cfg["name"] = unique_name
+    cfg["run_name"] = unique_name
+
+    paths = make_run_paths(cfg)
+    log_dir = paths.log_dir
+
+    print("IN TEST logdir = ", log_dir)
+
     c = 0
+    test_limit = 20000
 
     with torch.no_grad():
         bar = Bar("[Test]          ", max=len(loader))
         for pb, data, y in CUDAPrefetcher(loader, device):
-            print("data.fg_map shape : ", data.fg_map.shape, data.fg_map[:,1].max())
-            _sync(device)
-            t0 = time.perf_counter()
 
-            t1 = time.perf_counter()
-            pred = adapter.forward_fn(model, data)
+            print(pb[0].nv())
             _sync(device)
-            t2 = time.perf_counter()
+            tg0 = time.perf_counter()
 
-            scores = adapter.greedy_scores_fn(pb[0], data, pred)
-            t3 = time.perf_counter()
+            pred_grd = adapter.forward_fn(model, data)
+            pred_t = time.perf_counter() - tg0
+
+            scores = adapter.greedy_scores_fn(pb[0], data, pred_grd)
             grd_sol = pb[0].greedy(scores=scores).x
-            t4 = time.perf_counter()
+            _sync(device)
+            tg1 = time.perf_counter()
+
+            solver_grd_t = tg1 - tg0
+            total_grd_t = float(getattr(data, "preprocess_time_s", 0.0)) + solver_grd_t
 
             # Greedy decimation
-            t5 = time.perf_counter()
-            backend = adapter.decimation_backend_fn(pb[0], data, pred, cfg, device=device)
+            _sync(device)
+            td0 = time.perf_counter()
+
+            pred_dec = adapter.forward_fn(model, data)
+
+            backend = adapter.decimation_backend_fn(pb[0], data, pred_dec, cfg, device=device)
             padapter = adapter.decimation_adapter_fn(pb[0], cfg)
             best_val = None
             dec_sol = None
@@ -382,7 +403,6 @@ def final_test_eval(
             for _ in range(n_samples):
                 _dec_sol = greedy_decimation(pb[0], backend, padapter)
                 dec_val = float(np.dot(pb[0].w, _dec_sol))
-                print("sample val ", dec_val)
                 if best_val is None:
                     best_val = dec_val
                     dec_sol = _dec_sol
@@ -393,13 +413,23 @@ def final_test_eval(
                     if (not maximize) and (best_val > dec_val):
                         best_val = dec_val
                         dec_sol = _dec_sol
-            t6 = time.perf_counter()
-            
-            spec = adapter.loss_spec_fn(adapter, data, pred, y, cfg)
+            _sync(device)
+            td1 = time.perf_counter()
+
+            solver_gd_t = td1 - td0
+            total_gd_t = float(getattr(data, "preprocess_time_s", 0.0)) + solver_gd_t
            
+            spec = adapter.loss_spec_fn(adapter, data, pred_dec, y, cfg)
+
+            if hasattr(data, "lbp_edges"):
+                n_ss += data.lbp_edges.n_ss.detach().cpu().tolist()
+            if hasattr(data, "nmf_edges"):
+                n_ss += data.nmf_edges.n_ss.detach().cpu().tolist()
+          
             # In eval, backward_fn should be None; if not, you can log NaN or skip loss
             loss = compute_loss_from_spec(spec, loss_registry=LOSS_REGISTRY)
             losses.append(float(loss.detach().cpu().item()))
+
 
             for eval_loss_cfg in cfg.get("eval", {}).get("losses", []):
                 name = eval_loss_cfg["name"]
@@ -430,24 +460,25 @@ def final_test_eval(
                     eps=1e-8,
                 )
             )
+            print(loss, gap, dec_gap)
 
-            print(f"gap : {gap}, dec_gap : {dec_gap}")
-            print("\t", float(y.sum().item()), float(dec_sol.sum()))
 
             gaps.append(gap)
             dec_gaps.append(dec_gap)
-            t_pred.append(t2 - t1)
-            t_grd.append(t4 - t3)
-            t_tot.append(t4 - t0)
+            t_pred.append(pred_t)
+            t_grd.append(solver_grd_t)
+            t_grd_e2e.append(total_grd_t)
+            t_tot.append(total_grd_t)
             t_pre.append(float(getattr(data, "preprocess_time_s", 0.0)))
-            t_gd.append(t6 - t5)
-            t_e2e.append(t_pre[-1] + (t4 - t0))
+            t_gd.append(solver_gd_t)
+            t_gd_e2e.append(total_gd_t)
+            t_e2e.append(total_gd_t)
 
             bar.next()
 
-            #c += 1 
-            #if c >= 10:
-            #    break
+            c += 1 
+            if c >= test_limit:
+                break
 
         bar.finish()
 
@@ -474,6 +505,9 @@ def final_test_eval(
         time_preprocess_mean=ms(t_pre)[0], time_preprocess_std=ms(t_pre)[1],
         time_end_to_end_mean=ms(t_e2e)[0], time_end_to_end_std=ms(t_e2e)[1],
         time_gd_mean=ms(t_gd)[0], time_gd_std=ms(t_gd)[1],
+        time_greedy_total_mean=ms(t_grd_e2e)[0], time_greedy_total_std=ms(t_grd_e2e)[1],
+        time_gd_total_mean=ms(t_gd_e2e)[0], time_gd_total_std=ms(t_gd_e2e)[1],
+        num_ss_mean=ms(n_ss)[0], num_ss_std=ms(n_ss)[1],
 
         count=len(losses),
         eval_losses=eval_loss_stats,
@@ -487,9 +521,24 @@ def run_training(cfg: Dict[str, Any]) -> None:
     torch.manual_seed(int(cfg.get("seed", 0)))
     np.random.seed(int(cfg.get("seed", 0)))
 
+    print("SEED value = ", cfg.get("seed", 0))
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # run dirs + logger
+    run_cfg = cfg.setdefault("run", {})
+    base = run_cfg.get("run_name") or run_cfg.get("name") or cfg.get("run_name") or "run"
+    seed = int(cfg.get("seed", 0))
+    task_id = os.environ.get("SLURM_ARRAY_TASK_ID")  # None if not an array job
+
+    suffix = f"seed{seed}"
+    unique_name = f"{base}_{suffix}"
+
+    # write back to whatever key make_run_paths uses (cover both common conventions)
+    run_cfg["run_name"] = unique_name
+    run_cfg["name"] = unique_name
+    cfg["run_name"] = unique_name
+
     paths = make_run_paths(cfg)
     logger = TrainLogger(paths, cfg)
     logger.write_hparams(extra={"device": str(device)})
@@ -541,6 +590,7 @@ def run_training(cfg: Dict[str, Any]) -> None:
         if len(eloss):
             eloss_out = " | ".join(f"{n} {eloss[n]:.4f}" for n in eloss.keys())
             epoch_out += " | " + eloss_out
+            print("LR = ", str(list(optimizer.param_groups)[0]["lr"]))
             logger.add_scalars("extra_loss", eloss, epoch)
         print(epoch_out)
 

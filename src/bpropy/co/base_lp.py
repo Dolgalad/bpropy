@@ -20,6 +20,7 @@ class LPSolveConfig:
     solver: str = "scipy"              # "scipy" | "cbc" | "cplex" | ...
     relax_integrality: bool = False
     verbose: bool = False
+    timelimit: float = np.inf
 
 
 class LPProblem(ABC):
@@ -184,6 +185,7 @@ class LPProblem(ABC):
         verbose: Optional[bool] = None,
         # override hook for MIS(cliques=...)
         override_linear_constraints: Optional[Tuple[object, np.ndarray, np.ndarray]] = None,
+        partial_solution: Optional[tuple] = None
     ) -> Solution:
         """
         Generic LP/MILP solve for problems that provide the LP view.
@@ -254,15 +256,18 @@ class LPProblem(ABC):
 
         # --- python-mip family backend ---
         # allow "cbc" as alias; store solver_name accordingly
-        if slv in {"python-mip", "cbc", "cplex", "gurobi", "grb"}:
+        if slv in {"python-mip", "cbc", "cplex", "gurobi", "grb", "scip"}:
             import mip
 
             # map alias -> mip solver_name if you like
+            #print("Solver name given ", slv)
             solver_name = None if slv in {"python-mip", "cbc"} else slv.upper()
+            #print(solver_name)
             if solver_name is None:
                 md = mip.Model("lp")
             else:
                 md = mip.Model("lp", solver_name=solver_name)
+            #print(md.solver_name)
 
 
             n = self.nv()
@@ -276,6 +281,10 @@ class LPProblem(ABC):
                 lbx, ubx = vb
                 lbx = np.asarray(lbx, dtype=float).reshape(-1)
                 ubx = np.asarray(ubx, dtype=float).reshape(-1)
+            if partial_solution is not None:
+                partial_solution_x, partial_solution_free = partial_solution
+                lbx[~partial_solution_free] = partial_solution_x[~partial_solution_free]
+                ubx[~partial_solution_free] = partial_solution_x[~partial_solution_free]
 
             # choose var type: continuous if relaxed, binary otherwise
             var_type = mip.CONTINUOUS if config.relax_integrality else mip.BINARY
@@ -306,7 +315,7 @@ class LPProblem(ABC):
                     md += row_expr <= float(ub[i])
 
             md.verbose = 1 if config.verbose else 0
-            md.optimize(relax=config.relax_integrality)
+            md.optimize(relax=config.relax_integrality, max_seconds=config.timelimit)
 
             return Solution.from_solver("python-mip", x=x, md=md)
 
