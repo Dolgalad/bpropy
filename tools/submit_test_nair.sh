@@ -10,6 +10,7 @@ EXTRA_ARGS=("$@")
 EXTRA_ARGS_ESCAPED="$(printf '%q ' "${EXTRA_ARGS[@]}")"
 
 ROOT="${BPROPY_ROOT:-${WORK:-$(pwd)}}"
+CACHE_ROOT="${BPROPY_CACHE_ROOT:-${SCRATCH:-${ROOT}}/bpropy/cache}"
 
 jget() {
   local key="$1"
@@ -75,8 +76,8 @@ esac
 
 JOBNAME_BASE="test_nair_${DATASET_NAME}_${MODEL_NAME}_${DECODING}_p${FIX_PROP//./p}"
 
-OUT_BASE="${ROOT}/slurm_outputs/${JOBNAME_BASE}/%x_%A_%a.out"
-ERR_BASE="${ROOT}/slurm_outputs/${JOBNAME_BASE}/%x_%A_%a.err"
+OUT_BASE="${ROOT}/slurm_outputs/${JOBNAME_BASE}/%x_%a.out"
+ERR_BASE="${ROOT}/slurm_outputs/${JOBNAME_BASE}/%x_%a.err"
 mkdir -p "$(dirname "${OUT_BASE}")"
 
 # -------------------------
@@ -105,6 +106,9 @@ cat > "${TMP_SCRIPT}" <<EOF
 #SBATCH --array=0-${ARRAY_LAST}
 #SBATCH --job-name=${JOBNAME_BASE}
 #SBATCH -A bnq@v100
+#SBATCH --exclusive
+#SBATCH --output=/dev/null
+#SBATCH --error=/dev/null
 
 set -euo pipefail
 
@@ -116,6 +120,9 @@ export RESULTS_DIR="${RESULTS_DIR}"
 export BASENAME="${BASENAME}"
 export PYTHONUNBUFFERED=1
 export BPROPY_NAIR_OPT_CACHE="${CACHE_DIR}"
+
+CACHE_ROOT="${CACHE_ROOT}"
+mkdir -p "${CACHE_ROOT}"
 
 cd "\${ROOT}"
 export PYTHONPATH="\${PYTHONPATH:-}:\${ROOT}"
@@ -138,6 +145,7 @@ srun --job-name="${JOBNAME_BASE}_seed\${SEED}" \\
        --fix-prop "\${FIX_PROP}" \\
        --decoding "\${DECODING}" \\
        --output-json "\${OUTPUT_JSON}" \\
+       --cache-dir "\${CACHE_ROOT}"
 #       "\$@"
 EOF
 

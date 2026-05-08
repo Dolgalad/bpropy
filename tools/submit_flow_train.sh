@@ -5,6 +5,7 @@ CONFIG="${1:?Usage: submit_train.sh path/to/config.json [extra args...]}"
 shift || true
 
 ROOT="${BPROPY_ROOT:-${WORK:-$(pwd)}}"
+CACHE_ROOT="${BPROPY_CACHE_ROOT:-${SCRATCH:-${ROOT}}/bpropy/cache}"
 
 # helper: make relative path absolute wrt ROOT; keep absolute paths untouched
 abspath() {
@@ -69,12 +70,14 @@ cat > "${TMP_SCRIPT}" <<EOF
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --time=20:00:00
-#SBATCH --cpus-per-task=1
+#SBATCH --cpus-per-task=${CPUS}
 #SBATCH --gres=gpu:${GPUS}
 #SBATCH --array=0-2
 #SBATCH --job-name=${JOBNAME_BASE}
 #SBATCH -A bnq@v100
-##SBATCH --exclusive
+#SBATCH --exclusive
+#SBATCH --output=/dev/null
+#SBATCH --error=/dev/null
 $(printf "%s\n" "${SBATCH_OPT_LINES[@]}")
 
 set -euo pipefail
@@ -101,6 +104,9 @@ export PYTHONPATH="\${PYTHONPATH:-}:\${ROOT}"
 
 export PYTHONUNBUFFERED=1
 
+CACHE_ROOT="${CACHE_ROOT}"
+mkdir -p "${CACHE_ROOT}"
+
 # Ensure slurm log dirs exist under ROOT (if you keep them relative)
 mkdir -p "\${ROOT}/slurm/out" "\${ROOT}/slurm/err"
 
@@ -126,7 +132,7 @@ esac
 
 srun --job-name="${JOBNAME_BASE}\${SUFFIX}" \\
      --output="\${OUT_FILE}" --error="\${ERR_FILE}" \\
-     bpropy-flow-train --config "\${CONFIG}" --seed "\${SEED}"
+     bpropy-flow-train --config "\${CONFIG}" --seed "\${SEED}" --cache-dir "\${CACHE_ROOT}"
 EOF
 
 cat "${TMP_SCRIPT}"

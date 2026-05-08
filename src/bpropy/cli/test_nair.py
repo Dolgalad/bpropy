@@ -48,7 +48,7 @@ def build_full_parser(defaults: Dict[str, Any]) -> argparse.ArgumentParser:
     p.add_argument("--config", required=True)
     p.add_argument("--print-config", action="store_true")
     p.add_argument("--checkpoint", default=argparse.SUPPRESS)
-
+    p.add_argument("--cache-dir", dest="cache_dir", default=argparse.SUPPRESS)
     p.add_argument("--max-test-instances", type=int, default=None)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument(

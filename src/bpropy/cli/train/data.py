@@ -76,6 +76,7 @@ def make_dataset(cfg: Dict[str, Any], split: str, yield_mode: str) -> MRFDataset
         cfg=ds_cfg,
         preprocess=preprocess_fn,
         processed_dir=data_cfg.get("processed_dir", "processed"),
+        cache_dir=data_cfg.get("cache_dir"),
     )
 
 

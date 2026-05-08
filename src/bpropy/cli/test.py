@@ -56,6 +56,7 @@ def build_full_parser(defaults: Dict[str, Any]) -> argparse.ArgumentParser:
 
     # data
     p.add_argument("--data-root", dest="data_root", default=argparse.SUPPRESS)
+    p.add_argument("--cache-dir", dest="cache_dir", default=argparse.SUPPRESS)
     p.add_argument("--split", dest="split", default=argparse.SUPPRESS)
     p.add_argument("--val-split", dest="val_split", default=argparse.SUPPRESS)
     p.add_argument("--test-split", dest="test_split", default=argparse.SUPPRESS)

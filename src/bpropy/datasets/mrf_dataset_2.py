@@ -187,11 +187,16 @@ class MRFDataset(Dataset):
         preprocess: Optional[Callable[..., Data]] = None,
         cfg: Optional[MRFDatasetConfig] = None,
         processed_dir: str = "processed",
+        cache_dir: Optional[str] = None,
     ):
         self.root = root
         self.split = split
         self.split_dir = os.path.join(root, split)
-        self.processed_dir = os.path.join(root, processed_dir)
+        dataset_name = os.path.basename(os.path.normpath(root))
+        if cache_dir:
+            self.processed_dir = os.path.join(cache_dir, dataset_name, processed_dir)
+        else:
+            self.processed_dir = os.path.join(root, processed_dir)
         self.cfg = cfg or MRFDatasetConfig()
         self.preprocess = preprocess or (lambda pb: pb)  # type: ignore
 

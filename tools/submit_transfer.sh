@@ -5,6 +5,7 @@ CONFIG="${1:?Usage: submit_transfer.sh path/to/config.json [extra args...]}"
 shift || true
 
 ROOT="${BPROPY_ROOT:-${WORK:-$(pwd)}}"
+CACHE_ROOT="${BPROPY_CACHE_ROOT:-${SCRATCH:-${ROOT}}/bpropy/cache}"
 
 abspath() {
   local p="${1:-}"
@@ -67,7 +68,10 @@ cat > "${TMP_SCRIPT}" <<EOF
 #SBATCH --gres=gpu:${GPUS}
 #SBATCH --job-name=${JOBNAME_BASE}
 #SBATCH -A bnq@v100
-
+#SBATCH --exclusive
+#SBATCH --output=/dev/null
+#SBATCH --error=/dev/null
+#
 $(printf "%s\n" "${SBATCH_OPT_LINES[@]}")
 
 set -euo pipefail
@@ -79,7 +83,8 @@ SEED="${SEED}"
 cd "\${ROOT}"
 export PYTHONPATH="\${PYTHONPATH:-}:\${ROOT}"
 
-mkdir -p "\${ROOT}/slurm/out" "\${ROOT}/slurm/err"
+CACHE_ROOT="${CACHE_ROOT}"
+mkdir -p "${CACHE_ROOT}"
 
 OUT_FILE="${OUT_BASE}"
 ERR_FILE="${ERR_BASE}"
@@ -96,7 +101,7 @@ esac
 
 srun --job-name="${JOBNAME_BASE}_seed\${SEED}" \\
      --output="\${OUT_FILE}" --error="\${ERR_FILE}" \\
-     bpropy-train --config "\${CONFIG}" --seed "\${SEED}"
+     bpropy-train --config "\${CONFIG}" --seed "\${SEED}" --cache-dir "\${CACHE_ROOT}"
 EOF
 
 sbatch "${TMP_SCRIPT}"

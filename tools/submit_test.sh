@@ -8,6 +8,7 @@ EXTRA_ARGS=("$@")
 EXTRA_ARGS_ESCAPED="$(printf '%q ' "${EXTRA_ARGS[@]}")"
 
 ROOT="${BPROPY_ROOT:-${WORK:-$(pwd)}}"
+CACHE_ROOT="${BPROPY_CACHE_ROOT:-${SCRATCH:-${ROOT}}/bpropy/cache}"
 
 # helper: make relative path absolute wrt ROOT; keep absolute paths untouched
 abspath() {
@@ -78,6 +79,9 @@ cat > "${TMP_SCRIPT}" <<EOF
 #SBATCH --array=0-2
 #SBATCH --job-name=${JOBNAME_BASE}
 #SBATCH -A bnq@v100
+#SBATCH --exclusive
+#SBATCH --output=/dev/null
+#SBATCH --error=/dev/null
 $(printf "%s\n" "${SBATCH_OPT_LINES[@]}")
 
 set -euo pipefail
@@ -107,6 +111,9 @@ export PYTHONPATH="\${PYTHONPATH:-}:\${ROOT}"
 
 export PYTHONUNBUFFERED=1
 
+CACHE_ROOT="${CACHE_ROOT}"
+mkdir -p "${CACHE_ROOT}"
+
 # Ensure slurm log dirs exist under ROOT (if you keep them relative)
 mkdir -p "\${ROOT}/slurm/out" "\${ROOT}/slurm/err"
 
@@ -132,10 +139,8 @@ esac
 
 srun --job-name="${JOBNAME_BASE}\${SUFFIX}" \\
      --output="\${OUT_FILE}" --error="\${ERR_FILE}" \\
-     bpropy-test --config "\${CONFIG}" --checkpoint "runs/${BASENAME}\${SUFFIX}/checkpoints/best.pt" --seed "\${SEED}"
+     bpropy-test --config "\${CONFIG}" --checkpoint "runs/${BASENAME}\${SUFFIX}/checkpoints/best.pt" --seed "\${SEED}" --cache-dir "\${CACHE_ROOT}"
 EOF
-
-cat "${TMP_SCRIPT}"
 
 sbatch "${TMP_SCRIPT}"
 

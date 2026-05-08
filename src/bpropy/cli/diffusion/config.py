@@ -46,6 +46,9 @@ def merge_cli_overrides(cfg: Config, args: argparse.Namespace) -> Config:
     if "data_root" in d:
         cfg.setdefault("data", {})
         cfg["data"]["root"] = d["data_root"]
+    if "cache_dir" in d:
+        cfg.setdefault("data", {})
+        cfg["data"]["cache_dir"] = d["cache_dir"]
     if "split" in d:
         cfg["data"]["split"] = d["split"]
     if "val_split" in d:
@@ -131,6 +134,7 @@ def validate_config(cfg: Config) -> None:
     cfg["data"].setdefault("val_split", "val")
     cfg["data"].setdefault("test_split", "test")
     cfg["data"].setdefault("processed_dir", "processed")
+    cfg["data"].setdefault("cache_dir", None)
     cfg["data"].setdefault("feature_mode", "EB")
     cfg["data"].setdefault("hetero", False)
     cfg["data"].setdefault("precompute", {})
