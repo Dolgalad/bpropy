@@ -32,8 +32,8 @@ JOBNAME_BASE="$(jget job_name "bpropy_train")"
 
 
 # We'll suffix these per-seed inside the job
-OUT_BASE="$(jget output "slurm/out/%x_%A_%a.out")"
-ERR_BASE="$(jget error  "slurm/err/%x_%A_%a.err")"
+OUT_BASE="$(jget output "slurm/out/%x_%a.out")"
+ERR_BASE="$(jget error  "slurm/err/%x_%a.err")"
 
 # Optional extras
 QOS="$(jget qos "")"
@@ -75,6 +75,8 @@ cat > "${TMP_SCRIPT}" <<EOF
 #SBATCH --job-name=${JOBNAME_BASE}
 #SBATCH -A bnq@v100
 ##SBATCH --exclusive
+#SBATCH --output=/dev/null
+#SBATCH --error=/dev/null
 $(printf "%s\n" "${SBATCH_OPT_LINES[@]}")
 
 set -euo pipefail

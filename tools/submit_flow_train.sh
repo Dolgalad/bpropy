@@ -25,7 +25,7 @@ jget() {
 # Slurm resources from config (with sensible fallbacks)
 PARTITION="$(jget partition "gpu")"
 TIME="$(jget time "24:00:00")"
-CPUS="$(jget cpus_per_task "1")"
+CPUS="$(jget cpus_per_task "8")"
 MEM="$(jget mem "32G")"
 GPUS="$(jget gpus "1")"
 JOBNAME_BASE="$(jget job_name "bpropy_flow_train")"
@@ -73,9 +73,8 @@ cat > "${TMP_SCRIPT}" <<EOF
 #SBATCH --gres=gpu:${GPUS}
 #SBATCH --array=0-2
 #SBATCH --job-name=${JOBNAME_BASE}
-##SBATCH -A bnq@v100
+#SBATCH -A bnq@v100
 ##SBATCH --exclusive
-##SBATCH --nodelist=lipn-rtx1,lipn-rtx3
 $(printf "%s\n" "${SBATCH_OPT_LINES[@]}")
 
 set -euo pipefail
