@@ -76,6 +76,22 @@ def compute_loss_from_spec(
         base = base + sum(spec.extra_terms.values())
     return base
 
+def ensure_seeded_run_name(cfg: Dict[str, Any]) -> str:
+    run_cfg = cfg.setdefault("run", {})
+    seed = int(cfg.get("seed", 0))
+    suffix = f"_seed{seed}"
+
+    base = run_cfg.get("run_name") or run_cfg.get("name") or cfg.get("run_name") or "run"
+
+    if not str(base).endswith(suffix):
+        base = f"{base}{suffix}"
+
+    run_cfg["run_name"] = base
+    run_cfg["name"] = base
+    cfg["run_name"] = base
+
+    return base
+
 def _warmup_lr(cfg, optimizer, global_step: int):
     w = cfg.get("train", {}).get("warmup", None)
     if not w or not w.get("enabled", False):
@@ -104,6 +120,8 @@ def train_one_epoch(
     device: torch.device,
     epoch: int,
     global_step: int,
+    scaler: torch.amp.GradScaler,
+    use_amp: bool,
 ) -> float:
     model.train()
     losses = []
@@ -111,35 +129,48 @@ def train_one_epoch(
     steps = 0
     max_steps = int(cfg["train"]["steps_per_epoch"])
 
+    grad_accum_steps = int(cfg.get("train", {}).get("grad_accum_steps", 1))
+    grad_accum_steps = max(1, grad_accum_steps)
+
+    update_steps = 0
+    optimizer.zero_grad(set_to_none=True)
+
     bar = Bar(f"[Train] epoch {epoch}", max=len(loader))
 
     score_deltas = []
     theta_deltas = []
 
     for data, y in CUDAPrefetcher(loader, device):
-        optimizer.zero_grad(set_to_none=True)
-        pred = adapter.forward_fn(model, data)
-        spec = adapter.loss_spec_fn(adapter, data, pred, y, cfg)
-        if epoch == 1 and steps == 0:
-            from bpropy.debug_audit import audit_batch
-            #audit_batch(data, pred = pred, cfg=cfg, strict=True)
-       
-        if spec.backward_fn is not None:
-            logged_loss = spec.backward_fn()
-            loss_scalar = float(logged_loss.detach().cpu().item()) if torch.is_tensor(logged_loss) else float(logged_loss)
-        else:
-            loss = compute_loss_from_spec(spec, loss_registry=LOSS_REGISTRY)
-            loss.backward()
-            loss_scalar = float(loss.detach().cpu().item())
+        with torch.amp.autocast(device_type=device.type, enabled=use_amp):
+            pred = adapter.forward_fn(model, data)
+            spec = adapter.loss_spec_fn(adapter, data, pred, y, cfg)
+
         
-        clip = cfg["train"].get("grad_clip_norm")
-        if clip:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), float(clip))
-
-        _warmup_lr(cfg, optimizer, global_step + steps)
-
-        optimizer.step()
-
+        if spec.backward_fn is not None:
+            raise RuntimeError(
+                "Gradient accumulation is not implemented for LossSpec.backward_fn paths yet. "
+                "Use the standard loss path or adapt backward_fn to support scaled loss."
+            )
+        
+        loss = compute_loss_from_spec(spec, loss_registry=LOSS_REGISTRY)
+        loss_scalar = float(loss.detach().cpu().item())
+        scaler.scale(loss / grad_accum_steps).backward()
+        
+        is_update_step = ((steps + 1) % grad_accum_steps == 0)
+       
+        if is_update_step:
+            clip = cfg["train"].get("grad_clip_norm")
+            if clip:
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), float(clip))
+        
+            _warmup_lr(cfg, optimizer, global_step + update_steps)
+        
+            scaler.step(optimizer)
+            scaler.update()
+            optimizer.zero_grad(set_to_none=True)
+        
+            update_steps += 1
 
         losses.append(loss_scalar)
 
@@ -175,10 +206,24 @@ def train_one_epoch(
         steps += 1
         if steps >= max_steps:
             break
+
+    if steps>0 and steps % grad_accum_steps != 0:
+        clip = cfg["train"].get("grad_clip_norm")
+        if clip:
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), float(clip))
+    
+        _warmup_lr(cfg, optimizer, global_step + update_steps)
+        
+        scaler.step(optimizer)
+        scaler.update()
+        optimizer.zero_grad(set_to_none=True)
+    
+        update_steps += 1
     bar.finish()
     print("mean loss : ", np.mean(losses))
 
-    return float(np.mean(losses)) if losses else 0.0, steps
+    return float(np.mean(losses)) if losses else 0.0, update_steps
 
 
 def validate_one_epoch(
@@ -188,6 +233,7 @@ def validate_one_epoch(
     loader,
     device: torch.device,
     epoch: int,
+    use_amp: bool = False,
 ) -> Tuple[float, float]:
     model.eval()
     losses = []
@@ -208,8 +254,10 @@ def validate_one_epoch(
         bar = Bar(f"[Val]   epoch {epoch}", max=len(loader))
         for pbs, data, y in CUDAPrefetcher(loader, device):
             nv_offset = 0
-            pred = adapter.forward_fn(model, data)
-            spec = adapter.loss_spec_fn(adapter, data, pred, y, cfg)
+
+            with torch.amp.autocast(device_type=device.type, enabled=use_amp):
+                pred = adapter.forward_fn(model, data)
+                spec = adapter.loss_spec_fn(adapter, data, pred, y, cfg)
             
             # In eval, backward_fn should be None; if not, you can log NaN or skip loss
             loss = compute_loss_from_spec(spec, loss_registry=LOSS_REGISTRY)
@@ -442,13 +490,7 @@ def final_test_eval(
     maximize = bool(cfg.get("problem", {}).get("maximize", True))
     test_limit = int(cfg.get("eval", {}).get("test_limit", 20000))
 
-    run_cfg = cfg.setdefault("run", {})
-    base = run_cfg.get("run_name") or run_cfg.get("name") or cfg.get("run_name") or "run"
-    seed = int(cfg.get("seed", 0))
-    unique_name = f"{base}_seed{seed}"
-    run_cfg["run_name"] = unique_name
-    run_cfg["name"] = unique_name
-    cfg["run_name"] = unique_name
+    ensure_seeded_run_name(cfg)
 
     if output_json is not None:
         out_path = output_json
@@ -671,18 +713,7 @@ def run_training(cfg: Dict[str, Any]) -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # run dirs + logger
-    run_cfg = cfg.setdefault("run", {})
-    base = run_cfg.get("run_name") or run_cfg.get("name") or cfg.get("run_name") or "run"
-    seed = int(cfg.get("seed", 0))
-    task_id = os.environ.get("SLURM_ARRAY_TASK_ID")  # None if not an array job
-
-    suffix = f"seed{seed}"
-    unique_name = f"{base}_{suffix}"
-
-    # write back to whatever key make_run_paths uses (cover both common conventions)
-    run_cfg["run_name"] = unique_name
-    run_cfg["name"] = unique_name
-    cfg["run_name"] = unique_name
+    ensure_seeded_run_name(cfg)
 
     paths = make_run_paths(cfg)
     logger = TrainLogger(paths, cfg)
@@ -722,11 +753,13 @@ def run_training(cfg: Dict[str, Any]) -> None:
     patience = int(cfg["train"].get("early_stop", {}).get("patience", 20))
     global_step = 0
     warmup_steps = int(cfg.get("train", {}).get("warmup",{}).get("steps", 0))
+    use_amp = bool(cfg.get("train", {}).get("amp", False)) and device.type == "cuda"
+    scaler = torch.amp.GradScaler(device.type, enabled=use_amp)
 
     for epoch in range(st.epoch, epochs + 1):
-        tr, tr_steps = train_one_epoch(cfg, adapter_train, model, optimizer, loaders.train_loader, device, epoch, global_step)
+        tr, tr_steps = train_one_epoch(cfg, adapter_train, model, optimizer, loaders.train_loader, device, epoch, global_step, scaler, use_amp)
         global_step += tr_steps
-        va, gap, eloss = validate_one_epoch(cfg, adapter_train, model, loaders.val_loader, device, epoch)
+        va, gap, eloss = validate_one_epoch(cfg, adapter_train, model, loaders.val_loader, device, epoch, use_amp=use_amp)
 
         logger.add_scalars("loss", {"train": tr, "val": va}, epoch)
         logger.add_scalars("lr", {f"pg{k}":pg["lr"] for k,pg in enumerate(optimizer.param_groups)}, epoch)

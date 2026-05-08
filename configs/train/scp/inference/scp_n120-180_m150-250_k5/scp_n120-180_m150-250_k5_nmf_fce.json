@@ -42,9 +42,8 @@
     },
 
     "loader": {
-      "batch_size": 10,
-      "val_batch_size": 10,
-
+      "batch_size": 8,
+      "val_batch_size": 8,
       "num_workers": 2,
       "prefetch": 2,
       "pin_memory": true
@@ -70,6 +69,7 @@
   },
 
   "train": {
+    "grad_accum_steps": 4,
     "epochs": 100000,
     "steps_per_epoch": 500000,
     "val_steps": 200000,

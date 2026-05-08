@@ -10,7 +10,7 @@ import numpy as np
 import torch
 
 from bpropy.cli.train.config import load_run_config, merge_cli_overrides, validate_config
-from bpropy.cli.diffusion.loop import build_model, final_test_eval, build_noise_schedule
+from bpropy.cli.diffusion.loop import build_model, final_test_eval, build_noise_schedule, ensure_seeded_run_name
 from bpropy.cli.train.data import make_loaders
 from bpropy.cli.train.logging import make_run_paths
 from bpropy.cli.train.checkpoint import load_checkpoint
@@ -36,6 +36,13 @@ def build_full_parser(defaults: Dict[str, Any]) -> argparse.ArgumentParser:
     """
     p = argparse.ArgumentParser(prog="bpropy-test")
 
+    p.add_argument(
+        "--output-json",
+        dest="output_json",
+        default=argparse.SUPPRESS,
+        help="Path to the JSON file where test evaluation results will be written.",
+    )
+
     # still include these so `-h` shows them and they can be re-parsed
     p.add_argument("--config", required=True, help="Path to JSON config.")
     p.add_argument("--print-config", action="store_true", help="Print resolved config and exit.")
@@ -49,6 +56,7 @@ def build_full_parser(defaults: Dict[str, Any]) -> argparse.ArgumentParser:
 
     # data
     p.add_argument("--data-root", dest="data_root", default=argparse.SUPPRESS)
+    p.add_argument("--cache-dir", dest="cache_dir", default=argparse.SUPPRESS)
     p.add_argument("--split", dest="split", default=argparse.SUPPRESS)
     p.add_argument("--val-split", dest="val_split", default=argparse.SUPPRESS)
     p.add_argument("--test-split", dest="test_split", default=argparse.SUPPRESS)
@@ -110,7 +118,7 @@ def _pick_checkpoint_path(cfg: Dict[str, Any], paths, args: argparse.Namespace) 
     )
 
 
-def run_test(cfg: Dict[str, Any], checkpoint_path: str) -> Dict[str, Any]:
+def run_test(cfg: Dict[str, Any], checkpoint_path: str, output_json: Optional[str] = None) -> Dict[str, Any]:
     # seeds (match train script behavior)
     torch.manual_seed(int(cfg.get("seed", 0)))
     np.random.seed(int(cfg.get("seed", 0)))
@@ -147,6 +155,7 @@ def run_test(cfg: Dict[str, Any], checkpoint_path: str) -> Dict[str, Any]:
         device=device,
         log_dir=paths.log_dir,
         noise_schedule=noise_schedule,
+        output_json=output_json,
     )
     print(f"[test-eval] saved stats to {out_path}")
 
@@ -181,12 +190,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         # reuse your config dumper if you want; otherwise just json-dump
         print(json.dumps(cfg, indent=2, sort_keys=True))
         return 0
-
+    ensure_seeded_run_name(cfg)
     paths = make_run_paths(cfg)
     ckpt_path = _pick_checkpoint_path(cfg, paths, args)
     print("checkpoint path = ", ckpt_path)
 
-    stats = run_test(cfg, ckpt_path)
+    stats = run_test(cfg, ckpt_path, output_json=getattr(args,"output_json",None))
     print(json.dumps(stats, indent=2, sort_keys=True))
     return 0
 

@@ -76,6 +76,21 @@ def compute_loss_from_spec(
         base = base + sum(spec.extra_terms.values())
     return base
 
+def ensure_seeded_run_name(cfg: Dict[str, Any]) -> str:
+    run_cfg = cfg.setdefault("run", {})
+    seed = int(cfg.get("seed", 0))
+    suffix = f"_seed{seed}"
+
+    base = run_cfg.get("run_name") or run_cfg.get("name") or cfg.get("run_name") or "run"
+
+    if not str(base).endswith(suffix):
+        base = f"{base}{suffix}"
+
+    run_cfg["run_name"] = base
+    run_cfg["name"] = base
+    cfg["run_name"] = base
+
+    return base
 
 def _warmup_lr(cfg, optimizer, global_step: int):
     w = cfg.get("train", {}).get("warmup", None)
@@ -316,10 +331,15 @@ def train_one_epoch(
     steps = 0
     max_steps = int(cfg["train"]["steps_per_epoch"])
 
+    grad_accum_steps = int(cfg.get("train", {}).get("grad_accum_steps", 1))
+    grad_accum_steps = max(1, grad_accum_steps)
+    
+    update_steps = 0
+    optimizer.zero_grad(set_to_none=True)
+
     bar = Bar(f"[Train] epoch {epoch}", max=len(loader))
 
     for data, y in CUDAPrefetcher(loader, device):
-        optimizer.zero_grad(set_to_none=True)
 
         noisy_data, y_t, t = make_noisy_batch(data, y, noise_schedule, cfg)
 
@@ -328,21 +348,30 @@ def train_one_epoch(
             spec = adapter.loss_spec_fn(adapter, noisy_data, pred, y, cfg)
     
         if spec.backward_fn is not None:
-            logged_loss = spec.backward_fn()
-            loss_scalar = float(logged_loss.detach().cpu().item()) if torch.is_tensor(logged_loss) else float(logged_loss)
-        else:
-            loss = compute_loss_from_spec(spec, loss_registry=LOSS_REGISTRY)
-            scaler.scale(loss).backward()
-            loss_scalar = float(loss.detach().cpu().item())
-
-        if clip:
-            scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), clip)
-
-        _warmup_lr(cfg, optimizer, global_step + steps)
-        scaler.step(optimizer)
-        scaler.update()
-
+            raise RuntimeError(
+                "Gradient accumulation is not implemented for LossSpec.backward_fn paths yet."
+            )
+        
+        loss = compute_loss_from_spec(spec, loss_registry=LOSS_REGISTRY)
+        loss_scalar = float(loss.detach().cpu().item())
+        
+        scaled_loss = loss / grad_accum_steps
+        scaler.scale(scaled_loss).backward()
+        
+        is_update_step = ((steps + 1) % grad_accum_steps == 0)
+        
+        if is_update_step:
+            if clip:
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), clip)
+        
+            _warmup_lr(cfg, optimizer, global_step + update_steps)
+        
+            scaler.step(optimizer)
+            scaler.update()
+            optimizer.zero_grad(set_to_none=True)
+        
+            update_steps += 1
         losses.append(loss_scalar)
 
         bar.next()
@@ -351,9 +380,20 @@ def train_one_epoch(
 
         if steps >= max_steps:
             break
-
+    if steps > 0 and steps % grad_accum_steps != 0:
+        if clip:
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), clip)
+    
+        _warmup_lr(cfg, optimizer, global_step + update_steps)
+    
+        scaler.step(optimizer)
+        scaler.update()
+        optimizer.zero_grad(set_to_none=True)
+    
+        update_steps += 1
     bar.finish()
-    return float(np.mean(losses)) if losses else 0.0, steps
+    return float(np.mean(losses)) if losses else 0.0, update_steps
 
 def get_validation_timesteps(cfg: Dict[str, Any], noise_schedule: NoiseSchedule) -> list[int]:
     if "val_timesteps" in cfg.get("eval", {}):
@@ -621,6 +661,7 @@ def final_test_eval(
     device: torch.device,
     log_dir: str,
     noise_schedule: torch.Tensor,
+    output_json: Optional[str] = None,
 ) -> str:
     """
     Test-time: use a fixed timestep so all instances are evaluated at the same noise level.
@@ -638,18 +679,17 @@ def final_test_eval(
     eval_t = int(cfg.get("eval", {}).get("diffusion_t", num_steps - 1))
     eval_t = max(0, min(eval_t, len(noise_schedule["betas"])-1))
 
-    run_cfg = cfg.setdefault("run", {})
-    base = run_cfg.get("run_name") or run_cfg.get("name") or cfg.get("run_name") or "run"
-    seed = int(cfg.get("seed", 0))
-    unique_name = f"{base}_seed{seed}"
-    run_cfg["run_name"] = unique_name
-    run_cfg["name"] = unique_name
-    cfg["run_name"] = unique_name
-
-    paths = make_run_paths(cfg)
-    log_dir = paths.log_dir
-    out_path = os.path.join(log_dir, "test_eval.json")
-
+    ensure_seeded_run_name(cfg)
+    if output_json is not None:
+        out_path = output_json
+        out_dir = os.path.dirname(out_path)
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+    else:
+        paths = make_run_paths(cfg)
+        log_dir = paths.log_dir
+        os.makedirs(log_dir, exist_ok=True)
+        out_path = os.path.join(log_dir, "test_eval.json")
     c = 0
     test_limit = int(cfg.get("eval", {}).get("test_limit", 20000))
 
@@ -1146,14 +1186,7 @@ def run_training(cfg: Dict[str, Any]) -> None:
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    run_cfg = cfg.setdefault("run", {})
-    base = run_cfg.get("run_name") or run_cfg.get("name") or cfg.get("run_name") or "run"
-    seed = int(cfg.get("seed", 0))
-    unique_name = f"{base}_seed{seed}"
-    run_cfg["run_name"] = unique_name
-    run_cfg["name"] = unique_name
-    cfg["run_name"] = unique_name
-
+    ensure_seeded_run_name(cfg)
     paths = make_run_paths(cfg)
     logger = TrainLogger(paths, cfg)
     logger.write_hparams(extra={"device": str(device)})
@@ -1189,7 +1222,8 @@ def run_training(cfg: Dict[str, Any]) -> None:
     use_amp = bool(cfg["train"].get("amp", False)) and device.type == "cuda"
     scaler = torch.amp.GradScaler(device.type, enabled=use_amp)
 
-    clip = float(cfg["train"].get("grad_clip_norm"))
+    clip_cfg = cfg["train"].get("grad_clip_norm")
+    clip = float(clip_cfg) if clip_cfg is not None else None
 
     for epoch in range(st.epoch, epochs + 1):
         tr, tr_steps = train_one_epoch(

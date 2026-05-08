@@ -10,7 +10,7 @@ import numpy as np
 import torch
 
 from bpropy.cli.train.config import load_run_config, merge_cli_overrides, validate_config
-from bpropy.cli.flow.loop import build_model, final_test_eval
+from bpropy.cli.flow.loop import build_model, final_test_eval, ensure_seeded_run_name
 from bpropy.cli.train.data import make_loaders
 from bpropy.cli.train.logging import make_run_paths
 from bpropy.cli.train.checkpoint import load_checkpoint
@@ -56,6 +56,7 @@ def build_full_parser(defaults: Dict[str, Any]) -> argparse.ArgumentParser:
 
     # data
     p.add_argument("--data-root", dest="data_root", default=argparse.SUPPRESS)
+    p.add_argument("--cache-dir", dest="cache_dir", default=argparse.SUPPRESS)
     p.add_argument("--split", dest="split", default=argparse.SUPPRESS)
     p.add_argument("--val-split", dest="val_split", default=argparse.SUPPRESS)
     p.add_argument("--test-split", dest="test_split", default=argparse.SUPPRESS)
@@ -188,6 +189,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(json.dumps(cfg, indent=2, sort_keys=True))
         return 0
 
+    ensure_seeded_run_name(cfg)
     paths = make_run_paths(cfg)
     ckpt_path = _pick_checkpoint_path(cfg, paths, args)
     print("checkpoint path = ", ckpt_path)
