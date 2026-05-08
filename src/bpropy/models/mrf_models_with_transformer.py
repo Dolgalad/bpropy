@@ -261,16 +261,46 @@ class GCN_MRF_v61_Transformer(torch.nn.Module):
             data._debug_stats = {}
     
         # Mapping + theta prediction
-        if hasattr(data, "fg_map"):
-            m_stride = data.lbp_edges.m_stride.to(torch.long)  # [n_factors]
-            n_factors = int(m_stride.numel())
-            max_stride = int(m_stride.max().item())
+        #if hasattr(data, "fg_map"):
+        #    m_stride = data.lbp_edges.m_stride.to(torch.long)  # [n_factors]
+        #    n_factors = int(m_stride.numel())
+        #    max_stride = int(m_stride.max().item())
     
+        #    node_idx = data.fg_map[:, 0].to(torch.long)
+        #    factor_idx = data.fg_map[:, 1].to(torch.long)
+    
+        #    src_is_var = (data.bipartite[node_idx] == 0)
+        #    src_is_con = ~src_is_var
+                # Mapping + theta prediction
+        if hasattr(data, "fg_map"):
             node_idx = data.fg_map[:, 0].to(torch.long)
             factor_idx = data.fg_map[:, 1].to(torch.long)
-    
+
             src_is_var = (data.bipartite[node_idx] == 0)
             src_is_con = ~src_is_var
+
+            # This transformer is used for both LBP and NMF approximate-FG runs.
+            # Do not read factor sizes from data.lbp_edges here, because NMF runs
+            # may only have data.nmf_edges. The approximate factor arity is the
+            # number of variable-side fg_map entries per approximate factor.
+            if hasattr(data, "fg_factor_sizes"):
+                n_factors = int(data.fg_factor_sizes.numel())
+            else:
+                n_factors = int(factor_idx.max().item()) + 1 if factor_idx.numel() else 0
+
+            fac_of_var = factor_idx[src_is_var]
+            arity = torch.bincount(fac_of_var, minlength=n_factors).to(torch.long)
+            m_stride = (1 << arity).to(torch.long)
+            max_stride = int(m_stride.max().item()) if m_stride.numel() else 0
+
+            if hasattr(data, "fg_factor_sizes"):
+                fg_factor_sizes = data.fg_factor_sizes.to(device=arity.device, dtype=torch.long)
+                if fg_factor_sizes.numel() == arity.numel() and not torch.all(fg_factor_sizes == arity):
+                    raise RuntimeError(
+                        "GCN_MRF_v61_Transformer: fg_factor_sizes/fg_map mismatch. "
+                        "Expected fg_factor_sizes to equal the number of variable "
+                        "neighbors per approximate factor."
+                    )
     
             if node_idx.numel() > 0:
                 max_nid = int(node_idx.max().item()) + 1
@@ -291,8 +321,8 @@ class GCN_MRF_v61_Transformer(torch.nn.Module):
             ar = torch.arange(M, device=x.device).view(1, M)
             mask = ar < counts_all.view(-1, 1)
     
-            fac_of_var = factor_idx[src_is_var]
-            arity = torch.bincount(fac_of_var, minlength=n_factors).to(torch.long)
+            #fac_of_var = factor_idx[src_is_var]
+            #arity = torch.bincount(fac_of_var, minlength=n_factors).to(torch.long)
     
             present_arities = set(torch.unique(arity).tolist())
             available_arities = {int(k) for k in self.theta_heads.keys()}
