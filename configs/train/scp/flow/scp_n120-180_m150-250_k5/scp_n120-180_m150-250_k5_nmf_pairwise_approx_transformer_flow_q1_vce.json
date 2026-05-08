@@ -43,9 +43,9 @@
     "refresh": false,
 
     "precompute": {
-      "lbp": true,
+      "lbp": false,
       "ss": true,
-      "nmf": false ,
+      "nmf": true ,
       "fg_approx": {
         "method": "pairwise" ,
 	"seed": 0

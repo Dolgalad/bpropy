@@ -2,7 +2,7 @@
   "schema_version": 1,
 
   "slurm": {
-    "job_name": "scp_n150-300_m150-300_k15_var_logits_flow_velocity_mse_debug",
+    "job_name": "mis_n100_p0.15_eb_nmf_flow_q1_vce",
     "time": "20:00:00",
     "cpus_per_task": 8,
     "gpus": 1,
@@ -12,11 +12,11 @@
   },
 
   "run": {
-    "name": "scp_n150-300_m150-300_k15_var_logits_flow_velocity_mse_debug",
+    "name": "mis_n100_p0.15_eb_nmf_flow_q1_vce",
     "output_dir": "runs",
     "resume": null,
     "save_dirname": "checkpoints",
-    "tags": ["scp", "var_logits", "mse"]
+    "tags": ["mis", "nmf", "vce", "flow", "q1"]
   },
 
   "seed": 0,
@@ -26,12 +26,13 @@
     "num_validation_times": 5 ,
     "num_test_times": 8,
     "append_t_feature": true,
-    "loss_target": "velocity"
+    "loss_target": "q1",
+    "target_space": "prob"
   },
 
   "data": {
-    "problem": "scp",
-    "root": "datasets/problems/scp/scp_n150-300_m150-300_k15_balanced",
+    "problem": "mis",
+    "root": "datasets/problems/mis/mis_n100_p0.15",
     "split": "train",
     "val_split": "val",
     "test_split": "test",
@@ -42,13 +43,13 @@
 
     "precompute": {
       "lbp": false,
-      "ss": false,
-      "nmf": false 
+      "ss": true,
+      "nmf": true
     },
 
     "loader": {
-      "batch_size": 10,
-      "val_batch_size": 10,
+      "batch_size": 32,
+      "val_batch_size": 32,
       "num_workers": 2,
       "prefetch": 2,
       "pin_memory": true
@@ -57,28 +58,29 @@
 
   "problem": {
     "ground_truth": {
-      "solver": "scg3",
+      "solver": "kamis",
       "args": {}
     },
-    "maximize": false
+    "maximize": true
   },
 
   "model": {
-    "name": "GCNVarLogits",
-    "args": { "in_dim": 56, "hidden_dim": 64, "n_layers": 4},
+    "name": "GCN_MRF_v4",
+    "args": { "in_dim": 56, "hidden_dim": 64, "n_layers": 4, "inference": "naive_mean_field", "bp_max_iter": 10, "bp_damping": 0.5 , "factor_sizes": [1,2]},
     "init_from": null
   },
 
   "loss": {
-    "name": "mse",
+    "name": "vce",
     "args": {}
   },
 
   "train": {
-    "epochs": 100000,
+    "grad_accum_steps": 1,
+    "epochs": 200000,
     "steps_per_epoch": 200000,
     "val_steps": 100,
-    "method": "flow_variable_logits",
+    "method": "flow_variable_marginals",
 
     "optimizer": {
       "name": "adamw",
@@ -118,7 +120,12 @@
   "eval": {
     "metrics": ["gap", "accuracy"],
     "every_n_steps": 5000,
-    "splits": ["val", "test"]
+    "splits": ["val", "test"],
+    "greedy_decimation": {
+	    "mode": "naive_mean_field",
+	    "args": {"max_iter": 10, "damping": 0.5, "neg_inf": -100.0},
+	    "adapter": { "pick_mode": "min_entropy", "value_mode": "argmax"}
+    }
   },
 
   "logging": {

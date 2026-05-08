@@ -32,7 +32,7 @@
 
   "data": {
     "problem": "mis",
-    "root": "datasets/problems/mis/mis_n700-800_p0.15_balanced",
+    "root": "datasets/problems/mis/mis_n700-800_p0.15_maxdeg15",
     "split": "train",
     "val_split": "val",
     "test_split": "test",
@@ -48,8 +48,8 @@
     },
 
     "loader": {
-      "batch_size": 10,
-      "val_batch_size": 10,
+      "batch_size": 2,
+      "val_batch_size": 2,
       "num_workers": 2,
       "prefetch": 2,
       "pin_memory": true
@@ -76,6 +76,7 @@
   },
 
   "train": {
+    "grad_accum_steps": 16,
     "epochs": 100000,
     "steps_per_epoch": 200000,
     "val_steps": 100,
