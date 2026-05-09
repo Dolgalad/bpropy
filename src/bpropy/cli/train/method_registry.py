@@ -39,6 +39,10 @@ class MethodAdapter:
     greedy_scores_fn: Callable[[Any, Any, Any], np.ndarray]
     decimation_backend_fn: Callable[LPProblem, Any, torch.Tensor, Any]
     decimation_adapter_fn: Callable[LPProblem, Any]
+
+    flow_decimation_backend_fn: Optional[Callable[...,Any]] = None
+    theta_fn: Optional[Callable[..., torch.Tensor]] = None
+
     loss_name: Optional[str] = None  # optional adapter-level loss override
 
 
@@ -131,6 +135,45 @@ def _forward_factor_inference(model: torch.nn.Module, data: Any):
 def _forward_hybrid_theta(model: torch.nn.Module, data: Any) -> torch.Tensor:
     # Train-time: no inference, just return theta
     return model(data, inference="no_inference")
+
+def _theta_fn_var_logits(
+    model: torch.nn.Module,
+    data: Any,
+    cfg: Optional[Dict[str, Any]] = None,
+) -> torch.Tensor:
+    """
+    Variable-logit models do not expose MRF theta.
+    This is intentionally unsupported.
+    """
+    raise NotImplementedError(
+        "theta_fn is not defined for variable-logit models."
+    )
+
+
+def _theta_fn_factor_logits(
+    model: torch.nn.Module,
+    data: Any,
+    cfg: Optional[Dict[str, Any]] = None,
+) -> torch.Tensor:
+    """
+    Return raw factor theta.
+    """
+    return model(data)
+
+
+def _theta_fn_factor_no_inference(
+    model: torch.nn.Module,
+    data: Any,
+    cfg: Optional[Dict[str, Any]] = None,
+) -> torch.Tensor:
+    """
+    Return raw factor theta from MRF models that support inference='theta'
+    or inference='no_inference'.
+    """
+    try:
+        return model(data, inference="theta")
+    except TypeError:
+        return model(data, inference="no_inference")
 
 
 # ----------------------------
@@ -500,6 +543,33 @@ from bpropy.mrf.factor_graph import FactorGraph
 from bpropy.gd.factor_logit_backend import FactorLogitAggregationBackend
 from bpropy.gd.lbp_backend import LBPBackend
 from bpropy.gd.nmf_backend import NMFBackend
+from bpropy.gd.flow_backend import FlowLBPBackend, FlowNMFBackend, FlowScoreBackend
+
+def _flow_decimation_backend_var_logits(
+    pb,
+    data,
+    model,
+    cfg,
+    device=None,
+    rollout_steps: Optional[int] = None,
+):
+    gd = cfg.get("eval", {}).get("greedy_decimation", {})
+    mode_args = dict(gd.get("args", {}))
+
+    # This backend accepts rollout_steps separately.
+    mode_args.pop("rollout_steps", None)
+
+    return FlowScoreBackend(
+        model=model,
+        adapter=_METHOD_FLOW_VAR,
+        data=data,
+        cfg=cfg,
+        device=device,
+        dtype=torch.float32,
+        rollout_steps=rollout_steps,
+        **mode_args,
+    )
+
 def _decimation_backend_factor_logits(pb, data, pred_theta, cfg, device=None):
     gd = cfg.get("eval", {}).get("greedy_decimation", {})
     mode = gd.get("mode", "aggregate")
@@ -606,6 +676,97 @@ def _decimation_backend_factor_marginals(pb, data, pred, cfg, device=None):
 
     raise ValueError(f"Unknown decimation mode: {mode}")
 
+def _flow_decimation_backend_factor_marginals(
+    pb,
+    data,
+    model,
+    cfg,
+    device=None,
+    rollout_steps: Optional[int] = None,
+):
+    """
+    Flow-conditioned decimation backend.
+
+    Unlike _decimation_backend_factor_marginals, this does not freeze one
+    predicted theta. Instead, each scheduled observe() call performs a full
+    flow rollout under the current evidence, extracts final theta, applies
+    evidence masking, and then runs LBP/NMF.
+
+    Supported modes:
+      - loopy_belief_propagation
+      - naive_mean_field
+    """
+    model_cfg = cfg.get("model", {})
+    model_args = model_cfg.get("args", {})
+
+    gd = cfg.get("eval", {}).get("greedy_decimation", {})
+    mode = gd.get("mode", model_args.get("inference", "loopy_belief_propagation"))
+    mode_args = dict(gd.get("args", {}))
+
+    # run_every belongs to the backend scheduling.
+    # rollout_steps is controlled separately.
+    mode_args.pop("rollout_steps", None)
+
+    def fg_builder(pb, cfg):
+        fg_approx_cfg = cfg.get("data", {}).get("precompute", {}).get("fg_approx", None)
+        if fg_approx_cfg is not None:
+            from bpropy.mrf.factor_graph_approx import APPROX_BUILDERS
+            from bpropy.graphs.vc_graph import VCGraph
+
+            vcg = VCGraph(pb)
+            fg_true = FactorGraph(pb)
+            fg_approx, _, _ = APPROX_BUILDERS[fg_approx_cfg.get("method")](
+                pb=pb,
+                vcg=vcg,
+                fg_true=fg_true,
+                approx=fg_approx_cfg,
+            )
+            return fg_approx
+
+        return FactorGraph(pb)
+
+    def theta_builder(_pb, _fg, _device, _dtype):
+        """
+        Only used to initialize EvidenceMaskFactory shape/state.
+        The actual theta used by observe() comes from the flow rollout.
+        """
+        with torch.no_grad():
+            return model(data, inference="theta").to(device=_device, dtype=_dtype)
+
+    if mode == "loopy_belief_propagation":
+        return FlowLBPBackend(
+            fg_builder=lambda pb: fg_builder(pb, cfg),
+            theta_builder=theta_builder,
+            model=model,
+            adapter=_METHOD_FLOW_VARIABLE_MARGINALS,
+            data=data,
+            cfg=cfg,
+            device=device,
+            dtype=torch.float32,
+            rollout_steps=rollout_steps,
+            **mode_args,
+        )
+
+    if mode == "naive_mean_field":
+        return FlowNMFBackend(
+            fg_builder=lambda pb: fg_builder(pb, cfg),
+            theta_builder=theta_builder,
+            model=model,
+            adapter=_METHOD_FLOW_VARIABLE_MARGINALS,
+            data=data,
+            cfg=cfg,
+            device=device,
+            dtype=torch.float32,
+            rollout_steps=rollout_steps,
+            **mode_args,
+        )
+
+    raise ValueError(
+        "Flow decimation backend only supports "
+        "'loopy_belief_propagation' and 'naive_mean_field'. "
+        f"Got mode={mode!r}."
+    )
+
 # ----------------------------
 # Greedy decimation problem adapters
 # ----------------------------
@@ -685,6 +846,8 @@ _METHOD_FLOW_VAR = MethodAdapter(
     greedy_scores_fn=_greedy_scores_var_logits,
     decimation_backend_fn=_decimation_backend_var_logits,
     decimation_adapter_fn=_decimation_adapter_default,
+    flow_decimation_backend_fn=_flow_decimation_backend_var_logits,
+    theta_fn=None,
 )
 
 _METHOD_FLOW_VARIABLE_MARGINALS = MethodAdapter(
@@ -693,6 +856,8 @@ _METHOD_FLOW_VARIABLE_MARGINALS = MethodAdapter(
     greedy_scores_fn=_greedy_scores_factor_inference,
     decimation_backend_fn=_decimation_backend_factor_marginals,
     decimation_adapter_fn=_decimation_adapter_default,
+    theta_fn=_theta_fn_factor_no_inference,
+    flow_decimation_backend_fn=_flow_decimation_backend_flow_variable_marginals,
 )
 
 _METHOD_DIFFUSION_VAR = MethodAdapter(

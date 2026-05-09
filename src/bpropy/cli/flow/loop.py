@@ -23,6 +23,14 @@ from bpropy.models import MODEL_REGISTRY
 from bpropy.losses import LOSS_REGISTRY
 from bpropy.cli.train.method_registry import METHOD_REGISTRY
 
+from bpropy.flow_matching import (
+        append_flow_features,
+        make_flow_batch,
+        make_probability_path,
+        sample_flow_source,
+        flow_decoding,
+        )
+
 # ============================================================
 # Existing helpers kept as-is
 # ============================================================
@@ -119,64 +127,64 @@ def _variable_mask(data: Any) -> torch.Tensor:
     return (data.bipartite == 0)
 
 
-def append_flow_features(
-    data: Any,
-    p_t: torch.Tensor,
-    t: torch.Tensor | None = None,
-    z: torch.Tensor | None = None,
-    ) -> Any:
-    data = copy.copy(data)
+#def append_flow_features(
+#    data: Any,
+#    p_t: torch.Tensor,
+#    t: torch.Tensor | None = None,
+#    z: torch.Tensor | None = None,
+#    ) -> Any:
+#    data = copy.copy(data)
+#
+#    var_mask = _variable_mask(data)
+#    x = data.x
+#    N = x.size(0)
+#    device = x.device
+#    dtype = x.dtype
+#
+#    p_col = torch.zeros((N, 1), device=device, dtype=dtype)
+#    p_col[var_mask, 0] = p_t.to(dtype)
+#
+#    cols = [x, p_col]
+#
+#    if t is not None:
+#        t_col = torch.zeros((N, 1), device=device, dtype=dtype)
+#        t_col[var_mask, 0] = t.to(dtype)
+#        cols.append(t_col)
+#
+#    data.x = torch.cat(cols, dim=1)
+#    #print("AAAA ",torch.mean(t), torch.mean(data.x[var_mask,-1]))
+#
+#    data.p_t = p_t
+#    data.t_var = t
+#    data.z_var = z
+#
+#    return data
 
-    var_mask = _variable_mask(data)
-    x = data.x
-    N = x.size(0)
-    device = x.device
-    dtype = x.dtype
-
-    p_col = torch.zeros((N, 1), device=device, dtype=dtype)
-    p_col[var_mask, 0] = p_t.to(dtype)
-
-    cols = [x, p_col]
-
-    if t is not None:
-        t_col = torch.zeros((N, 1), device=device, dtype=dtype)
-        t_col[var_mask, 0] = t.to(dtype)
-        cols.append(t_col)
-
-    data.x = torch.cat(cols, dim=1)
-    #print("AAAA ",torch.mean(t), torch.mean(data.x[var_mask,-1]))
-
-    data.p_t = p_t
-    data.t_var = t
-    data.z_var = z
-
-    return data
-
-def make_flow_batch(
-    data: Any,
-    y: torch.Tensor,
-    source_prob: float = 0.5,
-    append_t_feature: bool = True,
-    t_policy: str = "per_problem",
-    ) -> tuple[Any, torch.Tensor, torch.Tensor, torch.Tensor]:
-    """
-    Returns:
-    flow_data : graph with appended p_t and optionally t
-    p_t       : interpolated state
-    t         : interpolation time
-    z         : source sample
-    """
-    t = sample_flow_times(data, y, y.device, policy=t_policy)
-    z = sample_flow_source(y, y.device, source_prob=source_prob)
-    p_t = make_probability_path(y, z, t)
-
-    flow_data = append_flow_features(
-        data=data,
-        p_t=p_t,
-        t=t if append_t_feature else None,
-        z=z,
-    )
-    return flow_data, p_t, t, z
+#def make_flow_batch(
+#    data: Any,
+#    y: torch.Tensor,
+#    source_prob: float = 0.5,
+#    append_t_feature: bool = True,
+#    t_policy: str = "per_problem",
+#    ) -> tuple[Any, torch.Tensor, torch.Tensor, torch.Tensor]:
+#    """
+#    Returns:
+#    flow_data : graph with appended p_t and optionally t
+#    p_t       : interpolated state
+#    t         : interpolation time
+#    z         : source sample
+#    """
+#    t = sample_flow_times(data, y, y.device, policy=t_policy)
+#    z = sample_flow_source(y, y.device, source_prob=source_prob)
+#    p_t = make_probability_path(y, z, t)
+#
+#    flow_data = append_flow_features(
+#        data=data,
+#        p_t=p_t,
+#        t=t if append_t_feature else None,
+#        z=z,
+#    )
+#    return flow_data, p_t, t, z
 
 ########## Flow utilities #############
 def _variable_batch_index(data: Any) -> torch.Tensor:
@@ -226,29 +234,29 @@ def sample_flow_times(
 
     raise ValueError(f"Unknown flow.t_policy={policy}")
 
-def sample_flow_source(
-    y: torch.Tensor,
-    device: torch.device,
-    source_prob: float = 0.5,
-    ) -> torch.Tensor:
-    """
-    Binary source z ~ Bernoulli(source_prob)^n.
-    """
-    return torch.rand(y.shape, device=device)
-    return torch.bernoulli(torch.full_like(y.float(), source_prob, device=device))
+#def sample_flow_source(
+#    y: torch.Tensor,
+#    device: torch.device,
+#    source_prob: float = 0.5,
+#    ) -> torch.Tensor:
+#    """
+#    Binary source z ~ Bernoulli(source_prob)^n.
+#    """
+#    return torch.rand(y.shape, device=device)
+#    return torch.bernoulli(torch.full_like(y.float(), source_prob, device=device))
 
-def make_probability_path(
-    y: torch.Tensor,
-    z: torch.Tensor,
-    t: torch.Tensor,
-    ) -> torch.Tensor:
-    """
-    p_t = (1 - t) z + t y
-    """
-    y = y.float()
-    z = z.float()
-    t = t.float()
-    return (1.0 - t) * z + t * y
+#def make_probability_path(
+#    y: torch.Tensor,
+#    z: torch.Tensor,
+#    t: torch.Tensor,
+#    ) -> torch.Tensor:
+#    """
+#    p_t = (1 - t) z + t y
+#    """
+#    y = y.float()
+#    z = z.float()
+#    t = t.float()
+#    return (1.0 - t) * z + t * y
 
 def get_validation_times(cfg: Dict[str, Any]) -> list[float]:
     n = int(cfg.get("flow", {}).get("num_validation_times", 5))
@@ -295,6 +303,7 @@ def train_one_epoch(
     optimizer.zero_grad(set_to_none=True)
 
     source_prob = float(cfg.get("flow", {}).get("source_prob", 0.5))
+    source = flow_cfg.get("source", "uniform")
     append_t_feature = bool(cfg.get("flow", {}).get("append_t_feature", True))
 
     t_policy = cfg.get("flow", {}).get("t_policy", "per_problem")
@@ -307,6 +316,7 @@ def train_one_epoch(
             data,
             y,
             source_prob=source_prob,
+            source=source,
             append_t_feature=append_t_feature,
             t_policy=t_policy,
         )
@@ -383,6 +393,7 @@ def validate_one_epoch(
     max_steps = int(cfg["train"]["val_steps"])
     maximize = bool(cfg.get("problem", {}).get("maximize", True))
     source_prob = float(cfg.get("flow", {}).get("source_prob", 0.5))
+    source = cfg.get("source", "uniform")
     append_t_feature = bool(cfg.get("flow", {}).get("append_t_feature", True))
 
     t_policy = cfg.get("flow", {}).get("t_policy", "per_problem")
@@ -400,6 +411,7 @@ def validate_one_epoch(
                 data,
                 y,
                 source_prob=source_prob,
+                source=source,
                 append_t_feature=append_t_feature,
                 t_policy=t_policy
             )
@@ -431,7 +443,12 @@ def validate_one_epoch(
             # -------------------------------------------------
             # 2. Validation gap: actual test-time flow rollout
             # -------------------------------------------------
-            z = sample_flow_source(y, y.device, source_prob=source_prob)
+            z = sample_flow_source(
+                y, 
+                y.device, 
+                source_prob=source_prob, 
+                source=cfg.get("source", "uniform")
+            )
             p_final = flow_decoding(
                 model=model,
                 p_init=z,
@@ -665,111 +682,140 @@ def build_partial_eval_payload(
 #        return p_cur, pred
 #    return p_cur
 
-def flow_decoding(
-    model,
-    p_init,
-    adapter,
-    data,
-    pb,
-    device,
+#def flow_decoding(
+#    model,
+#    p_init,
+#    adapter,
+#    data,
+#    pb,
+#    device,
+#    cfg: Dict[str, Any],
+#    return_pred: bool = False,
+#    update_mode: str = "endpoint_velocity",
+#):
+#    """
+#    Flow rollout for an endpoint-predicting model.
+#
+#    The model is interpreted as predicting q1_hat = f_theta(p_t, t),
+#    i.e. an estimate of the terminal probabilities p_1.
+#
+#    We then construct the instantaneous velocity
+#
+#        v_hat_t = (q1_hat - p_t) / max(1 - t, eps)
+#
+#    and update with explicit Euler:
+#
+#        p_{t+dt} = p_t + dt * v_hat_t.
+#
+#    This is equivalent to the previous "step" update, but makes the
+#    endpoint-to-velocity conversion explicit.
+#    """
+#    p_cur = p_init.clone().float().to(device)
+#    z_src = p_init.clone().float().to(device)
+#    pred = None
+#
+#    flow_cfg = cfg.get("flow", {})
+#    n_steps = int(flow_cfg.get("num_test_times", 8))
+#    if n_steps <= 0:
+#        raise ValueError("flow.num_test_times must be >= 1")
+#
+#    append_t_feature = bool(flow_cfg.get("append_t_feature", True))
+#
+#    # Avoid numerical explosion near t = 1.
+#    eps = float(flow_cfg.get("velocity_eps", 1e-6))
+#
+#    # Optional: smaller integration steps than the model time grid.
+#    # Usually 1 is enough. Try 2, 4, etc. if the rollout is unstable.
+#    substeps = int(flow_cfg.get("decode_substeps", 1))
+#    if substeps <= 0:
+#        raise ValueError("flow.decode_substeps must be >= 1")
+#
+#    # Main grid: 0, 1 / n_steps, ..., 1.
+#    grid = torch.linspace(0.0, 1.0, steps=n_steps + 1, device=device)
+#
+#    for k in range(n_steps):
+#        t_start = float(grid[k].item())
+#        t_end = float(grid[k + 1].item())
+#        dt_total = t_end - t_start
+#        dt = dt_total / substeps
+#
+#        for s in range(substeps):
+#            t_scalar = t_start + s * dt
+#
+#            t_var = torch.full_like(
+#                p_cur,
+#                fill_value=t_scalar,
+#                dtype=torch.float32,
+#                device=device,
+#            )
+#
+#            flow_data = append_flow_features(
+#                data=data,
+#                p_t=p_cur,
+#                t=t_var if append_t_feature else None,
+#                z=z_src,
+#            )
+#
+#            pred = adapter.forward_fn(model, flow_data)
+#            scores = adapter.greedy_scores_fn(pb, flow_data, pred)
+#            q1_hat = torch.as_tensor(scores, device=device, dtype=torch.float32)
+#
+#            # Make sure q1_hat is a probability vector.
+#            # For var_logits adapters, greedy_scores_fn already applies sigmoid.
+#            # This fallback keeps the function robust for raw-score adapters.
+#            if torch.any(q1_hat < 0.0) or torch.any(q1_hat > 1.0):
+#                q1_hat = torch.sigmoid(q1_hat)
+#
+#            q1_hat = q1_hat.clamp(0.0, 1.0)
+#
+#            if update_mode == "endpoint_velocity":
+#                denom = max(1.0 - t_scalar, eps)
+#                v_hat = (q1_hat - p_cur) / denom
+#                p_cur = p_cur + dt * v_hat
+#                p_cur = p_cur.clamp(0.0, 1.0)
+#
+#            elif update_mode == "convex":
+#                # Diagnostic/stable alternative:
+#                # p <- (1-dt) p + dt q1_hat
+#                # Not the same as rectified-flow endpoint dynamics.
+#                p_cur = (1.0 - dt) * p_cur + dt * q1_hat
+#                p_cur = p_cur.clamp(0.0, 1.0)
+#
+#            else:
+#                raise ValueError(f"Unknown flow decoding update_mode={update_mode}")
+#
+#    if return_pred:
+#        return p_cur, pred
+#    return p_cur
+
+
+def _set_gd_mode(
     cfg: Dict[str, Any],
-    return_pred: bool = False,
-    update_mode: str = "endpoint_velocity",
+    *,
+    run_every: int,
+    pick_mode: str = "min_entropy",
+    value_mode: str = "argmax",
+) -> None:
+    _ensure_greedy_decimation_cfg(cfg)
+    cfg["eval"]["greedy_decimation"]["args"]["run_every"] = int(run_every)
+    cfg["eval"]["greedy_decimation"]["adapter"]["pick_mode"] = pick_mode
+    cfg["eval"]["greedy_decimation"]["adapter"]["value_mode"] = value_mode
+
+
+def _project_with_decimation(
+    *,
+    pb0,
+    backend,
+    padapter,
+    device,
 ):
-    """
-    Flow rollout for an endpoint-predicting model.
+    _sync(device)
+    t0 = time.perf_counter()
+    sol = greedy_decimation(pb0, backend, padapter)
+    _sync(device)
+    t1 = time.perf_counter()
+    return sol, t1 - t0
 
-    The model is interpreted as predicting q1_hat = f_theta(p_t, t),
-    i.e. an estimate of the terminal probabilities p_1.
-
-    We then construct the instantaneous velocity
-
-        v_hat_t = (q1_hat - p_t) / max(1 - t, eps)
-
-    and update with explicit Euler:
-
-        p_{t+dt} = p_t + dt * v_hat_t.
-
-    This is equivalent to the previous "step" update, but makes the
-    endpoint-to-velocity conversion explicit.
-    """
-    p_cur = p_init.clone().float().to(device)
-    z_src = p_init.clone().float().to(device)
-    pred = None
-
-    flow_cfg = cfg.get("flow", {})
-    n_steps = int(flow_cfg.get("num_test_times", 8))
-    if n_steps <= 0:
-        raise ValueError("flow.num_test_times must be >= 1")
-
-    append_t_feature = bool(flow_cfg.get("append_t_feature", True))
-
-    # Avoid numerical explosion near t = 1.
-    eps = float(flow_cfg.get("velocity_eps", 1e-6))
-
-    # Optional: smaller integration steps than the model time grid.
-    # Usually 1 is enough. Try 2, 4, etc. if the rollout is unstable.
-    substeps = int(flow_cfg.get("decode_substeps", 1))
-    if substeps <= 0:
-        raise ValueError("flow.decode_substeps must be >= 1")
-
-    # Main grid: 0, 1 / n_steps, ..., 1.
-    grid = torch.linspace(0.0, 1.0, steps=n_steps + 1, device=device)
-
-    for k in range(n_steps):
-        t_start = float(grid[k].item())
-        t_end = float(grid[k + 1].item())
-        dt_total = t_end - t_start
-        dt = dt_total / substeps
-
-        for s in range(substeps):
-            t_scalar = t_start + s * dt
-
-            t_var = torch.full_like(
-                p_cur,
-                fill_value=t_scalar,
-                dtype=torch.float32,
-                device=device,
-            )
-
-            flow_data = append_flow_features(
-                data=data,
-                p_t=p_cur,
-                t=t_var if append_t_feature else None,
-                z=z_src,
-            )
-
-            pred = adapter.forward_fn(model, flow_data)
-            scores = adapter.greedy_scores_fn(pb, flow_data, pred)
-            q1_hat = torch.as_tensor(scores, device=device, dtype=torch.float32)
-
-            # Make sure q1_hat is a probability vector.
-            # For var_logits adapters, greedy_scores_fn already applies sigmoid.
-            # This fallback keeps the function robust for raw-score adapters.
-            if torch.any(q1_hat < 0.0) or torch.any(q1_hat > 1.0):
-                q1_hat = torch.sigmoid(q1_hat)
-
-            q1_hat = q1_hat.clamp(0.0, 1.0)
-
-            if update_mode == "endpoint_velocity":
-                denom = max(1.0 - t_scalar, eps)
-                v_hat = (q1_hat - p_cur) / denom
-                p_cur = p_cur + dt * v_hat
-                p_cur = p_cur.clamp(0.0, 1.0)
-
-            elif update_mode == "convex":
-                # Diagnostic/stable alternative:
-                # p <- (1-dt) p + dt q1_hat
-                # Not the same as rectified-flow endpoint dynamics.
-                p_cur = (1.0 - dt) * p_cur + dt * q1_hat
-                p_cur = p_cur.clamp(0.0, 1.0)
-
-            else:
-                raise ValueError(f"Unknown flow decoding update_mode={update_mode}")
-
-    if return_pred:
-        return p_cur, pred
-    return p_cur
 
 def final_test_eval(
     cfg: Dict[str, Any],
@@ -781,32 +827,38 @@ def final_test_eval(
     output_json: Optional[str] = None,
 ) -> str:
     """
-    Final test evaluation for the flow model.
+    Final flow test evaluation.
 
-    Test protocol:
-      - always start from t = 0
-      - initialize p_0 = z, where z ~ Bernoulli(source_prob)^n
-      - evaluate:
-          * random_grd : one forward pass + greedy projection
-          * random_egg : greedy_decimation with run_every = 1000000
-          * random_gd  : greedy_decimation with run_every = 1
-          * random_flow: rollout from p_0 using convex updates toward q1,
-                         then sample once at the end and repair/project
+    Protocol:
+      1. Sample source z.
+      2. Run a full endpoint-velocity flow rollout.
+      3. Log rollout sample feasibility/objective/gap.
+      4. Project using EGG and GD only.
 
-    For random_flow, logs:
-      - sample_feasible before correction
-      - sample_val before correction
-      - sample_gap before correction
-      - repaired objective/gap after greedy correction
+    Methods:
+      - flow_egg:
+          full rollout once, then EGG projection.
+      - flow_gd:
+          full rollout once, then GD projection.
+      - flow_gd_backend:
+          optional. GD projection whose backend performs a full flow rollout
+          at each scheduled inference call.
+
+    No pb.greedy projection is used.
+    No convex rollout diagnostic is evaluated.
     """
     model.eval()
 
     maximize = bool(cfg.get("problem", {}).get("maximize", True))
-    source_prob = float(cfg.get("flow", {}).get("source_prob", 0.5))
-    append_t_feature = bool(cfg.get("flow", {}).get("append_t_feature", True))
-    test_limit = int(cfg.get("eval", {}).get("test_limit", 20000))
+    flow_cfg = cfg.get("flow", {})
+    eval_cfg = cfg.get("eval", {})
 
-    eval_loss_names = [e["name"] for e in cfg.get("eval", {}).get("losses", [])]
+    source_prob = float(flow_cfg.get("source_prob", 0.5))
+    source = flow_cfg.get("source", "uniform")
+    rollout_steps = int(eval_cfg.get("flow_rollout_steps", flow_cfg.get("num_test_times", 8)))
+    test_limit = int(eval_cfg.get("test_limit", 20000))
+
+    eval_loss_names = [e["name"] for e in eval_cfg.get("losses", [])]
     eval_losses = {n: [] for n in eval_loss_names}
 
     ensure_seeded_run_name(cfg)
@@ -825,23 +877,32 @@ def final_test_eval(
     _ensure_greedy_decimation_cfg(cfg)
 
     instance_stats = []
-    n_ss = []
 
     summary_lists = {
-        "random_grd": {"obj": [], "gap": [], "forward_t": [], "decode_t": [], "total_t": []},
-        "random_egg": {"obj": [], "gap": [], "forward_t": [], "decode_t": [], "total_t": []},
-        "random_gd":  {"obj": [], "gap": [], "forward_t": [], "decode_t": [], "total_t": []},
-        "random_flow": {
-            "obj": [], "gap": [],
-            "decode_t": [], "project_t": [], "total_t": [],
-            "sample_feasible": [], "sample_val": [], "sample_gap": [],
+        "flow_rollout": {
+            "sample_feasible": [],
+            "sample_val": [],
+            "sample_gap": [],
+            "decode_t": [],
         },
-        "random_flow_cvx": {
-            "obj": [], "gap": [],
-            "decode_t": [], "project_t": [], "total_t": [],
-            "sample_feasible": [], "sample_val": [], "sample_gap": [],
+        "flow_egg": {
+            "obj": [],
+            "gap": [],
+            "project_t": [],
+            "total_t": [],
         },
-
+        "flow_gd": {
+            "obj": [],
+            "gap": [],
+            "project_t": [],
+            "total_t": [],
+        },
+        "flow_gd_backend": {
+            "obj": [],
+            "gap": [],
+            "project_t": [],
+            "total_t": [],
+        }
     }
 
     with torch.no_grad():
@@ -849,294 +910,265 @@ def final_test_eval(
 
         for idx, (pb, data, y) in enumerate(CUDAPrefetcher(loader, device)):
             stem = Path(loader.dataset.stems[idx]).name
-            print(len(pb))
             pb0 = pb[0]
 
-            # Reference objective from ground-truth label
             ref_val = objective_value(pb0, y)
+            pre_t = float(getattr(data, "preprocess_time_s", 0.0))
 
-            # Shared random-source initialization for all test methods
-            z = sample_flow_source(y, y.device, source_prob=source_prob)
-            t0_var = torch.zeros_like(y, dtype=torch.float32, device=device)
-            p_t = make_probability_path(y, z, t0_var)
-
-
-            flow_data_shared = append_flow_features(
-                data=data,
-                p_t=p_t,
-                t=t0_var if append_t_feature else None,
-                z=z,
+            # -------------------------------------------------
+            # 1. Full flow rollout from random source
+            # -------------------------------------------------
+            z = sample_flow_source(
+                y,
+                y.device,
+                source_prob=source_prob,
+                source=source,
             )
-            #print(torch.mean(flow_data_shared.x[:,-1]))
-            pre_t = float(getattr(flow_data_shared, "preprocess_time_s", 0.0))
 
-            # ----- shared forward pass for one-shot methods -----
             _sync(device)
             t0 = time.perf_counter()
-            pred_shared = adapter.forward_fn(model, flow_data_shared)
+            flow_probs = flow_decoding(
+                model=model,
+                p_init=z,
+                adapter=adapter,
+                data=data,
+                pb=pb,
+                device=device,
+                cfg=cfg,
+                update_mode="endpoint_velocity",
+                n_steps=rollout_steps,
+            )
             _sync(device)
             t1 = time.perf_counter()
-            shared_forward_t = t1 - t0
 
-            scores = adapter.greedy_scores_fn(pb, flow_data_shared, pred_shared)
-            #print("Greedy scores : ", scores)
-            scores_np = np.asarray(scores)
+            decode_t = t1 - t0
 
-            # ----- random_grd -----
-            _sync(device)
-            t2 = time.perf_counter()
-            random_grd_sol = pb0.greedy(scores=scores_np).x
-            _sync(device)
-            t3 = time.perf_counter()
+            flow_scores_np = flow_probs.detach().cpu().numpy()
 
-            forward_random_grd_t = shared_forward_t
-            decode_random_grd_t = t3 - t2
-            total_random_grd_t = pre_t + forward_random_grd_t + decode_random_grd_t
+            # Pre-projection rollout sample logging.
+            flow_sample = torch.bernoulli(flow_probs.clamp(0.0, 1.0))
+            flow_sample_np = flow_sample.detach().cpu().numpy()
 
-            # ----- random_egg -----
-            cfg["eval"]["greedy_decimation"]["args"]["run_every"] = 1000000
-            cfg["eval"]["greedy_decimation"]["adapter"]["pick_mode"] = "min_entropy"
-            cfg["eval"]["greedy_decimation"]["adapter"]["value_mode"] = "argmax"
-
-            _sync(device)
-            t4 = time.perf_counter()
-            backend = adapter.decimation_backend_fn(pb0, flow_data_shared, pred_shared, cfg, device=device)
-            padapter = adapter.decimation_adapter_fn(pb0, cfg)
-            random_egg_sol = greedy_decimation(pb0, backend, padapter)
-            _sync(device)
-            t5 = time.perf_counter()
-
-            forward_random_egg_t = shared_forward_t
-            decode_random_egg_t = t5 - t4
-            total_random_egg_t = pre_t + forward_random_egg_t + decode_random_egg_t
-
-            # ----- random_gd -----
-            cfg["eval"]["greedy_decimation"]["args"]["run_every"] = 1
-            cfg["eval"]["greedy_decimation"]["adapter"]["pick_mode"] = "min_entropy"
-            cfg["eval"]["greedy_decimation"]["adapter"]["value_mode"] = "argmax"
-
-            _sync(device)
-            t6 = time.perf_counter()
-            backend = adapter.decimation_backend_fn(pb0, flow_data_shared, pred_shared, cfg, device=device)
-            padapter = adapter.decimation_adapter_fn(pb0, cfg)
-            random_gd_sol = greedy_decimation(pb0, backend, padapter)
-            _sync(device)
-            t7 = time.perf_counter()
-
-            forward_random_gd_t = shared_forward_t
-            decode_random_gd_t = t7 - t6
-            total_random_gd_t = pre_t + forward_random_gd_t + decode_random_gd_t
-
-            # ----- random_flow rollout -----
-            _sync(device)
-            t8 = time.perf_counter()
-            random_flow_probs = flow_decoding(
-                model=model,
-                p_init=z,
-                adapter=adapter,
-                data=data,
-                pb=pb,
-                device=device,
-                cfg=cfg,
+            sample_feasible = float(pb0.check_solution(flow_sample_np))
+            sample_val = objective_value(pb0, flow_sample_np)
+            sample_gap = relative_objective_gap(
+                ref_val,
+                sample_val,
+                maximize=maximize,
+                eps=1e-8,
             )
-            _sync(device)
-            t9 = time.perf_counter()
 
-            # Sample once at the end for pre-correction feasibility logging
-            random_flow_sample = torch.bernoulli(random_flow_probs.clamp(0.0, 1.0))
-
-            # Repair / project sampled state using greedy heuristic
-            random_flow_sol = pb0.greedy(
-                scores=random_flow_probs.detach().cpu().numpy()
-            ).x
-            _sync(device)
-            t10 = time.perf_counter()
-
-            decode_random_flow_t = t9 - t8
-            project_random_flow_t = t10 - t9
-            total_random_flow_t = pre_t + decode_random_flow_t + project_random_flow_t
-
-            # ----- random_flow rollout -----
-            _sync(device)
-            t8 = time.perf_counter()
-            random_flow_cvx_probs = flow_decoding(
-                model=model,
-                p_init=z,
-                adapter=adapter,
+            # Build a flow_data object at t=1 only so the existing
+            # decimation backend can receive a normal prediction tensor.
+            t1_var = torch.ones_like(y, dtype=torch.float32, device=device)
+            flow_data_final = append_flow_features(
                 data=data,
-                pb=pb,
-                device=device,
-                cfg=cfg,
-                update_mode="convex",
+                p_t=flow_probs,
+                t=t1_var if bool(flow_cfg.get("append_t_feature", True)) else None,
+                z=z,
             )
-            _sync(device)
-            t9 = time.perf_counter()
 
-            # Sample once at the end for pre-correction feasibility logging
-            random_flow_cvx_sample = torch.bernoulli(random_flow_cvx_probs.clamp(0.0, 1.0))
+            # For flow_variable_logits, pred can be the final probabilities.
+            # ScoreBackend.set_logits is a name, but greedy_scores_var_logits
+            # expects logits. For backend projection we want scores to match
+            # rollout probabilities, so convert probabilities to logits.
+            eps = 1e-6
+            pred_final_logits = torch.logit(
+                flow_probs.clamp(eps, 1.0 - eps)
+            )
 
-            # Repair / project sampled state using greedy heuristic
-            random_flow_cvx_sol = pb0.greedy(
-                scores=random_flow_cvx_probs.detach().cpu().numpy()
-            ).x
-            _sync(device)
-            t10 = time.perf_counter()
+            # -------------------------------------------------
+            # 2. Full rollout + EGG projection
+            # -------------------------------------------------
+            _set_gd_mode(cfg, run_every=1000000)
 
-            decode_random_flow_cvx_t = t9 - t8
-            project_random_flow_cvx_t = t10 - t9
-            total_random_flow_cvx_t = pre_t + decode_random_flow_cvx_t + project_random_flow_cvx_t
+            backend = adapter.decimation_backend_fn(
+                pb0,
+                flow_data_final,
+                pred_final_logits,
+                cfg,
+                device=device,
+            )
+            padapter = adapter.decimation_adapter_fn(pb0, cfg)
 
+            flow_egg_sol, flow_egg_project_t = _project_with_decimation(
+                pb0=pb0,
+                backend=backend,
+                padapter=padapter,
+                device=device,
+            )
 
-            # ----- loss values from shared one-shot forward -----
-            spec = adapter.loss_spec_fn(adapter, flow_data_shared, pred_shared, y, cfg)
-            loss = compute_loss_from_spec(spec, loss_registry=LOSS_REGISTRY)
+            flow_egg_val = objective_value(pb0, flow_egg_sol)
+            flow_egg_gap = relative_objective_gap(
+                ref_val,
+                flow_egg_val,
+                maximize=maximize,
+                eps=1e-8,
+            )
+            flow_egg_total_t = pre_t + decode_t + flow_egg_project_t
 
-            for eval_loss_cfg in cfg.get("eval", {}).get("losses", []):
+            # -------------------------------------------------
+            # 3. Full rollout + GD projection
+            # -------------------------------------------------
+            _set_gd_mode(cfg, run_every=1)
+
+            backend = adapter.decimation_backend_fn(
+                pb0,
+                flow_data_final,
+                pred_final_logits,
+                cfg,
+                device=device,
+            )
+            padapter = adapter.decimation_adapter_fn(pb0, cfg)
+
+            flow_gd_sol, flow_gd_project_t = _project_with_decimation(
+                pb0=pb0,
+                backend=backend,
+                padapter=padapter,
+                device=device,
+            )
+
+            flow_gd_val = objective_value(pb0, flow_gd_sol)
+            flow_gd_gap = relative_objective_gap(
+                ref_val,
+                flow_gd_val,
+                maximize=maximize,
+                eps=1e-8,
+            )
+            flow_gd_total_t = pre_t + decode_t + flow_gd_project_t
+
+            # -------------------------------------------------
+            # 4. GD with flow backend
+            # -------------------------------------------------
+            _set_gd_mode(cfg, run_every=1)
+            
+            flow_backend_cfg = eval_cfg.get("flow_gd_backend", {})
+            backend_rollout_steps = flow_backend_cfg.get(
+                "rollout_steps",
+                rollout_steps,
+            )
+            
+            backend = adapter.flow_decimation_backend_fn(
+                pb0,
+                data,
+                model,
+                cfg,
+                device=device,
+                rollout_steps=backend_rollout_steps,
+            )
+            padapter = adapter.decimation_adapter_fn(pb0, cfg)
+            
+            flow_gd_backend_sol, flow_gd_backend_project_t = _project_with_decimation(
+                pb0=pb0,
+                backend=backend,
+                padapter=padapter,
+                device=device,
+            )
+            
+            flow_gd_backend_val = objective_value(pb0, flow_gd_backend_sol)
+            flow_gd_backend_gap = relative_objective_gap(
+                ref_val,
+                flow_gd_backend_val,
+                maximize=maximize,
+                eps=1e-8,
+            )
+            flow_gd_backend_total_t = pre_t + flow_gd_backend_project_t
+            
+            flow_gd_backend_record = {
+                "objective": float(flow_gd_backend_val),
+                "gap": float(flow_gd_backend_gap),
+                "projection_time_s": float(flow_gd_backend_project_t),
+                "total_time_s": float(flow_gd_backend_total_t),
+                "rollout_steps": int(backend_rollout_steps),
+            }
+            # -------------------------------------------------
+            # 5. Eval losses at t=1 flow state
+            # -------------------------------------------------
+            pred_for_loss = adapter.forward_fn(model, flow_data_final)
+            spec = adapter.loss_spec_fn(adapter, flow_data_final, pred_for_loss, y, cfg)
+            _ = compute_loss_from_spec(spec, loss_registry=LOSS_REGISTRY)
+
+            for eval_loss_cfg in eval_cfg.get("losses", []):
                 name = eval_loss_cfg["name"]
                 args = eval_loss_cfg.get("args", {})
-                val = LOSS_REGISTRY[name](pred_shared, y, data=flow_data_shared, **args)
+                val = LOSS_REGISTRY[name](
+                    pred_for_loss,
+                    y,
+                    data=flow_data_final,
+                    **args,
+                )
                 eval_losses[name].append(float(val.detach().cpu().item()))
 
-            if hasattr(flow_data_shared, "lbp_edges"):
-                n_ss += flow_data_shared.lbp_edges.n_ss.detach().cpu().tolist()
-            if hasattr(flow_data_shared, "nmf_edges"):
-                n_ss += flow_data_shared.nmf_edges.n_ss.detach().cpu().tolist()
-
-            # ----- objectives / gaps -----
-            random_grd_val = objective_value(pb0, random_grd_sol)
-            random_egg_val = objective_value(pb0, random_egg_sol)
-            random_gd_val = objective_value(pb0, random_gd_sol)
-
-            random_flow_sample_val = objective_value(pb0, random_flow_sample)
-            random_flow_val = objective_value(pb0, random_flow_sol)
-
-            random_flow_cvx_sample_val = objective_value(pb0, random_flow_cvx_sample)
-            random_flow_cvx_val = objective_value(pb0, random_flow_cvx_sol)
-
-            random_grd_gap = relative_objective_gap(ref_val, random_grd_val, maximize=maximize, eps=1e-8)
-            random_egg_gap = relative_objective_gap(ref_val, random_egg_val, maximize=maximize, eps=1e-8)
-            random_gd_gap  = relative_objective_gap(ref_val, random_gd_val,  maximize=maximize, eps=1e-8)
-
-            random_flow_sample_gap = relative_objective_gap(
-                ref_val, random_flow_sample_val, maximize=maximize, eps=1e-8
-            )
-            random_flow_gap = relative_objective_gap(
-                ref_val, random_flow_val, maximize=maximize, eps=1e-8
-            )
-
-            random_flow_cvx_sample_gap = relative_objective_gap(
-                ref_val, random_flow_cvx_sample_val, maximize=maximize, eps=1e-8
-            )
-            random_flow_cvx_gap = relative_objective_gap(
-                ref_val, random_flow_cvx_val, maximize=maximize, eps=1e-8
-            )
-
-
-            # ----- instance record -----
+            # -------------------------------------------------
+            # 6. Record instance
+            # -------------------------------------------------
             instance_record = {
                 "instance_index": idx,
                 "instance_stem": stem,
                 "reference_objective": float(ref_val),
                 "preprocess_time_s": float(pre_t),
-                "random_grd": {
-                    "objective": float(random_grd_val),
-                    "gap": float(random_grd_gap),
-                    "forward_time_s": float(forward_random_grd_t),
-                    "decode_time_s": float(decode_random_grd_t),
-                    "total_time_s": float(total_random_grd_t),
+                "rollout_steps": int(rollout_steps),
+                "flow_rollout": {
+                    "decode_time_s": float(decode_t),
+                    "sample_feasible": float(sample_feasible),
+                    "sample_val": float(sample_val),
+                    "sample_gap": float(sample_gap),
                 },
-                "random_egg": {
-                    "objective": float(random_egg_val),
-                    "gap": float(random_egg_gap),
-                    "forward_time_s": float(forward_random_egg_t),
-                    "decode_time_s": float(decode_random_egg_t),
-                    "total_time_s": float(total_random_egg_t),
+                "flow_egg": {
+                    "objective": float(flow_egg_val),
+                    "gap": float(flow_egg_gap),
+                    "projection_time_s": float(flow_egg_project_t),
+                    "total_time_s": float(flow_egg_total_t),
                 },
-                "random_gd": {
-                    "objective": float(random_gd_val),
-                    "gap": float(random_gd_gap),
-                    "forward_time_s": float(forward_random_gd_t),
-                    "decode_time_s": float(decode_random_gd_t),
-                    "total_time_s": float(total_random_gd_t),
+                "flow_gd": {
+                    "objective": float(flow_gd_val),
+                    "gap": float(flow_gd_gap),
+                    "projection_time_s": float(flow_gd_project_t),
+                    "total_time_s": float(flow_gd_total_t),
                 },
-                "random_flow": {
-                    "objective": float(random_flow_val),
-                    "gap": float(random_flow_gap),
-                    "decode_time_s": float(decode_random_flow_t),
-                    "projection_time_s": float(project_random_flow_t),
-                    "total_time_s": float(total_random_flow_t),
-                    "sample_feasible": float(pb0.check_solution(random_flow_sample.detach().cpu().numpy())),
-                    "sample_val": float(random_flow_sample_val),
-                    "sample_gap": float(random_flow_sample_gap),
-                },
-                "random_flow_cvx": {
-                    "objective": float(random_flow_cvx_val),
-                    "gap": float(random_flow_cvx_gap),
-                    "decode_time_s": float(decode_random_flow_cvx_t),
-                    "projection_time_s": float(project_random_flow_cvx_t),
-                    "total_time_s": float(total_random_flow_cvx_t),
-                    "sample_feasible": float(pb0.check_solution(random_flow_cvx_sample.detach().cpu().numpy())),
-                    "sample_val": float(random_flow_cvx_sample_val),
-                    "sample_gap": float(random_flow_cvx_sample_gap),
-                },
-
+                "flow_gd_backend": flow_gd_backend_record,
             }
+
             instance_stats.append(instance_record)
 
-            # ----- accumulate summary stats -----
-            summary_lists["random_grd"]["obj"].append(float(random_grd_val))
-            summary_lists["random_grd"]["gap"].append(float(random_grd_gap))
-            summary_lists["random_grd"]["forward_t"].append(float(forward_random_grd_t))
-            summary_lists["random_grd"]["decode_t"].append(float(decode_random_grd_t))
-            summary_lists["random_grd"]["total_t"].append(float(total_random_grd_t))
+            # -------------------------------------------------
+            # 7. Summary accumulation
+            # -------------------------------------------------
+            summary_lists["flow_rollout"]["sample_feasible"].append(sample_feasible)
+            summary_lists["flow_rollout"]["sample_val"].append(float(sample_val))
+            summary_lists["flow_rollout"]["sample_gap"].append(float(sample_gap))
+            summary_lists["flow_rollout"]["decode_t"].append(float(decode_t))
 
-            summary_lists["random_egg"]["obj"].append(float(random_egg_val))
-            summary_lists["random_egg"]["gap"].append(float(random_egg_gap))
-            summary_lists["random_egg"]["forward_t"].append(float(forward_random_egg_t))
-            summary_lists["random_egg"]["decode_t"].append(float(decode_random_egg_t))
-            summary_lists["random_egg"]["total_t"].append(float(total_random_egg_t))
+            summary_lists["flow_egg"]["obj"].append(float(flow_egg_val))
+            summary_lists["flow_egg"]["gap"].append(float(flow_egg_gap))
+            summary_lists["flow_egg"]["project_t"].append(float(flow_egg_project_t))
+            summary_lists["flow_egg"]["total_t"].append(float(flow_egg_total_t))
 
-            summary_lists["random_gd"]["obj"].append(float(random_gd_val))
-            summary_lists["random_gd"]["gap"].append(float(random_gd_gap))
-            summary_lists["random_gd"]["forward_t"].append(float(forward_random_gd_t))
-            summary_lists["random_gd"]["decode_t"].append(float(decode_random_gd_t))
-            summary_lists["random_gd"]["total_t"].append(float(total_random_gd_t))
+            summary_lists["flow_gd"]["obj"].append(float(flow_gd_val))
+            summary_lists["flow_gd"]["gap"].append(float(flow_gd_gap))
+            summary_lists["flow_gd"]["project_t"].append(float(flow_gd_project_t))
+            summary_lists["flow_gd"]["total_t"].append(float(flow_gd_total_t))
 
-            summary_lists["random_flow"]["obj"].append(float(random_flow_val))
-            summary_lists["random_flow"]["gap"].append(float(random_flow_gap))
-            summary_lists["random_flow"]["decode_t"].append(float(decode_random_flow_t))
-            summary_lists["random_flow"]["project_t"].append(float(project_random_flow_t))
-            summary_lists["random_flow"]["total_t"].append(float(total_random_flow_t))
-            summary_lists["random_flow"]["sample_feasible"].append(
-                float(pb0.check_solution(random_flow_sample.detach().cpu().numpy()))
+            summary_lists["flow_gd_backend"]["obj"].append(
+                flow_gd_backend_record["objective"]
             )
-            summary_lists["random_flow"]["sample_val"].append(float(random_flow_sample_val))
-            summary_lists["random_flow"]["sample_gap"].append(float(random_flow_sample_gap))
-
-            summary_lists["random_flow_cvx"]["obj"].append(float(random_flow_cvx_val))
-            summary_lists["random_flow_cvx"]["gap"].append(float(random_flow_cvx_gap))
-            summary_lists["random_flow_cvx"]["decode_t"].append(float(decode_random_flow_cvx_t))
-            summary_lists["random_flow_cvx"]["project_t"].append(float(project_random_flow_cvx_t))
-            summary_lists["random_flow_cvx"]["total_t"].append(float(total_random_flow_cvx_t))
-            summary_lists["random_flow_cvx"]["sample_feasible"].append(
-                float(pb0.check_solution(random_flow_cvx_sample.detach().cpu().numpy()))
+            summary_lists["flow_gd_backend"]["gap"].append(
+                flow_gd_backend_record["gap"]
             )
-            summary_lists["random_flow_cvx"]["sample_val"].append(float(random_flow_cvx_sample_val))
-            summary_lists["random_flow_cvx"]["sample_gap"].append(float(random_flow_cvx_sample_gap))
+            summary_lists["flow_gd_backend"]["project_t"].append(
+                flow_gd_backend_record["projection_time_s"]
+            )
+            summary_lists["flow_gd_backend"]["total_t"].append(
+                flow_gd_backend_record["total_time_s"]
+            )
 
-
-            # ----- checkpoint JSON after each instance -----
             partial_payload = {
                 "summary": {
                     "count": len(instance_stats),
                     "status": "running",
                     "methods": {
-                        "random_grd": summarize_method(summary_lists["random_grd"]),
-                        "random_egg": summarize_method(summary_lists["random_egg"]),
-                        "random_gd": summarize_method(summary_lists["random_gd"]),
-                        "random_flow": summarize_method(summary_lists["random_flow"]),
-                        "random_flow_cvx": summarize_method(summary_lists["random_flow_cvx"]),
-
+                        k: summarize_method(v)
+                        for k, v in summary_lists.items()
                     },
                     "eval_losses": build_eval_loss_stats(eval_losses),
                 },
@@ -1144,21 +1176,21 @@ def final_test_eval(
             }
             atomic_write_json(out_path, partial_payload)
 
-            print()
-            print(
+            msg = (
                 f"[test {idx:04d}] "
                 f"ref={ref_val:.4f} | "
-                f"R-GRD gap={random_grd_gap:.4f} t={total_random_grd_t:.4f}s | "
-                f"R-EGG gap={random_egg_gap:.4f} t={total_random_egg_t:.4f}s | "
-                f"R-GD gap={random_gd_gap:.4f} t={total_random_gd_t:.4f}s | "
-                f"R-FLOW gap={random_flow_gap:.4f} t={total_random_flow_t:.4f}s "
-                f"(feas={pb0.check_solution(random_flow_sample.detach().cpu().numpy())}) | "
-                f"R-FLOW-CVX gap={random_flow_cvx_gap:.4f} t={total_random_flow_cvx_t:.4f}s "
-                f"(feas={pb0.check_solution(random_flow_cvx_sample.detach().cpu().numpy())})"
-
+                f"sample_gap={sample_gap:.4f} feas={sample_feasible:.0f} | "
+                f"FLOW-EGG gap={flow_egg_gap:.4f} t={flow_egg_total_t:.4f}s | "
+                f"FLOW-GD gap={flow_gd_gap:.4f} t={flow_gd_total_t:.4f}s | "
+                f"FLOW-GD-BACKEND gap={flow_gd_backend_record['gap']:.4f} "
+                f"t={flow_gd_backend_record['total_time_s']:.4f}s"
             )
 
+            print()
+            print(msg)
+
             bar.next()
+
             if len(instance_stats) >= test_limit:
                 break
 
@@ -1169,17 +1201,14 @@ def final_test_eval(
             "count": len(instance_stats),
             "status": "completed",
             "methods": {
-                "random_grd": summarize_method(summary_lists["random_grd"]),
-                "random_egg": summarize_method(summary_lists["random_egg"]),
-                "random_gd": summarize_method(summary_lists["random_gd"]),
-                "random_flow": summarize_method(summary_lists["random_flow"]),
-                "random_flow_cvx": summarize_method(summary_lists["random_flow_cvx"]),
-
+                k: summarize_method(v)
+                for k, v in summary_lists.items()
             },
             "eval_losses": build_eval_loss_stats(eval_losses),
         },
         "instances": instance_stats,
     }
+
     atomic_write_json(out_path, final_payload)
     return out_path
 
