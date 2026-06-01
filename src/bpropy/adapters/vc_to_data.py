@@ -2,6 +2,7 @@
 from __future__ import annotations
 import numpy as np
 import torch
+import gc
 from typing import Iterable, Literal, Optional, Tuple, Union
 from torch_geometric.data import Data, HeteroData
 
@@ -31,10 +32,89 @@ from bpropy.datasets.types import FeatureExtractionResult
 # Factor Graph approximations
 from bpropy.mrf.factor_graph_approx import APPROX_BUILDERS
 
+import multiprocessing as mp
+import traceback
+
 # ---- problem registry / tags -------------------------------------------------
 
 NAME2CODE = {"MIS": 0, "SCP": 1}
 CODE2NAME = {v: k for k, v in NAME2CODE.items()}
+
+def _compute_pe_worker(edge_index, num_nodes, pe_dim, queue):
+    """
+    Runs PyG PE transforms in a short-lived subprocess.
+
+    Return NumPy arrays rather than torch.Tensor objects to avoid PyTorch
+    shared-memory machinery keeping extra state alive in the parent.
+    """
+    try:
+        import gc
+        import torch
+        from torch_geometric.data import Data
+        from torch_geometric.transforms import AddRandomWalkPE, AddLaplacianEigenvectorPE
+
+        # Keep this child strictly CPU-only.
+        edge_index = edge_index.cpu()
+
+        d = Data(edge_index=edge_index, num_nodes=int(num_nodes))
+
+        rw_transform = AddRandomWalkPE(walk_length=int(pe_dim), attr_name="rwpe")
+        d = rw_transform(d)
+        rwpe = d.rwpe.detach().cpu().numpy().copy()
+
+        # Remove RWPE before computing LAPE so it cannot be retained by `d`.
+        del d.rwpe
+        gc.collect()
+
+        la_transform = AddLaplacianEigenvectorPE(k=int(pe_dim), attr_name="lape")
+        d = la_transform(d)
+        lape = d.lape.detach().cpu().numpy().copy()
+
+        del d
+        gc.collect()
+
+        queue.put(("ok", rwpe, lape))
+
+    except BaseException:
+        queue.put(("err", traceback.format_exc(), None))
+
+
+def _compute_pe_in_subprocess(edge_index, num_nodes, pe_dim, timeout_s=300):
+    """
+    Compute RandomWalkPE and LaplacianEigenvectorPE in a child process.
+    When the child exits, native allocator memory from PyG/SciPy/PyTorch
+    transforms is returned to the OS.
+    """
+    # On Linux/HPC this is usually the most practical. It avoids needing
+    # a separate script file and avoids re-importing the full training entrypoint.
+    ctx = mp.get_context("fork")
+
+    queue = ctx.Queue(maxsize=1)
+    proc = ctx.Process(
+        target=_compute_pe_worker,
+        args=(edge_index.detach().cpu(), int(num_nodes), int(pe_dim), queue),
+    )
+
+    proc.start()
+    proc.join(timeout_s)
+
+    if proc.is_alive():
+        proc.terminate()
+        proc.join()
+        raise TimeoutError(f"PE subprocess timed out after {timeout_s}s")
+
+    if queue.empty():
+        raise RuntimeError(f"PE subprocess exited with code {proc.exitcode} without returning a result")
+
+    status, a, b = queue.get()
+
+    if status == "err":
+        raise RuntimeError("PE subprocess failed:\n" + str(a))
+
+    rwpe = torch.from_numpy(a).to(torch.float32)
+    lape = torch.from_numpy(b).to(torch.float32)
+
+    return rwpe, lape
 
 def _infer_problem_name(pb) -> str:
     if isinstance(pb, MIS): return "MIS"
@@ -96,7 +176,8 @@ def problem_to_data(pb,
                y: Optional[torch.Tensor] = None,
                hetero: bool = False,
                feature_mode: str = None,
-               fg_approx: Optional[dict] = None
+               fg_approx: Optional[dict] = None,
+               return_graphs = False,
 ) -> Union[Data, HeteroData]:
     """
     Build a VCGraph from `pb` and convert to a PyG (Data|HeteroData),
@@ -105,6 +186,8 @@ def problem_to_data(pb,
     Mirrors the logic in mis_to_data/scp_to_data, but unified.  """
 
     name = _infer_problem_name(pb)
+
+    fg, vcg = None, None
 
     # 1) Extract features (may mutate `pb` by adding constraints)
     fx = _make_features(pb, name, feature_mode=feature_mode)  # returns FeatureExtractionResult
@@ -132,15 +215,50 @@ def problem_to_data(pb,
         from torch_geometric.transforms import AddRandomWalkPE, AddLaplacianEigenvectorPE
 
         pe_dim = 16          # number of steps / dimensions
-        transform = AddRandomWalkPE(walk_length=pe_dim, attr_name='rwpe')
 
-        data = transform(data)                 # adds data.rwpe with shape [num_nodes, pe_dim]
-        data.x = torch.cat([data.x, data.rwpe, ndegs], dim=-1)
+        try:
+            transform = AddRandomWalkPE(walk_length=pe_dim, attr_name="rwpe")
+            data = transform(data)
+            rwpe_data = data.rwpe
+            del data.rwpe
+        except Exception:
+            print("replace rwpe zeros")
+            rwpe_data = torch.zeros(data.x.shape[0], pe_dim)
+        
+        data.x = torch.cat([data.x, rwpe_data, ndegs], dim=-1)
+        del rwpe_data
+        
+        try:
+            transform = AddLaplacianEigenvectorPE(k=pe_dim, attr_name="lape")
+            data = transform(data)
+            lape_data = data.lape
+            del data.lape
+        except Exception:
+            print("replace lape zeros")
+            lape_data = torch.zeros(data.x.shape[0], pe_dim)
+        
+        data.x = torch.cat([data.x, lape_data, ndegs], dim=-1)
+        del lape_data
+        #data.x = torch.cat([data.x, data.lape, ndegs], dim=-1)
+        #data.x = torch.cat([data.x, lape_data, ndegs], dim=-1)
 
-        transform = AddLaplacianEigenvectorPE(k=pe_dim, attr_name='lape')
+        #del data.lape
 
-        data = transform(data)                 # adds data.rwpe with shape [num_nodes, pe_dim]
-        data.x = torch.cat([data.x, data.lape, ndegs], dim=-1)
+
+        #pe_dim = 16
+
+        #rwpe, lape = _compute_pe_in_subprocess(
+        #    edge_index=data.edge_index,
+        #    num_nodes=data.num_nodes,
+        #    pe_dim=pe_dim,
+        #    timeout_s=300,
+        #)
+        #
+        #data.x = torch.cat([data.x, rwpe, ndegs], dim=-1)
+        #data.x = torch.cat([data.x, lape, ndegs], dim=-1)
+        #
+        #del rwpe, lape
+        #gc.collect()
 
         data.x = torch.cat([data.x, torch.randn(data.x.shape[0], 10)], dim=-1)
 
@@ -148,6 +266,9 @@ def problem_to_data(pb,
         data.problem_type_name = name
         data.problem_type_code = torch.tensor([NAME2CODE[name]], dtype=torch.long)
         data.feature_mode = feature_mode
+
+        if fg_approx is None:
+            fg_approx = {}
 
         # approximate factor graph
         if len(fg_approx):
@@ -162,7 +283,7 @@ def problem_to_data(pb,
 
             fg = fg_approx
         else:
-            if with_lbp or with_nmf or (with_ss and (y is not None)):
+            if return_graphs or with_lbp or with_nmf or (with_ss and (y is not None)):
                 fg = FactorGraph(pb)
 
         # optional wiring via the right factor-graph class
@@ -185,6 +306,25 @@ def problem_to_data(pb,
                 #fg = FactorGraph(pb)
                 data.y_ss = torch.from_numpy(x2ss(y.astype(int), fg)).to(torch.float32)
 
+        # Drop large preprocessing-only objects before returning.
+        try:
+            del fx, nfeat, cfeat, efeat, x, ndegs
+        except Exception:
+            pass
+        
+        if not return_graphs:
+            try:
+                del fg
+            except Exception:
+                pass
+            try:
+                del vcg
+            except Exception:
+                pass
+        
+        gc.collect()
+        if return_graphs:
+            return data, fg, vcg
         return data
 
     # HeteroData branch – mirrors your MIS hetero converter
@@ -231,6 +371,10 @@ def problem_to_data(pb,
         if with_ss and (y is not None):
             fg = FactorGraph(pb)
             data.y_ss = torch.from_numpy(x2ss(y.astype(int), fg)).to(torch.float32)
+    if return_graphs and fg is None:
+        fg = FactorGraph(pb)
+    if return_graphs:
+        return data, fg, vcg
     return data
 
 # ---- public: Data/HeteroData -> problem instance ----------------------------
