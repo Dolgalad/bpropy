@@ -12,16 +12,19 @@ This work is a **development preview**, not a published release.
 - [ ] Restructure the legacy extras so `pip install bpropy` installs only a
       documented minimal dependency set. The current top-level distribution
       still pulls in combinatorial optimization / plotting dependencies.
-- [ ] Reproduce and repair the **existing** `bpropy` full unit-test CI failures
-      separately from the new standalone inference suite.
+- [x] Repair the pre-existing legacy LBP batch-test convergence mismatch;
+      162 tests pass (4 skipped) on Python 3.10/3.11/3.12. Keep both the
+      legacy test matrix and new inference-core tests as separate CI gates.
 - [ ] Test Windows/Linux/macOS packaging, Python version compatibility and
       PyTorch CPU-only installation from a fresh virtual environment.
-- [ ] Run CUDA tests on supported NVIDIA hardware and record numerical parity,
-      peak memory and real runtime against the old scatter implementation.
+- [ ] Run the new CUDA tests on supported NVIDIA hardware and record numerical
+      parity (beliefs and gradients), peak memory and runtime. The CUDA suite
+      and reproducible benchmarks are implemented, but GPU measurements are
+      not yet available.
 - [ ] Benchmark varying graph sizes, factor degrees, cardinalities, batch sizes,
       inference iteration counts and changing versus cached topologies.
-- [ ] Validate PyG `HeteroData` / `DataLoader` interoperability and gradient
-      propagation in a dedicated PyG CI job.
+- [x] Validate PyG `HeteroData` / `DataLoader` interoperability and gradient
+      propagation in a dedicated **CPU** PyG CI job.
 - [ ] Exercise `torch.compile`, mixed precision and (if relevant) CUDA Graphs;
       clearly document supported compilation and autograd modes.
 - [ ] Handle contradictory hard factors (`-inf`) with informative diagnostics;

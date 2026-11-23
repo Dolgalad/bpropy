@@ -42,5 +42,5 @@ migration guide before attempting numerical comparisons.
 ## Publication status
 
 The new inference API is **not yet a published PyPI release**. Packaging the
-original research dependencies, bundled C utilities, licensing, existing CI
-failures and GPU performance validation are tracked in the release checklist.
+original research dependencies, bundled C utilities, licensing, and GPU
+performance validation are tracked in the release checklist.
