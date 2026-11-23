@@ -48,6 +48,15 @@ dev = [
 test = [
 ]
 
+# New, self-contained PyTorch inference layer. No C++ scatter extensions needed.
+inference = [
+  "torch>=2.2",
+]
+pyg = [
+  "torch>=2.2",
+  "torch-geometric>=2.5",
+]
+
 docs = [
   "mkdocs-material",
   "mkdocstrings[python]",
