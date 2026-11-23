@@ -208,6 +208,13 @@ See [Migration](migration.md). In particular, the legacy bit order for binary
 factor tables differs from the standard row-major order. Use the explicit
 converter instead of reusing the old `theta` buffers unchanged.
 
+## Reproducible CPU/GPU benchmarking
+
+See [CUDA validation and benchmarking](benchmarking.md) for CPU/CUDA parity,
+backward timing, GPU-event latency, memory accounting, a reproducible GPU
+sweep and optional comparisons with the legacy `torch_scatter` kernels.
+GPU-specific claims must be supported by measurements from actual CUDA hardware.
+
 ## Quality gates before publishing
 
 See [Release checklist](release.md). Tests cover exact tree marginals, hard

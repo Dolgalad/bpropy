@@ -12,8 +12,9 @@ GPU-friendly scatter indices, differentiable sum-product belief propagation,
 and naive mean-field inference. It does not depend on NetworkX, PyG, or
 `torch_scatter` at runtime; PyG interchange is optional.
 
-See the [inference core documentation](docs/inference/README.md),
-[migration notes](docs/inference/migration.md), and
+See the [inference documentation](docs/inference/README.md),
+[migration guide](docs/inference/migration.md),
+[GPU benchmarking guide](docs/inference/benchmarking.md), and
 [publishing checklist](docs/inference/release.md).
 
 ```python
