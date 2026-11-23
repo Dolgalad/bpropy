@@ -45,3 +45,17 @@ jobs:
         run: |
           python -m unittest discover -s tests/unit -v
 
+      - name: Compare legacy and tensor-native inference on a matched model
+        if: matrix.python-version == '3.11'
+        run: |
+          PYTHONPATH=src python benchmarks/inference_core.py --device cpu --variables 6 --factors 8 --arity 2 --iterations 16 --damping 0 --warmup 1 --repeats 1 --no-backward --compare-legacy --json-out /tmp/bpropy-legacy-parity.json
+          python - <<'PY'
+          import json
+          with open('/tmp/bpropy-legacy-parity.json') as stream:
+              result = json.load(stream)
+          comparisons = result['legacy']['comparison']
+          for name, item in comparisons.items():
+              assert item['allclose'], f"{name} legacy/new parity failed: {item}"
+          PY
+
+

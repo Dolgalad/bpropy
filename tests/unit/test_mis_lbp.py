@@ -116,7 +116,12 @@ class TestMISLBP(unittest.TestCase):
         self.assertTrue(edges_1.f2v_edges[:,1].max().item() < (SS_total + V2F_total))
 
     def test_stack_lbpedges(self):
+        # This is a batching/indexing equivalence test, not an early-stopping
+        # equivalence test. A batched solve stops when *all* graphs converge,
+        # whereas independently evaluated graphs may stop on different steps.
+        # With tol=0, both paths perform the same number of updates.
         max_iter = 10
+        tol = 0.0
         batch_size = 4
         # prepare problems and solve
         pbs = []
@@ -129,7 +134,7 @@ class TestMISLBP(unittest.TestCase):
             edges = LBPEdges(fg)
             theta = torch.randn(fg.number_sufficient_statistics())
             v2f = torch.zeros_like(theta)
-            mu = loopy_belief_propagation(theta, v2f, edges, max_iter=max_iter, tol=1e-6, damping=0.).mu
+            mu = loopy_belief_propagation(theta, v2f, edges, max_iter=max_iter, tol=tol, damping=0.).mu
             mus.append(mu)
             batch_edges.append(edges)
             batch_thetas.append(theta)
@@ -138,13 +143,18 @@ class TestMISLBP(unittest.TestCase):
         batch = LBPEdges.batch(batch_edges)
         batch_theta = torch.concatenate(batch_thetas, dim=0)
         batch_v2f = torch.zeros_like(batch_theta)
-        batch_mus = loopy_belief_propagation(batch_theta, batch_v2f, batch, max_iter=max_iter, tol=1e-6, damping=0.).mu
+        batch_mus = loopy_belief_propagation(batch_theta, batch_v2f, batch, max_iter=max_iter, tol=tol, damping=0.).mu
         
         end_offset = batch.n_ss.cumsum(dim=0)
         beg_offset = end_offset.roll(1)
         beg_offset[0] = 0
         for i in range(batch_size):
-            self.assertTrue(torch.all(torch.isclose(mus[i], batch_mus[beg_offset[i]:end_offset[i]])))
+            self.assertTrue(
+                torch.all(torch.isclose(mus[i], batch_mus[beg_offset[i]:end_offset[i]])),
+                f"Fixed-step batched LBP differs for graph {i}: "
+                f"max abs error = "
+                f"{(mus[i] - batch_mus[beg_offset[i]:end_offset[i]]).abs().max().item():.3g}",
+            )
     def test_batch_maxsum(self):
         max_iter = 10
         batch_size = 4
